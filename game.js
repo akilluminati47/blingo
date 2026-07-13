@@ -83,7 +83,7 @@ function roadAxisDist(v) {
 }
 // town footprint rectangles [x0,z0,x1,z1] - flattened terrain + no random spawns inside
 const TOWN_RECTS = [
-  [-16, -50, 110, 6],  // main street, shops, bank, town hall, courthouse
+  [-16, -60, 110, 6],  // main street, shops, bank + fountain pavilion, town hall, courthouse
   [8, 12, 78, 64],     // shopping plaza + parking
   [36, -16, 46, 18],   // plaza driveway
 ];
@@ -99,14 +99,15 @@ function inTown(x, z, margin = 0) {
 function groundHeight(x, z) {
   const base = (vnoise(x, z, 57) - 0.5) * 3.4 + (vnoise(x, z, 23) - 0.5) * 1.1 + (vnoise(x, z, 131) - 0.5) * 2.2;
   const dr = Math.min(roadAxisDist(x), roadAxisDist(z));
-  let f = smooth(clamp((dr - 3.5) / 10, 0, 1)); // graded flat near roads
+  let f = smooth(clamp((dr - 6.7) / 10, 0, 1)); // graded flat near roads
   let td = Infinity;
   for (const r of TOWN_RECTS) td = Math.min(td, rectDist(x, z, r));
   f = Math.min(f, smooth(clamp((td - 1) / 12, 0, 1))); // graded flat in town
   return base * (0.12 + 0.88 * f);
 }
+// roads are two-way now: a lane each direction, 12.8 wide in total
 function onRoad(x, z, margin = 0) {
-  return roadAxisDist(x) < 3.2 + margin || roadAxisDist(z) < 3.2 + margin;
+  return roadAxisDist(x) < 6.4 + margin || roadAxisDist(z) < 6.4 + margin;
 }
 
 // shared materials/geometries
@@ -161,6 +162,164 @@ function textPlate(txt, w, h, bg = '#3a3128', fg = '#ffe9c0') {
     ctx.fillText(txt, 128, 34);
   });
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: t }));
+}
+
+// ---------- sky, time-of-day & weather ----------
+// four times of day, cycled morning -> noon -> sunset -> night as blocks are cleared
+// (the heroes never stop rescuing); weather rerolls each cycle: 40% sunny / 40% cloudy / 20% rain
+const PHASES = [
+  { name: 'MORNING', top: '#6f9fd8', mid: '#f2c58e', hor: '#ffd9a8', sun: '#fff0c4', sunV: 0.40, sunR: 34,
+    hemiSky: 0xbfd4ee, hemiGnd: 0x4a4436, hemiI: 0.95, dirC: 0xffe2ae, dirI: 0.9, dirPos: [40, 26, 55], ambC: 0x8a7458, ambI: 0.42, fog: '#c7ad91' },
+  { name: 'NOON', top: '#2e6fc9', mid: '#7ab5ea', hor: '#cde6f8', sun: '#ffffff', sunV: 0.12, sunR: 30,
+    hemiSky: 0xd8e8ff, hemiGnd: 0x5a5442, hemiI: 1.1, dirC: 0xfff6e0, dirI: 1.0, dirPos: [12, 70, 18], ambC: 0x9a8a70, ambI: 0.42, fog: '#a9c3dd' },
+  { name: 'SUNSET', top: '#413a6e', mid: '#d96a4c', hor: '#ffb35c', sun: '#ffcf9a', sunV: 0.44, sunR: 40,
+    hemiSky: 0xd8a080, hemiGnd: 0x3a3040, hemiI: 0.85, dirC: 0xff9a5c, dirI: 0.8, dirPos: [-55, 16, 22], ambC: 0x7a5a48, ambI: 0.38, fog: '#8a5f52' },
+  { name: 'NIGHT', top: '#0a0e22', mid: '#1c2440', hor: '#2b3350', sun: '#dfe8ff', sunV: 0.30, sunR: 22, stars: true,
+    hemiSky: 0x8fa3d0, hemiGnd: 0x2e2a22, hemiI: 0.75, dirC: 0xaebfff, dirI: 0.7, dirPos: [-30, 50, -20], ambC: 0x64513a, ambI: 0.32, fog: '#232a45' },
+];
+function rollWeather() { const r = Math.random(); return r < 0.4 ? 'sunny' : r < 0.8 ? 'cloudy' : 'rain'; }
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
+const skyCanvas = document.createElement('canvas');
+skyCanvas.width = 1024; skyCanvas.height = 512;
+const skyTex = new THREE.CanvasTexture(skyCanvas);
+skyTex.colorSpace = THREE.SRGBColorSpace;
+skyTex.flipY = false; // canvas top = zenith, middle row = horizon
+const skyDome = new THREE.Mesh(
+  new THREE.SphereGeometry(240, 24, 16),
+  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false })
+);
+skyDome.renderOrder = -10;
+scene.add(skyDome);
+const moonOff = new THREE.Vector3(-30, 50, -20); // key-light offset, follows the player
+function drawSky(p, weather) {
+  const ctx = skyCanvas.getContext('2d');
+  const W = skyCanvas.width, H = skyCanvas.height;
+  const g = ctx.createLinearGradient(0, 0, 0, H * 0.56);
+  g.addColorStop(0, p.top); g.addColorStop(0.72, p.mid); g.addColorStop(1, p.hor);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.56);
+  ctx.fillStyle = p.hor; ctx.fillRect(0, H * 0.55, W, H * 0.45);
+  ctx.fillStyle = 'rgba(28,28,34,.5)'; ctx.fillRect(0, H * 0.58, W, H * 0.42); // haze below the horizon
+  if (p.stars && weather === 'sunny') {
+    const srng = mulberry32(42);
+    ctx.fillStyle = '#fff';
+    for (let i = 0; i < 170; i++) {
+      ctx.globalAlpha = 0.25 + srng() * 0.75;
+      ctx.fillRect(srng() * W, srng() * H * 0.5, srng() < 0.12 ? 2 : 1, 1);
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (weather !== 'rain') {
+    // sun (moon at night) with a soft halo
+    const sx = W * 0.72, sy = H * p.sunV, r = p.sunR;
+    const halo = ctx.createRadialGradient(sx, sy, 1, sx, sy, r * 3.2);
+    halo.addColorStop(0, hexA(p.sun, 0.9)); halo.addColorStop(0.3, hexA(p.sun, 0.35)); halo.addColorStop(1, hexA(p.sun, 0));
+    ctx.fillStyle = halo;
+    ctx.fillRect(sx - r * 3.2, sy - r * 3.2, r * 6.4, r * 6.4);
+    ctx.fillStyle = p.sun;
+    ctx.beginPath(); ctx.arc(sx, sy, r * (weather === 'cloudy' ? 0.75 : 1), 0, TAU); ctx.fill();
+  }
+  // clouds: a few white puffs when sunny, a grey blanket when cloudy, dark rollers in rain
+  const crng = mulberry32(7 + game.cycle * 31 + game.phase);
+  const night = !!p.stars;
+  const nC = weather === 'sunny' ? 5 : weather === 'cloudy' ? 24 : 32;
+  for (let i = 0; i < nC; i++) {
+    const cx2 = crng() * W, cy2 = (0.14 + crng() * 0.34) * H;
+    const cw2 = 50 + crng() * 130, chh = 10 + crng() * 16;
+    ctx.fillStyle = night
+      ? (weather === 'sunny' ? 'rgba(52,60,86,.7)' : 'rgba(30,34,52,.85)')
+      : weather === 'sunny' ? 'rgba(255,255,255,.55)'
+      : weather === 'cloudy' ? 'rgba(208,212,220,.8)'
+      : 'rgba(88,94,106,.85)';
+    for (let k2 = 0; k2 < 4; k2++) {
+      ctx.beginPath();
+      ctx.ellipse(cx2 + (crng() - 0.5) * cw2, cy2 + (crng() - 0.5) * chh, cw2 * (0.3 + crng() * 0.3), chh * (0.6 + crng() * 0.6), 0, 0, TAU);
+      ctx.fill();
+    }
+  }
+  if (weather === 'cloudy') { ctx.fillStyle = 'rgba(148,153,163,.25)'; ctx.fillRect(0, 0, W, H); }
+  if (weather === 'rain') { ctx.fillStyle = 'rgba(66,72,84,.45)'; ctx.fillRect(0, 0, W, H); }
+  skyTex.needsUpdate = true;
+}
+// live wind: direction & strength drift over time, gusting harder in worse weather.
+// rain streaks lean and drift with it, and the wind bed swells/pans to match.
+let windYaw = Math.random() * TAU, windTgtYaw = windYaw, windStr = 0.4, windTgtStr = 0.4, windShiftT = 0;
+function updateWind(dt) {
+  windShiftT -= dt;
+  if (windShiftT <= 0) {
+    windShiftT = 5 + Math.random() * 7;
+    windTgtYaw = Math.random() * TAU;
+    windTgtStr = game.weather === 'rain' ? 0.45 + Math.random() * 0.55
+      : game.weather === 'cloudy' ? 0.3 + Math.random() * 0.45
+      : 0.15 + Math.random() * 0.3;
+  }
+  windYaw = angLerp(windYaw, windTgtYaw, 1 - Math.exp(-0.5 * dt));
+  windStr = lerp(windStr, windTgtStr, 1 - Math.exp(-0.7 * dt));
+  if (windGainNode) {
+    const base = game.weather === 'rain' ? 0.75 : game.weather === 'cloudy' ? 0.55 : 0.3;
+    windGainNode.gain.value = base * (0.5 + windStr * 0.9);
+    if (windPanNode) windPanNode.pan.value = clamp(Math.sin(windYaw - player.camYaw), -1, 1) * 0.7;
+  }
+}
+
+// rain: recycled line streaks falling around the player
+const RAIN_N = 260;
+let rainMesh = null;
+function rainOn(on) {
+  if (on && !rainMesh) {
+    const pos = new Float32Array(RAIN_N * 6);
+    for (let i = 0; i < RAIN_N; i++) {
+      const x = (Math.random() - 0.5) * 56, y = Math.random() * 26, z = (Math.random() - 0.5) * 56;
+      pos.set([x, y, z, x + 0.12, y - 0.9, z], i * 6);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    rainMesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x9db4cc, transparent: true, opacity: 0.4 }));
+    rainMesh.frustumCulled = false;
+    scene.add(rainMesh);
+  } else if (!on && rainMesh) {
+    scene.remove(rainMesh);
+    rainMesh.geometry.dispose();
+    rainMesh = null;
+  }
+}
+function updateRain(dt) {
+  if (!rainMesh) return;
+  const a = rainMesh.geometry.attributes.position;
+  const px = player.pos.x, py = player.pos.y, pz = player.pos.z;
+  // drops drift with the wind and the streaks lean along their true velocity
+  const wx = Math.sin(windYaw) * windStr * 11, wz = Math.cos(windYaw) * windStr * 11;
+  for (let i = 0; i < RAIN_N; i++) {
+    let y = a.getY(i * 2) - 34 * dt;
+    let x = a.getX(i * 2) + wx * dt, z = a.getZ(i * 2) + wz * dt;
+    if (y < py - 3) {
+      y = py + 20 + Math.random() * 6;
+      x = px + (Math.random() - 0.5) * 56;
+      z = pz + (Math.random() - 0.5) * 56;
+    }
+    a.setXYZ(i * 2, x, y, z);
+    a.setXYZ(i * 2 + 1, x + wx * 0.035, y - 0.92, z + wz * 0.035);
+  }
+  a.needsUpdate = true;
+}
+function applyEnvironment() {
+  const p = PHASES[game.phase] || PHASES[0];
+  const w = game.weather || 'sunny';
+  drawSky(p, w);
+  const dimD = w === 'sunny' ? 1 : w === 'cloudy' ? 0.55 : 0.35;
+  const dimH = w === 'sunny' ? 1 : w === 'cloudy' ? 0.85 : 0.7;
+  hemi.color.set(p.hemiSky); hemi.groundColor.set(p.hemiGnd); hemi.intensity = p.hemiI * dimH;
+  moon.color.set(p.dirC); moon.intensity = p.dirI * dimD;
+  moonOff.set(p.dirPos[0], p.dirPos[1], p.dirPos[2]);
+  warm.color.set(p.ambC); warm.intensity = p.ambI;
+  const fogC = new THREE.Color(p.fog);
+  if (w === 'cloudy') fogC.lerp(new THREE.Color(0x9aa0aa), 0.4);
+  if (w === 'rain') fogC.lerp(new THREE.Color(0x5c636e), 0.6);
+  scene.fog.color.copy(fogC);
+  scene.fog.near = w === 'rain' ? 16 : w === 'cloudy' ? 24 : 28;
+  scene.fog.far = w === 'rain' ? 70 : w === 'cloudy' ? 92 : 105;
+  scene.background = fogC.clone();
+  rainOn(w === 'rain');
+  syncWeatherAmbience();
 }
 
 // fake blob shadow
@@ -258,7 +417,10 @@ const SFX = {
     if (w.id === 'shotgun') { noiseBurst(0.28, 900, 0.9); tone(90, 0.15, 0.4, 'square', 40); }
     else if (w.id === 'sniper') { noiseBurst(0.4, 1400, 0.9); tone(140, 0.3, 0.35, 'sawtooth', 50); }
     else if (w.id === 'magnum') { noiseBurst(0.22, 1100, 0.8); tone(120, 0.16, 0.4, 'square', 45); }
-    else if (w.id === 'fists') { noiseBurst(0.08, 500, 0.3); }
+    else if (w.melee) {
+      if (w.id === 'fists') { noiseBurst(0.08, 500, 0.3); }               // soft whiff
+      else { noiseBurst(0.09, 340, 0.42); tone(160, 0.08, 0.18, 'square', 80); } // swing whoosh + thud
+    }
     else { noiseBurst(0.12, 1800, 0.55); tone(180, 0.07, 0.25, 'square', 70); }
   },
   hit() { noiseBurst(0.08, 700, 0.4); tone(220, 0.06, 0.2, 'square', 120); },
@@ -291,19 +453,69 @@ const SFX = {
 
 // ---------- ambience + persona themes ----------
 let ambStarted = false;
+let windGainNode = null, windPanNode = null, rainGainNode = null;
 function startAmbience() {
   if (ambStarted || !actx) return;
   ambStarted = true;
-  // low wind: looping filtered noise with a slow swell
-  const n = actx.sampleRate * 3, buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
-  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
-  const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
-  const f = actx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 300;
-  const g = actx.createGain(); g.gain.value = 0.5;
+  const mkNoise = () => {
+    const n = actx.sampleRate * 3, buf = actx.createBuffer(1, n, actx.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = actx.createBufferSource(); src.buffer = buf; src.loop = true;
+    return src;
+  };
+  // wind bed: filtered noise; the live wind sim drives its swell and stereo direction
+  const wsrc = mkNoise();
+  const wf = actx.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 300;
+  windGainNode = actx.createGain(); windGainNode.gain.value = 0.35;
   const lfo = actx.createOscillator(); lfo.frequency.value = 0.07;
-  const lfoG = actx.createGain(); lfoG.gain.value = 0.22;
-  lfo.connect(lfoG); lfoG.connect(g.gain); lfo.start();
-  src.connect(f); f.connect(g); g.connect(ambGain); src.start();
+  const lfoG = actx.createGain(); lfoG.gain.value = 0.1;
+  lfo.connect(lfoG); lfoG.connect(windGainNode.gain); lfo.start();
+  wsrc.connect(wf); wf.connect(windGainNode);
+  if (actx.createStereoPanner) {
+    windPanNode = actx.createStereoPanner();
+    windGainNode.connect(windPanNode); windPanNode.connect(ambGain);
+  } else windGainNode.connect(ambGain);
+  wsrc.start();
+  // rain bed: bright hiss, silent until a rainy weather roll fades it up
+  const rsrc = mkNoise();
+  const rf = actx.createBiquadFilter(); rf.type = 'highpass'; rf.frequency.value = 900;
+  rainGainNode = actx.createGain(); rainGainNode.gain.value = 0;
+  rsrc.connect(rf); rf.connect(rainGainNode); rainGainNode.connect(ambGain);
+  rsrc.start();
+  // each weather roll has its own life on top of the wind bed: sunny = songbirds by
+  // day / crickets at night, cloudy = crows + low moaning gusts, rain = distant thunder
+  (function weatherLife() {
+    setTimeout(() => {
+      if (actx) {
+        if (game.weather === 'sunny') {
+          if (game.phase === 3) {
+            for (let i = 0; i < 6; i++) setTimeout(() => tone(3400 + Math.random() * 300, 0.035, 0.05, 'sine', undefined, ambGain), i * 85);
+          } else {
+            const base = 1800 + Math.random() * 900;
+            for (let i = 0; i < 2 + ((Math.random() * 3) | 0); i++) setTimeout(() => tone(base + Math.random() * 500, 0.09, 0.055, 'sine', base - 400, ambGain), i * 170);
+          }
+        } else if (game.weather === 'cloudy') {
+          if (Math.random() < 0.45) {
+            for (let i = 0; i < 2 + ((Math.random() * 2) | 0); i++) setTimeout(() => tone(640 + Math.random() * 90, 0.15, 0.06, 'square', 390, ambGain), i * 290); // far-off crows
+          } else {
+            tone(230 + Math.random() * 90, 2.3, 0.045, 'sine', 115, ambGain); // hollow gust moan
+          }
+        } else if (Math.random() < 0.45) {
+          // rolling thunder somewhere past the fog line
+          const f = 52 + Math.random() * 24;
+          tone(f, 2.6, 0.16, 'sawtooth', 30, ambGain);
+          setTimeout(() => tone(f * 0.7, 1.9, 0.1, 'sawtooth', 26, ambGain), 350 + Math.random() * 450);
+        }
+      }
+      weatherLife();
+    }, 3500 + Math.random() * 6500);
+  })();
+  syncWeatherAmbience();
+}
+// fade the rain bed with the current weather (wind is driven live by updateWind)
+function syncWeatherAmbience() {
+  if (!actx || !ambStarted) return;
+  rainGainNode.gain.setTargetAtTime(game.weather === 'rain' ? 0.55 : 0, actx.currentTime, 1.2);
 }
 const NF = s => 220 * Math.pow(2, s / 12);
 // each cousin has a persona motif (chiptune-ish MIDI feel)
@@ -365,15 +577,26 @@ let shakeAmp = 0;
 // weak = weapon too puny to reliably pop a healthy head (far/weak headshots expose brain instead)
 // dismember = base chance to sever a limb on a hit; gib = head bursts on any headshot (insta-kill)
 // mags are arcade-sized (generous). semi-auto guns fire as fast as you can pull the trigger.
+// melee: swung, infinite ammo. execute: any hit (limb, chest, head) detonates the target
+// in an instant kill. slot: which inventory group the weapon sorts into (melee first, then guns).
 const WEAPONS = {
-  fists:   { id: 'fists',   name: 'Fists',        melee: true, dmg: 42, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [60, 0.4, 0.2], cqc: 0, weak: true, dismember: 0.12 },
-  pistol:  { id: 'pistol',  name: 'Pistol',       dmg: 34, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14 },
-  smg:     { id: 'smg',     name: 'SMG',          dmg: 15, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1 },
-  shotgun: { id: 'shotgun', name: 'Shotgun',      dmg: 12, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true },
-  rifle:   { id: 'rifle',   name: 'Assault Rifle',dmg: 32, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32 },
-  magnum:  { id: 'magnum',  name: 'Magnum',       dmg: 62, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true },
-  sniper:  { id: 'sniper',  name: 'Sniper Rifle', dmg: 145,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.09, rmb: [160, 1, 0.7],  cqc: 0.2,  dismember: 0.9, gib: true },
+  fists:   { id: 'fists',   name: 'Fists',        melee: true, slot: 'melee', dmg: 42, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
+  pipe:    { id: 'pipe',    name: 'Lead Pipe',    melee: true, slot: 'melee', dmg: 80, range: 3.1, rpm: 150, mag: Infinity, kick: 0.03, rmb: [80, 0.5, 0.3], cqc: 0, dismember: 0.28, color: 0x8b9099 },
+  bat:     { id: 'bat',     name: 'Slugger Bat',  melee: true, slot: 'melee', dmg: 92, range: 3.4, rpm: 130, mag: Infinity, kick: 0.04, rmb: [90, 0.55, 0.35], cqc: 0, dismember: 0.34, color: 0x8a5a2a },
+  machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 112, range: 3.2, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
+  katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 130, range: 3.7, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
+  sledge:  { id: 'sledge',  name: 'Sledgehammer', melee: true, slot: 'melee', dmg: 190, range: 3.1, rpm: 72, mag: Infinity, kick: 0.09, rmb: [150, 0.95, 0.5], cqc: 0, dismember: 0.6, gib: true, color: 0x5c6068 },
+  axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 152, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
+  pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 34, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14 },
+  smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 15, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1 },
+  rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 32, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32 },
+  shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 12, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true },
+  magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 62, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true },
+  sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 145,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [180, 1, 0.8],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
 };
+// inventory slot order: melee group first (fists then found melee by weight), then guns by tier
+const SLOT_ORDER = ['fists', 'pipe', 'bat', 'machete', 'katana', 'sledge', 'axe', 'pistol', 'smg', 'rifle', 'shotgun', 'magnum', 'sniper'];
+function slotRank(id) { const i = SLOT_ORDER.indexOf(id); return i < 0 ? 99 : i; }
 // point-blank damage multiplier for a hit at distance d
 function closeBonus(w, d) { return 1 + (w.cqc || 0) * clamp(1 - d / 8, 0, 1); }
 const LOOT_TABLE = [
@@ -406,11 +629,87 @@ function buildGunMesh(id) {
     const magz = box(0.07, 0.2, 0.11, c); magz.position.set(0, -0.1, -0.1); magz.rotation.x = 0.3; g.add(magz);
     const stock = box(0.08, 0.12, 0.2, c); stock.position.set(0, 0.02, 0.2); g.add(stock);
   } else if (id === 'sniper') {
-    const body = box(0.08, 0.11, 0.95, c); body.position.set(0, 0.05, -0.28); g.add(body);
-    const scope = cyl(0.045, 0.045, 0.2, 0x181a1f); scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.14, -0.1); g.add(scope);
-    const stock = box(0.08, 0.14, 0.24, 0x33291c); stock.position.set(0, 0, 0.22); g.add(stock);
+    // long-barrelled marksman rifle with a proper scope + lens
+    const body = box(0.08, 0.12, 1.15, c); body.position.set(0, 0.05, -0.42); g.add(body);
+    const barrel = cyl(0.035, 0.035, 0.5, 0x1c1e22); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.86); g.add(barrel);
+    const brake = cyl(0.06, 0.06, 0.1, 0x2a2c30); brake.rotation.x = Math.PI / 2; brake.position.set(0, 0.06, -1.08); g.add(brake);
+    for (const sz of [-0.16, 0.02]) { const mount = box(0.05, 0.09, 0.05, 0x101216); mount.position.set(0, 0.15, sz); g.add(mount); }
+    const scope = cyl(0.055, 0.055, 0.42, 0x121317); scope.rotation.x = Math.PI / 2; scope.position.set(0, 0.2, -0.08); g.add(scope);
+    const lens = cyl(0.056, 0.056, 0.03, 0x5aa0ff, 10); lens.rotation.x = Math.PI / 2; lens.position.set(0, 0.2, -0.29);
+    lens.material = new THREE.MeshBasicMaterial({ color: 0x7fb8ff }); g.add(lens);
+    const stock = box(0.08, 0.15, 0.3, 0x2a2318); stock.position.set(0, 0.0, 0.28); g.add(stock);
+    const grip = box(0.07, 0.16, 0.09, 0x22252b); grip.position.set(0, -0.09, 0.12); grip.rotation.x = 0.25; g.add(grip);
+  } else if (w.melee && id !== 'fists') {
+    buildMeleeMesh(g, id, c);
   }
+  // beefier reads better on the blocky blobs: guns +20%, melee +35%
+  g.scale.setScalar(w.melee ? 1.35 : 1.2);
   return g;
+}
+// melee weapons sit in the same fist socket as guns, blade/head pointing forward (-z)
+function shaftZ(len, r1, r2, color, near = 0.06) {
+  const m = cyl(r1, r2, len, color, 8);
+  m.rotation.x = Math.PI / 2;                 // lie the length along Z
+  m.position.set(0, 0, near - len / 2);       // extend forward from just past the fist
+  return m;
+}
+function buildMeleeMesh(g, id, c) {
+  if (id === 'pipe') {
+    g.add(shaftZ(0.86, 0.05, 0.055, c));
+    const joint = cyl(0.075, 0.075, 0.09, 0x6a6f78); joint.rotation.x = Math.PI / 2; joint.position.set(0, 0, -0.72); g.add(joint);
+    const cap = cyl(0.065, 0.065, 0.06, 0x555a63); cap.rotation.x = Math.PI / 2; cap.position.set(0, 0, -0.82); g.add(cap);
+    for (const zz of [-0.32, -0.52]) { // rust rings
+      const rust = cyl(0.054, 0.054, 0.05, 0x7a4a2a); rust.rotation.x = Math.PI / 2; rust.position.set(0, 0, zz); g.add(rust);
+    }
+    g.add(shaftZ(0.18, 0.058, 0.058, 0x2b2b2b, 0.08));
+  } else if (id === 'bat') {
+    g.add(shaftZ(0.95, 0.04, 0.1, c));                        // thin grip -> fat barrel
+    const cap = cyl(0.095, 0.078, 0.07, 0x744a20); cap.rotation.x = Math.PI / 2; cap.position.set(0, 0, -0.9); g.add(cap);
+    for (const zz of [-0.56, -0.64]) { // tape stripes on the barrel
+      const tape = cyl(0.083, 0.083, 0.035, 0x2a2a2e); tape.rotation.x = Math.PI / 2; tape.position.set(0, 0, zz); g.add(tape);
+    }
+    const knob = cyl(0.06, 0.06, 0.04, 0x2a2a2a); knob.rotation.x = Math.PI / 2; knob.position.set(0, 0, 0.07); g.add(knob);
+    g.add(shaftZ(0.22, 0.046, 0.046, 0x2a2a2a, 0.06));
+  } else if (id === 'machete') {
+    const blade = box(0.03, 0.16, 0.74, c); blade.position.set(0, 0.02, -0.47); g.add(blade);
+    const spine = box(0.034, 0.03, 0.72, 0x8a9097); spine.position.set(0, 0.1, -0.46); g.add(spine);
+    const edge = box(0.012, 0.025, 0.72, 0xe8edf2); edge.position.set(0, -0.06, -0.46); g.add(edge);
+    const tip = box(0.03, 0.02, 0.2, c); tip.position.set(0, 0.09, -0.86); tip.rotation.x = 0.5; g.add(tip);
+    const guard = box(0.16, 0.06, 0.06, 0x2a2c30); guard.position.set(0, 0, -0.06); g.add(guard);
+    for (const gy2 of [0.03, -0.03]) { // grip rivets
+      const rivet = ball(0.018, 0xc8a44a); rivet.position.set(0.05, gy2, 0.02); g.add(rivet);
+    }
+    g.add(shaftZ(0.2, 0.048, 0.052, 0x3a2a1a, 0.12));
+  } else if (id === 'katana') {
+    const blade = box(0.022, 0.12, 1.0, c); blade.position.set(0, 0.02, -0.56); g.add(blade);
+    const edge = box(0.01, 0.03, 0.98, 0xf2f6fa); edge.position.set(0, -0.045, -0.55); g.add(edge);
+    const tip = box(0.022, 0.1, 0.14, c); tip.position.set(0, 0.04, -1.12); tip.rotation.x = 0.35; g.add(tip);
+    const guard = cyl(0.12, 0.12, 0.035, 0x1c1c22); guard.rotation.x = Math.PI / 2; guard.position.set(0, 0, -0.04); g.add(guard);
+    for (const zz of [0.05, 0.12, 0.19]) { // silk wrap bands
+      const wrap = cyl(0.052, 0.052, 0.035, 0x0c1c2c); wrap.rotation.x = Math.PI / 2; wrap.position.set(0, 0, zz); g.add(wrap);
+    }
+    const pommel = cyl(0.056, 0.056, 0.04, 0xc8a44a); pommel.rotation.x = Math.PI / 2; pommel.position.set(0, 0, 0.26); g.add(pommel);
+    g.add(shaftZ(0.28, 0.05, 0.05, 0x14304a, 0.12));
+  } else if (id === 'sledge') {
+    g.add(shaftZ(0.8, 0.042, 0.052, 0x6b5330));
+    const head = box(0.24, 0.24, 0.34, c); head.position.set(0, 0, -0.76); g.add(head);
+    for (const zz of [-0.63, -0.89]) { // forged bands
+      const band = box(0.25, 0.25, 0.05, 0x3a3d43); band.position.set(0, 0, zz); g.add(band);
+    }
+    for (const s of [-1, 1]) { // striking faces
+      const face = cyl(0.1, 0.1, 0.05, 0x8a8f98); face.rotation.z = Math.PI / 2; face.position.set(s * 0.15, 0, -0.76); g.add(face);
+    }
+    const collar = cyl(0.06, 0.06, 0.08, 0x3a3d43); collar.rotation.x = Math.PI / 2; collar.position.set(0, 0, -0.56); g.add(collar);
+    g.add(shaftZ(0.2, 0.047, 0.047, 0x2a2a2a, 0.08));
+  } else if (id === 'axe') {
+    g.add(shaftZ(0.82, 0.042, 0.048, 0x6b5330));
+    const collar = box(0.07, 0.1, 0.1, 0x3a3d43); collar.position.set(0, 0.02, -0.72); g.add(collar);
+    const head = box(0.07, 0.3, 0.24, c); head.position.set(0, 0.05, -0.76); g.add(head);
+    const blade = box(0.034, 0.36, 0.1, 0xd8dde5); blade.position.set(0, 0.05, -0.88); g.add(blade);
+    const spike = box(0.05, 0.09, 0.14, 0x5c6068); spike.position.set(0, 0.05, -0.62); g.add(spike);
+    const stripe = box(0.072, 0.05, 0.24, 0xf2e28a); stripe.position.set(0, -0.06, -0.76); g.add(stripe);
+    g.add(shaftZ(0.2, 0.047, 0.047, 0x2a2a2a, 0.08));
+  }
 }
 
 // ---------- blob character builder ----------
@@ -523,6 +822,9 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   const gunSocket = new THREE.Group();
   gunSocket.position.set(0, -0.56, 0.02);
   gunSocket.rotation.x = -Math.PI / 2;
+  // roll the socket so the weapon's top (sights, scope, axe head) faces UP when the
+  // arm is raised — without this the guns hang upside down under the fist
+  gunSocket.rotation.z = Math.PI;
   arms[gunArm].add(gunSocket);
 
   root.scale.setScalar(scale);
@@ -542,11 +844,13 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
 function placeShadow(blob, x, z, y) {
   if (!blob.shadow) return;
   const sy = supportTop(x, z, y === undefined ? groundHeight(x, z) : y, 0.1);
-  blob.shadow.position.set(x, sy + 0.02, z);
+  // lifted enough to sit on road (+0.04) and parking (+0.05) surfaces too, not just grass
+  blob.shadow.position.set(x, sy + 0.08, z);
 }
 const FLASH_RED = new THREE.MeshBasicMaterial({ color: 0xff2525 });
-function flashBlob(blob) {
-  if (blob.flashT <= 0) for (const s of blob.skinList) s.mesh.material = FLASH_RED;
+const FLASH_GREEN = new THREE.MeshBasicMaterial({ color: 0x3ae06a }); // shielded boss: no damage taken
+function flashBlob(blob, fm = FLASH_RED) {
+  for (const s of blob.skinList) s.mesh.material = fm;
   blob.flashT = 0.12;
 }
 function updateFlash(blob, dt) {
@@ -786,6 +1090,14 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
     group.add(barrel);
     colliders.push(aabb(bx2, bz2, 0.36, 0.36, 0.9, by));
   }
+  // footprint: zombies never spawn inside a building on their own, and the door gap is
+  // the only route they will path in or out through
+  const doorX = doorSide === 2 ? bx - w / 2 : doorSide === 3 ? bx + w / 2 : bx;
+  const doorZ = doorSide === 0 ? bz - d / 2 : doorSide === 1 ? bz + d / 2 : bz;
+  const outX = doorSide === 2 ? -1 : doorSide === 3 ? 1 : 0;
+  const outZ = doorSide === 0 ? -1 : doorSide === 1 ? 1 : 0;
+  return { x: bx, z: bz, hw: w / 2 + 0.5, hd: d / 2 + 0.5,
+    doorX, doorZ, doorOutX: doorX + outX * 2.2, doorOutZ: doorZ + outZ * 2.2 };
 }
 
 function makeTree(rng, x, z, group, colliders) {
@@ -890,7 +1202,7 @@ function makePileup(rng, x, z, along, group, colliders) {
   const n = 3 + ((rng() * 3) | 0);
   for (let i = 0; i < n; i++) {
     const off = (i - n / 2) * 4.6 + (rng() - 0.5) * 1.6;
-    const jitter = (rng() - 0.5) * 2.6;
+    const jitter = (rng() - 0.5) * 5.6; // scattered across both lanes now that roads are two-way
     const px = along === 'z' ? x + jitter : x + off;
     const pz = along === 'z' ? z + off : z + jitter;
     makeCar(rng, px, pz, group, colliders, {
@@ -922,8 +1234,20 @@ function buildChunk(cx, cz) {
   // roads on grid lines every 3 chunks (center at ox-17 / oz-17)
   const hasVRoad = ((cx % 3) + 3) % 3 === 0;
   const hasHRoad = ((cz % 3) + 3) % 3 === 0;
-  if (hasVRoad) group.add(terrainPlane(6.4, CHUNK, 2, 10, ox - 17, oz, roadMat, 0.04));
-  if (hasHRoad) group.add(terrainPlane(CHUNK, 6.4, 10, 2, ox, oz - 17, roadMat, 0.04));
+  if (hasVRoad) group.add(terrainPlane(12.8, CHUNK, 3, 10, ox - 17, oz, roadMat, 0.04));
+  if (hasHRoad) group.add(terrainPlane(CHUNK, 12.8, 10, 3, ox, oz - 17, roadMat, 0.04));
+  // dotted yellow centre line between the two lanes, broken well clear of intersections
+  for (const vert of [true, false]) {
+    if (vert ? !hasVRoad : !hasHRoad) continue;
+    for (let off = -CHUNK / 2 + 1.6; off < CHUNK / 2; off += 4.2) {
+      const dxp = vert ? ox - 17 : ox + off;
+      const dzp = vert ? oz + off : oz - 17;
+      if (roadAxisDist(vert ? dzp : dxp) < 8.4) continue;
+      const dash = box(vert ? 0.16 : 1.7, 0.02, vert ? 1.7 : 0.16, 0xd8b62a);
+      dash.position.set(dxp, groundHeight(dxp, dzp) + 0.075, dzp);
+      group.add(dash);
+    }
+  }
 
   const spots = [];
   function freeSpot(minDist, roadMargin = 2) {
@@ -940,10 +1264,11 @@ function buildChunk(cx, cz) {
     return null;
   }
 
+  const buildings = [];
   const nB = rng() < 0.55 ? 1 + (rng() < 0.3 ? 1 : 0) : 0;
   for (let i = 0; i < nB; i++) {
     const p = freeSpot(10, 4);
-    if (p) makeBuilding(rng, p.x, p.z, group, colliders, crateList);
+    if (p) buildings.push(makeBuilding(rng, p.x, p.z, group, colliders, crateList));
   }
   if (cx === 0 && cz === 0) makeCrate(rng, 4.5, groundHeight(4.5, 5) + 0.02, 5, group, colliders, crateList, false);
   const nC = Math.round((1 + ((rng() * 2) | 0)) * clamp(settings.lootSpawn, 0, 3));
@@ -978,8 +1303,22 @@ function buildChunk(cx, cz) {
   }
 
   scene.add(group);
-  return { group, colliders, crates: crateList, cx, cz };
+  return { group, colliders, crates: crateList, buildings, cx, cz };
 }
+// the hollow chunk house whose footprint contains (x,z), or null — keeps spawns
+// outdoors and lets zombies respect doorways instead of pressing through walls
+function buildingAt(x, z) {
+  const ccx = Math.round(x / CHUNK), ccz = Math.round(z / CHUNK);
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+    const ch = chunks.get(chunkKey(ccx + dx, ccz + dz));
+    if (!ch || !ch.buildings) continue;
+    for (const bld of ch.buildings) {
+      if (Math.abs(x - bld.x) <= bld.hw && Math.abs(z - bld.z) <= bld.hd) return bld;
+    }
+  }
+  return null;
+}
+function insideBuilding(x, z) { return !!buildingAt(x, z); }
 
 function chunkKey(cx, cz) { return cx + ',' + cz; }
 function updateChunks(px, pz) {
@@ -1200,17 +1539,56 @@ function buildTown() {
   const rng = mulberry32(9001);
   // main street shops: road z in [-20,-14], shops face it from both sides
   const northNames = ['DINER', 'BAKERY', 'BOOKS', 'TOOLS', 'PIZZA'];
-  const southNames = ['MART', 'BANK', 'BARBER', 'TAILOR', 'RADIO'];
+  const southNames = ['MART', 'LIQUOR', 'BARBER', 'TAILOR', 'RADIO'];
   for (let i = 0; i < 5; i++) {
-    shopBuilding(12 + i * 13, -8.5, 9.5, 7, 3.4 + rng() * 0.8, -1, northNames[i], rng); // north side faces south (-z)
-    shopBuilding(12 + i * 13, -26, 9.5, 7, 3.4 + rng() * 0.8, 1, southNames[i], rng);   // south side faces north (+z)
+    shopBuilding(12 + i * 13, -5.9, 9.5, 7, 3.4 + rng() * 0.8, -1, northNames[i], rng); // north side faces south (-z)
+    shopBuilding(12 + i * 13, -28.1, 9.5, 7, 3.4 + rng() * 0.8, 1, southNames[i], rng); // south side faces north (+z)
   }
   // town hall & courthouse face each other across the east end of main street,
   // pulled west of the x=103 cross road so nothing overlaps it
   grandBuilding(88, -2, 18, 12, 6.5, 0x8a7f6a, 'TOWN HALL', rng, -1);
   grandBuilding(88, -34, 18, 12, 6, 0x9a9aa2, 'COURTHOUSE', rng, 1);
-  // the bank anchors the west end of the shop road, a third grander than town hall
-  grandBuilding(0, -38, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
+  // the bank anchors the west end of the shop road, a third grander than town hall,
+  // set back to leave room for the fountain pavilion (and the boss arena between them)
+  grandBuilding(0, -46, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
+
+  // fountain pavilion in front of the bank — the Two Horned One wakes between the two
+  {
+    const fy = groundHeight(0, -28.5);
+    const pave = new THREE.Mesh(new THREE.CircleGeometry(4.8, 26), lotMat);
+    pave.rotation.x = -Math.PI / 2;
+    pave.position.set(0, fy + 0.06, -28.5);
+    townGroup.add(pave);
+    const basin = cyl(2.8, 3.0, 0.85, 0x9a948a, 18);
+    basin.position.set(0, fy + 0.42, -28.5);
+    townGroup.add(basin);
+    const water = new THREE.Mesh(new THREE.CircleGeometry(2.45, 18),
+      new THREE.MeshLambertMaterial({ color: 0x3f7fae, emissive: 0x14405e, emissiveIntensity: 0.55 }));
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(0, fy + 0.78, -28.5);
+    townGroup.add(water);
+    const ped = cyl(0.42, 0.62, 1.5, 0x8b8577, 10);
+    ped.position.set(0, fy + 1.5, -28.5);
+    townGroup.add(ped);
+    const bowl = cyl(1.05, 0.22, 0.45, 0x9a948a, 12);
+    bowl.position.set(0, fy + 2.4, -28.5);
+    townGroup.add(bowl);
+    const spout = ball(0.26, 0x7fb8d8, { emissive: 0x2a5a78, emissiveIntensity: 0.6 });
+    spout.position.set(0, fy + 2.72, -28.5);
+    townGroup.add(spout);
+    townColliders.push(aabb(0, -28.5, 2.9, 2.9, 0.95, fy));
+    // lamp ring around the pavilion
+    for (const a of [0.79, 2.36, 3.93, 5.5]) {
+      const lx = Math.cos(a) * 4.3, lz = -28.5 + Math.sin(a) * 4.3;
+      const ly = groundHeight(lx, lz);
+      const pole = cyl(0.06, 0.08, 3.4, 0x3a3d42);
+      pole.position.set(lx, ly + 1.7, lz);
+      townGroup.add(pole);
+      const bulb = ball(0.14, 0xffe9a8, { emissive: 0xffdd77, emissiveIntensity: 1 });
+      bulb.position.set(lx, ly + 3.4, lz);
+      townGroup.add(bulb);
+    }
+  }
 
   // shopping plaza: long building north edge of plaza rect, parking in front
   const plazaShops = [['SUPER MART', 20], ['PHARMACY', 12], ['GYM', 10], ['CAFE', 10]];
@@ -1234,13 +1612,13 @@ function buildTown() {
   makeCar(rng, 47, -3, townGroup, townColliders, { broken: true, flipped: true });
 
   // loot crates scattered through town
-  const spots = [[10, -17.5], [36, -12], [58, -22], [88, -10], [94, -26], [30, 30], [55, 42], [18, 20], [70, 55], [41, 10]];
+  const spots = [[10, -9.8], [36, -9.8], [58, -24.4], [88, -9.4], [94, -26], [30, 30], [55, 42], [18, 20], [70, 55], [41, 10]];
   for (const [cx2, cz2] of spots) {
     if (rng() < 0.8) makeCrate(rng, cx2 + (rng() - 0.5) * 3, groundHeight(cx2, cz2) + 0.05, cz2 + (rng() - 0.5) * 3, townGroup, townColliders, townCrates, false);
   }
   // street lamps tucked in the gaps between shopfronts, clear of the awnings
   for (const lx of [5.5, 18.5, 31.5, 44.5, 57.5, 70.5]) {
-    for (const lz of [-12.9, -21.1]) {
+    for (const lz of [-10.1, -23.9]) {
       const y0 = groundHeight(lx, lz);
       const pole = cyl(0.07, 0.09, 4.2, 0x3a3d42);
       pole.position.set(lx, y0 + 2.1, lz);
@@ -1270,6 +1648,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyE') input.interact = true;
   if (e.code === 'KeyR') input.reload = true;
   if ((e.code === 'KeyQ' || e.code === 'KeyF') && !e.repeat) cycleWeapon(1);
+  if (e.code === 'KeyV' && !e.repeat) toggleFPV();
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyC') && !e.repeat) input.slide = true;
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
   if (e.code === 'Tab') { e.preventDefault(); toggleControlsBar(); }
@@ -1280,17 +1659,13 @@ addEventListener('keyup', e => { keys[e.code] = false; });
 addEventListener('mousemove', e => {
   const sens = settings.mouseSens || 1;
   if (document.pointerLockElement === canvas) {
-    // mouse is locked to the game window: drive a virtual cursor that can't
-    // wander onto another monitor mid-firefight
-    aimX = clamp(aimX + e.movementX, 0, innerWidth);
-    aimY = clamp(aimY + e.movementY, 0, innerHeight);
-    if (rmbDrag || player.aimT > 0.5) {
-      input.lookDX += e.movementX * 0.0052 * sens;
-      input.lookDY += e.movementY * 0.0052 * sens;
-    }
+    // locked: the mouse aims the camera directly (proper third-person look), crosshair centred
+    input.lookDX += e.movementX * 0.0052 * sens;
+    input.lookDY += e.movementY * 0.0052 * sens;
   } else {
     aimX = e.clientX; aimY = e.clientY;
-    if (rmbDrag) {
+    // unlocked (no pointer lock yet): drag with the button held to look around
+    if (rmbDrag || input.shoot) {
       input.lookDX += (e.clientX - lastMX) * 0.0052 * sens;
       input.lookDY += (e.clientY - lastMY) * 0.0052 * sens;
     }
@@ -1308,9 +1683,10 @@ function grabPointer() {
 canvas.addEventListener('mousedown', e => {
   initAudio();
   if (game.state === 'playing') grabPointer();
+  lastMX = e.clientX; lastMY = e.clientY;
   if (e.button === 0 && game.state === 'playing') { input.shoot = true; input.shootPressed = true; }
-  // right mouse: aim down sights (ease to first person). drag still fine-tunes the look.
-  if (e.button === 2) { rmbDrag = true; input.aim = true; lastMX = e.clientX; lastMY = e.clientY; }
+  // right mouse: aim / zoom. third-person = tighter over-the-shoulder; first-person = focus down the sights.
+  if (e.button === 2) { rmbDrag = true; input.aim = true; }
 });
 // Esc naturally releases the pointer lock -> treat that as opening the pause menu
 let lockLossT = -9999;
@@ -1353,6 +1729,7 @@ function bindBtn(id, down, up) {
 bindBtn('btnJump', () => { input.jump = true; });
 bindBtn('btnShoot', () => { input.shoot = true; input.shootPressed = true; }, () => { input.shoot = false; });
 bindBtn('btnAim', () => { input.aimTouch = true; }, () => { input.aimTouch = false; });
+bindBtn('btnView', () => { toggleFPV(); });
 bindBtn('btnCycle', () => { cycleWeapon(1); });
 bindBtn('btnReload', () => { input.reload = true; });
 bindBtn('btnInteract', () => { input.interact = true; });
@@ -1457,7 +1834,7 @@ function pollGamepad(dt) {
   // left trigger: aim down sights (ease to first person)
   input.aimPad = !!(gp.buttons[6] && (gp.buttons[6].pressed || gp.buttons[6].value > 0.35));
   if (justPressed(9)) togglePause();     // Start: pause menu
-  if (justPressed(8)) toggleControlsBar(); // Back/Select: controls help
+  if (justPressed(8)) toggleFPV();       // Back/Select: first/third person toggle
 }
 
 // ---------- controls bar / prompts ----------
@@ -1478,16 +1855,18 @@ const CONTROL_SCHEMES = {
     name: 'Keyboard & Mouse',
     rows: [
       [['kbm', 'keyboard_w'], ['kbm', 'keyboard_a'], ['kbm', 'keyboard_s'], ['kbm', 'keyboard_d'], 'Move'],
-      [['kbm', 'mouse_move'], 'Free aim'],
+      [['kbm', 'mouse_move'], 'Aim / Look'],
       [['kbm', 'mouse_left'], 'Shoot'],
-      [['kbm', 'mouse_right'], 'Aim (1st person)'],
+      [['kbm', 'mouse_right'], 'Zoom / ADS'],
       [['kbm', 'keyboard_f'], 'Swap weapon'],
-      [['kbm', 'mouse_scroll'], 'Zoom'],
+      ['V', 'First / Third view'],
+      [['kbm', 'mouse_scroll'], 'Cam distance'],
       [['kbm', 'keyboard_e'], 'Loot / Recruit'],
       [['kbm', 'keyboard_r'], 'Reload'],
       [['kbm', 'keyboard_space'], 'Jump'],
       [['kbm', 'keyboard_shift'], 'Sprint'],
       [['kbm', 'keyboard_ctrl'], 'Slide'],
+      ['Tab', 'Hide this help'],
     ],
     prompt: ['kbm', 'keyboard_e'],
   },
@@ -1497,8 +1876,9 @@ const CONTROL_SCHEMES = {
       [['xbox', 'xbox_stick_l'], 'Move'],
       [['xbox', 'xbox_stick_r'], 'Look'],
       [['xbox', 'xbox_rt'], 'Shoot'],
-      [['xbox', 'xbox_lt'], 'Aim (1st person)'],
+      [['xbox', 'xbox_lt'], 'Zoom / ADS'],
       [['xbox', 'xbox_button_color_y'], 'Swap weapon'],
+      ['Select', 'First / Third view'],
       [['xbox', 'xbox_button_color_x'], 'Loot / Recruit'],
       [['xbox', 'xbox_button_color_b'], 'Reload'],
       [['xbox', 'xbox_button_color_a'], 'Jump'],
@@ -1513,8 +1893,9 @@ const CONTROL_SCHEMES = {
       [['ps', 'playstation_stick_l'], 'Move'],
       [['ps', 'playstation_stick_r'], 'Look'],
       [['ps', 'playstation_trigger_r2'], 'Shoot'],
-      [['ps', 'playstation_trigger_l2'], 'Aim (1st person)'],
+      [['ps', 'playstation_trigger_l2'], 'Zoom / ADS'],
       [['ps', 'playstation_button_triangle'], 'Swap weapon'],
+      ['Share', 'First / Third view'],
       [['ps', 'playstation_button_square'], 'Loot / Recruit'],
       [['ps', 'playstation_button_circle'], 'Reload'],
       [['ps', 'playstation_button_cross'], 'Jump'],
@@ -1528,7 +1909,7 @@ const CONTROL_SCHEMES = {
     rows: [
       [['touch', 'touch_swipe_move'], 'Left side: joystick'],
       [['touch', 'touch_swipe_horizontal'], 'Right side: look'],
-      [['touch', 'touch_tap'], 'Shoot / Aim / GUN swap'],
+      [['touch', 'touch_tap'], 'Shoot / Aim / GUN / VIEW'],
     ],
     prompt: ['touch', 'touch_tap'],
   },
@@ -1563,12 +1944,12 @@ function refreshControlsBar() {
 
 // ---------- cousins ----------
 const COUSINS = [
-  { id: 'blingo',  name: 'Blingo',  color: 0xff8c42, perk: 'Balanced hero', lore: 'The First Immune. Bitten at the Blob Falls picnic on day one, never turned. He swore on his grandma’s jelly recipe to take the town back.' },
-  { id: 'blazo',   name: 'Blazo',   color: 0xff4f42, perk: '+15% damage',   lore: 'Blingo’s hot-headed cousin. The horde ate his championship chili stand. Now every trigger pull is seasoned with revenge.' },
-  { id: 'blizzy',  name: 'Blizzy',  color: 0x6fd8ff, perk: '+12% sprint speed', lore: 'The coolest head in Clan Blob. Scouted the frozen north alone for two winters. Zombies can’t catch what they can’t chill.' },
-  { id: 'blomba',  name: 'Blomba',  color: 0xb06fff, perk: '+25 max HP',    lore: 'Big-hearted bouncer of the old Blob Lounge. Soft on the inside, softer on the outside, absolutely will not fall over.' },
-  { id: 'bloopy',  name: 'Bloopy',  color: 0x3fd8b0, perk: '35% faster reload', lore: 'Fidgety tinkerer who rebuilt the clan radio from soup cans. Hands so twitchy the reloads finish themselves.' },
-  { id: 'blondie', name: 'Blondie', color: 0xffd84a, perk: '+50% ammo from loot', lore: 'The clan hoarder. Her pockets don’t make sense geometrically. If there’s a bullet in a crate, she’ll find three.' },
+  { id: 'blingo',  name: 'Blingo',  color: 0xff8c42, perk: 'Balanced hero', melee: 'bat',     lore: 'The First Immune. Bitten at the Blob Falls picnic on day one, never turned. He swore on his grandma’s jelly recipe to take the town back.' },
+  { id: 'blazo',   name: 'Blazo',   color: 0xff4f42, perk: '+15% damage',   melee: 'axe',     lore: 'Blingo’s hot-headed cousin. The horde ate his championship chili stand. Now every trigger pull is seasoned with revenge.' },
+  { id: 'blizzy',  name: 'Blizzy',  color: 0x6fd8ff, perk: '+12% sprint speed', melee: 'katana', lore: 'The coolest head in Clan Blob. Scouted the frozen north alone for two winters. Zombies can’t catch what they can’t chill.' },
+  { id: 'blomba',  name: 'Blomba',  color: 0xb06fff, perk: '+25 max HP',    melee: 'sledge',  lore: 'Big-hearted bouncer of the old Blob Lounge. Soft on the inside, softer on the outside, absolutely will not fall over.' },
+  { id: 'bloopy',  name: 'Bloopy',  color: 0x3fd8b0, perk: '35% faster reload', melee: 'pipe', lore: 'Fidgety tinkerer who rebuilt the clan radio from soup cans. Hands so twitchy the reloads finish themselves.' },
+  { id: 'blondie', name: 'Blondie', color: 0xffd84a, perk: '+50% ammo from loot', melee: 'machete', lore: 'The clan hoarder. Her pockets don’t make sense geometrically. If there’s a bullet in a crate, she’ll find three.' },
 ];
 const CLAN_LORE = 'The immune cousins of Clan Blob are clearing the wasteland so the rest of blob-kind can move back home.';
 let selectedCousin = 'blingo';
@@ -1598,17 +1979,76 @@ function scatterCousins() {
     );
     beacon.position.set(x, groundHeight(x, z) + 17, z);
     scene.add(beacon);
-    const gun = buildGunMesh('pistol');
+    // every cousin carries their signature melee weapon until you trade them something else
+    const gun = buildGunMesh(data.melee);
     blob.gunSocket.add(gun);
+    const maxHp = data.id === 'blomba' ? 125 : 100;
     companions.push({ data, blob, beacon, pos: new THREE.Vector3(x, 0, z), recruited: false, shootCd: 0, walkPhase: Math.random() * 9, yaw: Math.random() * TAU,
-      weapon: WEAPONS.pistol, gunMesh: gun });
+      weapon: WEAPONS[data.melee], gunMesh: gun, hp: maxHp, maxHp, downed: false,
+      y: groundHeight(x, z), vy: 0, grounded: true, meleeT: 0 });
     i++;
   }
   updateCousinHUD();
+  rebuildSquadBars();
 }
 function updateCousinHUD() {
   const n = companions.filter(c => c.recruited).length;
   document.querySelector('#cousins b').textContent = n + '/' + companions.length;
+}
+
+// ---------- squad + player health bars (bottom-left) ----------
+const squadBarsEl = document.getElementById('squadbars');
+const squadBarEls = []; // {row, bar, c}
+function rebuildSquadBars() {
+  squadBarsEl.innerHTML = '';
+  squadBarEls.length = 0;
+  // recruited cousins, in the order they were found, each colour-coded to their character
+  const squad = companions.filter(c => c.recruited).sort((a, b) => (a.order || 0) - (b.order || 0));
+  for (const c of squad) {
+    const hex = '#' + c.data.color.toString(16).padStart(6, '0');
+    const row = document.createElement('div');
+    row.className = 'sqrow';
+    row.innerHTML = `<div class="sqwrap"><div class="sqbar" style="background:${hex}"></div></div>` +
+                    `<span class="sqname" style="color:${hex}">${c.data.name}</span>`;
+    squadBarsEl.appendChild(row);
+    squadBarEls.push({ row, bar: row.querySelector('.sqbar'), c });
+  }
+}
+function updateSquadBars() {
+  for (const e of squadBarEls) {
+    e.bar.style.width = clamp(e.c.hp / e.c.maxHp, 0, 1) * 100 + '%';
+    e.row.classList.toggle('down', !!e.c.downed);
+  }
+}
+function hurtCompanion(c, dmg) {
+  if (c.downed || !c.recruited) return;
+  c.hp -= dmg;
+  c.lastHurtT = game.time;
+  flashBlob(c.blob);
+  if (c.hp <= 0) {
+    // downed, not dead — but they stay down until you walk over and pick them up
+    c.hp = 0; c.downed = true;
+    play3d(c.pos.x, c.pos.z, () => SFX.hurt());
+    // red rescue beacon marks where they fell
+    c.beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.5, 34, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+    );
+    c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 17, c.pos.z);
+    scene.add(c.beacon);
+    toast(`${c.data.name.toUpperCase()} IS DOWN — PICK THEM UP!`);
+  }
+}
+// haul a downed cousin back onto their feet at half health
+function reviveCousin(c) {
+  c.downed = false;
+  c.hp = c.maxHp * 0.5;
+  c.blob.wob.rotation.x = 0;
+  c.blob.wob.scale.set(1, 1, 1);
+  if (c.beacon) { scene.remove(c.beacon); c.beacon = null; }
+  SFX.recruit();
+  rumble(140, 0.5, 0.6);
+  toast(`${c.data.name.toUpperCase()} IS BACK UP`);
 }
 
 // ---------- player ----------
@@ -1628,7 +2068,8 @@ const player = {
   stumbleT: 0, stumbleX: 0, stumbleZ: 0, meleeArm: 0,
   slideT: 0, slideDX: 0, slideDZ: 0, hopT: 0,
   dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1,
-  owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=third-person .. 1=first-person ADS
+  owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=hip .. 1=aiming down / zoomed
+  fpv: false, fpvT: 0,                         // fpv toggle (V / Select); fpvT eased 0=third-person .. 1=first-person
 };
 const reserves = {};
 
@@ -1659,7 +2100,8 @@ function applyCousin(id) {
   if (playerBlob.shadow) scene.remove(playerBlob.shadow);
   playerBlob = buildBlob({ color: data.color, gunHand: id === 'blondie' ? 'left' : 'right' });
   scene.add(playerBlob.root);
-  document.documentElement.style.setProperty('--hero', '#' + data.color.toString(16).padStart(6, '0'));
+  player.colorHex = '#' + data.color.toString(16).padStart(6, '0');
+  document.documentElement.style.setProperty('--hero', player.colorHex);
   startTheme(id);
   player.dmgMult = id === 'blazo' ? 1.15 : 1;
   player.sprintMult = id === 'blizzy' ? 1.12 : 1;
@@ -1673,6 +2115,8 @@ function applyCousin(id) {
 function equipWeapon(id) {
   player.weapon = WEAPONS[id];
   if (!player.owned.includes(id)) player.owned.push(id);
+  // keep the loadout organised into slots: melee group first, then guns by tier
+  player.owned.sort((a, b) => slotRank(a) - slotRank(b));
   if (gunMesh) { player.reloading = 0; gunMesh.removeFromParent(); gunMesh = null; }
   if (!player.weapon.melee) {
     gunMesh = buildGunMesh(id);
@@ -1680,6 +2124,11 @@ function equipWeapon(id) {
     player.clip = player.weapon.mag;
     if (reserves[id] === undefined) reserves[id] = Math.round(player.weapon.ammo * player.ammoMult);
   } else {
+    // melee weapons get a visible model in the fist too (fists stay bare)
+    if (id !== 'fists') {
+      gunMesh = buildGunMesh(id);
+      playerBlob.gunSocket.add(gunMesh);
+    }
     player.clip = Infinity;
   }
   updateAmmoHUD();
@@ -1699,30 +2148,68 @@ function cycleWeapon(dir = 1) {
   toast(WEAPONS[id].name.toUpperCase());
   rumble(40, 0.2, 0.3);
 }
+// V / Select flips between the over-the-shoulder third-person rig and first person
+function toggleFPV() {
+  if (player.dead) return;
+  player.fpv = !player.fpv;
+  toast(player.fpv ? 'FIRST PERSON' : 'THIRD PERSON');
+  initAudio(); SFX.swap({ id: 'view' });
+  rumble(40, 0.2, 0.3);
+  const vb = document.getElementById('btnView');
+  if (vb) vb.classList.toggle('pressed', player.fpv);
+}
 
 // ---------- zombies ----------
 const zombies = [];
 const ZOMBIE_COLORS = [0x6fae4e, 0x7fb85a, 0x5f9a44, 0x8fbc6a];
-function spawnZombie(x, z, powerScale = 1) {
+// opts.mode: 'grave' claws up out of the dirt, 'sleeper' lies on the ground until you're
+// close, 'runner' spawns far out and sprints in, default 'pop' just appears (boss waves).
+// opts.horns: purple boss-wave guard — wears the Two Horned One's horns and shields him while alive.
+function spawnZombie(x, z, powerScale = 1, opts = {}) {
+  const purple = !!opts.purple;              // boss-swarm variant: purple & 33% faster
+  const mode = opts.mode || 'pop';
   const scale = 0.85 + Math.random() * 0.5;
   // random rot-variants; brain-showing spawns are the rare weak-spot walkers
-  const droopy = Math.random() < 0.3;
+  const droopy = !purple && Math.random() < 0.3;
   const brain = Math.random() < 0.12;
-  const blind = Math.random() < 0.16;
+  const blind = !purple && Math.random() < 0.16;
   // extra-gore mode makes fresh zombies spawn already mangled and bloody
   const wounded = extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5;
-  const blob = buildBlob({ color: ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0], zombie: true, scale, droopy, brain, blind, wounded });
+  const color = purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
+  const blob = buildBlob({ color, zombie: true, scale, droopy, brain, blind, wounded });
   blob.root.position.set(x, groundHeight(x, z), z);
+  if (opts.horns) {
+    for (const s of [-1, 1]) {
+      const horn = cyl(0.015, 0.12, 0.42, 0x2a1a3a, 6);
+      horn.position.set(0.2 * s, 0.28, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
+      blob.head.add(horn);
+    }
+  }
+  // 1-in-10 shuffles in already missing an arm, a dried blood glob capping the shoulder
+  if (Math.random() < 0.1) {
+    const idx = Math.random() < 0.5 ? 0 : 1;
+    blob.arms[idx].visible = false;
+    blob.armGone[idx] = true;
+    const glob = ball(0.16, BLOOD);
+    glob.position.copy(blob.arms[idx].position);
+    glob.position.y -= 0.15;
+    blob.wob.add(glob);
+  }
+  if (mode === 'sleeper') blob.root.rotation.x = -1.45; // sprawled on its back
   scene.add(blob.root);
   zombies.push({
     blob, pos: new THREE.Vector3(x, 0, z),
-    hp: (55 + Math.random() * 40) * scale * powerScale,
-    speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1),
+    hp: (55 + Math.random() * 40) * scale * powerScale * (purple ? 1.2 : 1),
+    speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1) * (purple ? 1.33 : 1) * (mode === 'runner' ? 1.5 : 1),
     yaw: Math.random() * TAU,
-    state: 'chase', attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
+    state: mode === 'grave' ? 'emerge' : mode === 'sleeper' ? 'sleep' : 'chase',
+    attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
     brainExposed: brain, blind, stepT: Math.random(),
-    bleeding: wounded, dripT: 0,
+    bleeding: wounded, dripT: 0, purple,
+    mode, emergeT: 0, hornWave: !!opts.horns,
+    despawnR: mode === 'runner' ? 140 : 85,
+    wanderT: 0, wanderYaw: Math.random() * TAU, shotIgnoreT: -99,
   });
 }
 
@@ -1828,17 +2315,31 @@ function exposeBrain(z) {
   if (b.brainMesh) b.brainMesh.visible = true;
   if (b.skull) b.skull.visible = false;
 }
+// limb hitboxes in the zombie's facing frame: [kind, idx, localX, localY, localZ, radius].
+// a bullet that strikes one of these severs that exact limb (dismemberment local to the shot).
+const LIMB_SPEC = [
+  ['arm', 0, -0.5, 0.80, 0.18, 0.30],
+  ['arm', 1,  0.5, 0.80, 0.18, 0.30],
+  ['leg', 0, -0.2, 0.28, 0.02, 0.24],
+  ['leg', 1,  0.2, 0.28, 0.02, 0.24],
+];
 // sever an arm or leg; returns true if one came off. arms are weighted higher so you can
 // reliably shoot arms off.
-function blowLimb(z, kx, kz) {
+function blowLimb(z, kx, kz, spec) {
   const b = z.blob;
-  const opts = [];
-  if (!b.armGone[0]) { opts.push(['arm', 0]); opts.push(['arm', 0]); }
-  if (!b.armGone[1]) { opts.push(['arm', 1]); opts.push(['arm', 1]); }
-  if (!b.legGone[0]) opts.push(['leg', 0]);
-  if (!b.legGone[1]) opts.push(['leg', 1]);
-  if (!opts.length) return false;
-  const [kind, idx] = opts[(Math.random() * opts.length) | 0];
+  let kind, idx;
+  // dismemberment is local to the limb that was actually shot, when we know which one
+  if (spec && spec.kind && b[spec.kind + 'Gone'] && !b[spec.kind + 'Gone'][spec.idx]) {
+    kind = spec.kind; idx = spec.idx;
+  } else {
+    const opts = [];
+    if (!b.armGone[0]) { opts.push(['arm', 0]); opts.push(['arm', 0]); }
+    if (!b.armGone[1]) { opts.push(['arm', 1]); opts.push(['arm', 1]); }
+    if (!b.legGone[0]) opts.push(['leg', 0]);
+    if (!b.legGone[1]) opts.push(['leg', 1]);
+    if (!opts.length) return false;
+    [kind, idx] = opts[(Math.random() * opts.length) | 0];
+  }
   const grp = kind === 'arm' ? b.arms[idx] : b.legs[idx];
   const wp = new THREE.Vector3(); grp.getWorldPosition(wp);
   grp.visible = false;
@@ -1905,6 +2406,7 @@ const hud = {
   reloadmsg: document.getElementById('reloadmsg'),
   btnInteract: document.getElementById('btnInteract'),
 };
+const scopeEl = document.getElementById('scope');
 function updateAmmoHUD() {
   if (player.weapon.melee) { hud.clip.textContent = '∞'; hud.res.textContent = ''; }
   else {
@@ -1927,7 +2429,8 @@ function toast(txt, long) {
 let hitmarkT = 0;
 
 // ---------- game state ----------
-const game = { state: 'menu', time: 0, kills: 0, cratesOpened: 0, spawnT: 2, lastShot: new THREE.Vector3(), lastShotT: -99 };
+const game = { state: 'menu', time: 0, kills: 0, cratesOpened: 0, spawnT: 2, lastShot: new THREE.Vector3(), lastShotT: -99,
+  phase: 0, weather: 'sunny', cycle: 0, cleanup: false, clearTarget: 0 };
 
 function resetGame() {
   applyCousin(selectedCousin);
@@ -1939,8 +2442,13 @@ function resetGame() {
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
   player.slideT = 0; player.hopT = 0;
   player.owned = ['fists']; player.aiming = false; player.aimT = 0;
+  player.fpv = false; player.fpvT = 0;
   input.aim = false; input.aimPad = false; input.aimTouch = false;
+  const vb = document.getElementById('btnView'); if (vb) vb.classList.remove('pressed');
   game.time = 0; game.kills = 0; game.cratesOpened = 0; game.spawnT = 2; game.lastShotT = -99;
+  // every run starts on a fresh morning; the sky rolls forward as blocks are cleared
+  game.phase = 0; game.cycle = 0; game.weather = rollWeather(); game.cleanup = false; game.clearTarget = 0;
+  applyEnvironment();
   // clear ground gore from the last run
   for (const d of decals) { scene.remove(d); d.material.dispose(); }
   decals.length = 0;
@@ -1948,6 +2456,10 @@ function resetGame() {
   gibs.length = 0;
   for (const z of zombies) { scene.remove(z.blob.root); if (z.blob.shadow) scene.remove(z.blob.shadow); }
   zombies.length = 0;
+  // reset the boss + its beam
+  if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+  bossState.boss = null; bossState.spawned = false; bossState.defeated = false;
+  bossBarEl.classList.remove('show');
   for (const p of pickups) scene.remove(p.mesh);
   pickups.length = 0;
   for (const k in reserves) delete reserves[k];
@@ -1959,7 +2471,7 @@ function resetGame() {
   // starter zombies far out
   for (let i = 0; i < 3; i++) {
     const ang = Math.random() * TAU;
-    spawnZombie(Math.sin(ang) * 48, Math.cos(ang) * 48);
+    spawnZombie(Math.sin(ang) * 48, Math.cos(ang) * 48, 1, { mode: Math.random() < 0.5 ? 'grave' : 'sleeper' });
   }
 }
 
@@ -2144,15 +2656,10 @@ function padMenuNav(gp, dt, justPressed, ax, ay) {
 }
 
 // ---------- aiming ----------
-const _aimDir = new THREE.Vector3(), _ndc = new THREE.Vector3();
+const _aimDir = new THREE.Vector3();
 function getAimDir(out) {
-  // free-aim cursor on kbm, but once we're aiming down sights the crosshair centers
-  if (input.device === 'kbm' && player.aimT < 0.5) {
-    _ndc.set((aimX / innerWidth) * 2 - 1, -(aimY / innerHeight) * 2 + 1, 0.5);
-    out.copy(_ndc).unproject(camera).sub(camera.position).normalize();
-  } else {
-    camera.getWorldDirection(out);
-  }
+  // aim is camera-relative now (centred crosshair, third-person or first) — no free-aim cursor
+  camera.getWorldDirection(out);
   return out;
 }
 
@@ -2165,7 +2672,8 @@ function fireWeapon() {
   if (w.melee) {
     SFX.shoot(w);
     player.lastShotT = game.time;
-    player.meleeArm ^= 1; // alternate punching arm each swing
+    // fists alternate hands; an armed melee always swings the weapon hand
+    player.meleeArm = w.id === 'fists' ? (player.meleeArm ^ 1) : playerBlob.gunArm;
     for (const z of zombies) {
       if (z.state === 'dying') continue;
       const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
@@ -2174,7 +2682,8 @@ function fireWeapon() {
         const ang = Math.atan2(dx, dz);
         let diff = Math.abs(((ang - player.lastAimYaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
         if (diff < 1.15) {
-          damageZombie(z, w.dmg * player.dmgMult * closeBonus(w, d), dx / d, dz / d, 2.5, { weapon: w, dist: d, isHead: false });
+          // fists send them staggering back; armed melee shoves a bit too
+          damageZombie(z, w.dmg * player.dmgMult * closeBonus(w, d), dx / d, dz / d, w.id === 'fists' ? 11 : 3.5, { weapon: w, dist: d, isHead: false });
           rumble(...w.rmb);
           break;
         }
@@ -2219,12 +2728,22 @@ function fireWeapon() {
     let best = null, bestT = Math.min(tWall, 80);
     for (const z of zombies) {
       if (z.state === 'dying') continue;
-      const gy = z.blob.root.position.y;
-      const bodyY = gy + 0.7 * z.scale, headY = gy + 1.3 * z.scale;
-      let t = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, headY, z.pos.z, 0.42 * z.scale);
-      let isHead = true;
-      if (t === Infinity) { t = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, bodyY, z.pos.z, 0.55 * z.scale); isHead = false; }
-      if (t < bestT) { bestT = t; best = { z, isHead }; }
+      const gy = z.blob.root.position.y, s = z.scale;
+      const ht = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 1.3 * s, z.pos.z, 0.42 * s);
+      if (ht < bestT) { bestT = ht; best = { z, isHead: true, limb: null }; }
+      const bt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 0.7 * s, z.pos.z, 0.55 * s);
+      if (bt < bestT) { bestT = bt; best = { z, isHead: false, limb: null }; }
+      // arms + legs live in the zombie's facing frame; a hit here marks that exact limb
+      if (!z.isBoss) {
+        const cy = Math.cos(z.yaw || 0), sy = Math.sin(z.yaw || 0);
+        for (const L of LIMB_SPEC) {
+          if (L[0] === 'arm' ? z.blob.armGone[L[1]] : z.blob.legGone[L[1]]) continue;
+          const wx = z.pos.x + (L[2] * cy + L[4] * sy) * s;
+          const wz = z.pos.z + (-L[2] * sy + L[4] * cy) * s;
+          const lt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, wx, gy + L[3] * s, wz, L[5] * s);
+          if (lt < bestT) { bestT = lt; best = { z, isHead: false, limb: { kind: L[0], idx: L[1] } }; }
+        }
+      }
     }
     _to.set(_from.x + rdx * bestT, _from.y + rdy * bestT, _from.z + rdz * bestT);
     if (gunMesh) {
@@ -2235,7 +2754,7 @@ function fireWeapon() {
       anyHit = true;
       const dHit = bestT;
       const dmg = w.dmg * player.dmgMult * (best.isHead ? 2 : 1) * closeBonus(w, dHit);
-      damageZombie(best.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: best.isHead });
+      damageZombie(best.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: best.isHead, limb: best.limb });
     } else if (bestT < 80) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
     }
@@ -2246,21 +2765,51 @@ function fireWeapon() {
 function killZombie(z, kx, kz, headPop) {
   if (z.state === 'dying') return;
   z.state = 'dying'; z.deadT = 0; z.hp = 0;
+  if (z.isBoss) onBossDefeated(z);
   game.kills++;
   hud.kills.textContent = game.kills;
+  if (game.cleanup && game.kills >= game.clearTarget) completeCleanup();
   play3d(z.pos.x, z.pos.z, () => SFX.splat());
   rumble(70, 0.4, 0.3);
   spawnBlood(z.pos.x, z.blob.root.position.y + 0.8 * z.scale, z.pos.z, kx, kz, 2.2);
   if (headPop) popHead(z, kx, kz);
   if (Math.random() < 0.22 * settings.lootSpawn) spawnPickup(Math.random() < 0.7 ? 'ammo' : 'medkit', z.pos.x, z.pos.z);
 }
+// sniper-class execute: the target detonates wherever it was struck — instant kill
+function executeZombie(z, kx, kz, limb) {
+  if (z.state === 'dying') return;
+  const b = z.blob;
+  if (limb) blowLimb(z, kx, kz, limb);   // the struck limb comes off first
+  blowLimb(z, kx, kz);                    // then it comes apart
+  spawnBlood(z.pos.x, b.root.position.y + 0.9 * z.scale, z.pos.z, kx, kz, 3);
+  for (let i = 0; i < 4; i++) spawnGib(z.pos.x, b.root.position.y + (0.4 + Math.random()) * z.scale, z.pos.z, i % 2 ? BLOOD : 0x8aa85a, kx, kz);
+  killZombie(z, kx, kz, true);           // pops the head too
+}
 function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   if (z.state === 'dying') return;
+  // horn-guard: while boss-wave zombies still stand, the Two Horned One shrugs everything
+  // off — he flashes green instead of red because nothing got through
+  if (z.isBoss && bossShielded()) {
+    flashBlob(z.blob, FLASH_GREEN);
+    spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, 0x3ae06a, 3, 2.5, 0.3);
+    return;
+  }
+  // poking the Two Horned One is a mistake: any hit wakes him and sparks a lunge
+  if (z.isBoss) {
+    wakeBoss(z);
+    if (game.time > z.dashCdT) bossDash(z);
+  }
+  // a sleeping zombie that takes a hit starts getting up
+  if (z.state === 'sleep') { z.state = 'wake'; z.emergeT = 0; }
   const w = opts.weapon, isHead = opts.isHead, dist = opts.dist == null ? 0 : opts.dist;
   const b = z.blob;
+  const limb = opts.limb || null;   // {kind, idx} when a specific arm/leg took the hit
+
+  // sniper execute: any hit — limb, chest or head — is an instant, explosive kill (bosses are immune)
+  if (w && w.execute && !z.isBoss) { executeZombie(z, kx, kz, limb); return; }
 
   // heavy weapons, or any hit on an already-exposed brain, burst the head: instant kill, head vanishes
-  if (isHead && !b.headGone && ((w && w.gib) || z.brainExposed)) {
+  if (isHead && !b.headGone && !z.isBoss && ((w && w.gib) || z.brainExposed)) {
     killZombie(z, kx, kz, true);
     return;
   }
@@ -2277,14 +2826,15 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
     stainBody(b.wob, b.stainCount, localAng + (Math.random() - 0.5) * 0.6, -0.1 + Math.random() * 0.55, 1);
   }
 
-  // limb dismemberment on body hits (chance scales with close range + whether it killed)
-  if (!isHead && w && w.dismember && Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : 0.55)) {
-    blowLimb(z, kx, kz);
+  // limb dismemberment — a direct hit on an arm/leg severs that exact limb; otherwise it's a body-shot chance
+  if (!isHead && !z.isBoss && w && w.dismember) {
+    const base = limb ? 0.9 : 0.55;
+    if (Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : base)) blowLimb(z, kx, kz, limb);
   }
 
   if (z.hp > 0) {
     // weak or far headshot that doesn't kill cracks the skull open, revealing the weak spot
-    if (isHead && !z.brainExposed && w && (w.weak || dist > 26)) exposeBrain(z);
+    if (isHead && !z.brainExposed && !z.isBoss && w && (w.weak || dist > 26)) exposeBrain(z);
     return;
   }
   killZombie(z, kx, kz, isHead && (!w || w.gib || z.brainExposed));
@@ -2318,6 +2868,40 @@ function findNearRecruit() {
     if (d < bestD) { bestD = d; best = c; }
   }
   return best;
+}
+// a downed squadmate close enough to pick back up
+function findNearDowned() {
+  let best = null, bestD = 2.8;
+  for (const c of companions) {
+    if (!c.recruited || !c.downed) continue;
+    const d = Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best;
+}
+// a recruited cousin you're close to AND looking at — so the squad trailing behind
+// doesn't spam the trade prompt while you walk
+function findNearTrade() {
+  let best = null, bestD = 2.4;
+  const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
+  for (const c of companions) {
+    if (!c.recruited || c.downed) continue;
+    const dx = c.pos.x - player.pos.x, dz = c.pos.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = c; }
+  }
+  return best;
+}
+// swap held weapons with a recruited cousin — hand their personal favourite back, or borrow it
+function tradeWeapons(c) {
+  const myId = player.weapon.id;
+  const theirId = (c.weapon || WEAPONS.pistol).id;
+  if (myId === theirId) { toast('YOU BOTH HOLD THE SAME WEAPON'); return; }
+  setCompanionWeapon(c, myId);
+  equipWeapon(theirId);
+  SFX.swap(WEAPONS[theirId]);
+  rumble(60, 0.3, 0.4);
+  toast(`TRADED: YOUR ${WEAPONS[myId].name.toUpperCase()} FOR ${c.data.name.toUpperCase()}'S ${WEAPONS[theirId].name.toUpperCase()}`);
 }
 function openCrate(cr) {
   cr.opened = true;
@@ -2362,12 +2946,24 @@ let recruitCounter = 0;
 function recruitCousin(c) {
   c.recruited = true;
   c.order = ++recruitCounter; // formation order = order found
+  c.hp = c.maxHp; c.downed = false;
   scene.remove(c.beacon);
   c.beacon = null;
   SFX.recruit();
   rumble(160, 0.5, 0.7);
-  toast(`${c.data.name.toUpperCase()} JOINED! - ${c.data.lore}`, true);
+  // every cousin hands you their signature melee weapon (into the melee slot), no forced swap
+  const mid = c.data.melee;
+  let mtxt = '';
+  if (mid && !player.owned.includes(mid)) {
+    player.owned.push(mid);
+    player.owned.sort((a, b) => slotRank(a) - slotRank(b));
+    updateWeaponBtn();
+    mtxt = ` +${WEAPONS[mid].name.toUpperCase()}`;
+  }
+  toast(`${c.data.name.toUpperCase()} JOINED!${mtxt} — ${c.data.lore}`, true);
   updateCousinHUD();
+  rebuildSquadBars();
+  maybeSpawnBoss();
 }
 // weapon-only loot roll (companions only ever grab guns from crates)
 function rollLootWeapon(rng) {
@@ -2378,7 +2974,7 @@ function rollLootWeapon(rng) {
 function setCompanionWeapon(c, id) {
   c.weapon = WEAPONS[id];
   if (c.gunMesh) c.gunMesh.removeFromParent();
-  c.gunMesh = c.weapon.melee ? null : buildGunMesh(id);
+  c.gunMesh = id === 'fists' ? null : buildGunMesh(id); // melee models show in their fist too
   if (c.gunMesh) c.blob.gunSocket.add(c.gunMesh);
 }
 // a companion opens a crate it walked up to and equips whatever gun it finds
@@ -2413,18 +3009,23 @@ function animate() {
     updateCrates(dt);
     updatePickups(dt);
     updateSpawner(dt);
+    updateBossFx();
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
   }
   updateCamera(dt);
   updateFx(dt);
+  updateRain(dt);
   renderer.render(scene, camera);
 }
 
 function updatePlayer(dt) {
   if (player.dead) return;
-  player.camYaw -= input.lookDX;
-  player.camPitch = clamp(player.camPitch - input.lookDY, -1.25, 0.6);
+  // look speed scales with the current FOV so zoomed aim (especially the sniper
+  // scope, 22° vs 70°) turns proportionally slower and stays steady on target
+  const lookDamp = camera.fov / 70;
+  player.camYaw -= input.lookDX * lookDamp;
+  player.camPitch = clamp(player.camPitch - input.lookDY * lookDamp, -1.25, 0.6);
   input.lookDX = 0; input.lookDY = 0;
 
   let mx = input.moveX, my = input.moveY;
@@ -2436,7 +3037,9 @@ function updatePlayer(dt) {
   if (ml > 1) { mx /= ml; my /= ml; }
 
   const sprinting = (keys['ShiftLeft'] || keys['ShiftRight'] || sprintToggle || input.sprintGamepad) && ml > 0.1;
-  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73);
+  // bare fists keep you light on your feet: 5% quicker stride, 10% springier jumps
+  const fists = player.weapon.id === 'fists';
+  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73) * (fists ? 1.05 : 1);
 
   // camera-relative: forward = away from camera
   const sin = Math.sin(player.camYaw), cos = Math.cos(player.camYaw);
@@ -2480,7 +3083,7 @@ function updatePlayer(dt) {
   const groundY = supportTop(player.pos.x, player.pos.z, player.pos.y);
   if (input.jump && player.grounded) {
     const hop = player.slideT > 0;   // slide-hop: bigger jump, momentum kept
-    player.vy = hop ? 8.6 : 7.4;
+    player.vy = (hop ? 8.6 : 7.4) * (fists ? 1.1 : 1);
     if (hop) { player.hopT = 0.5; player.slideT = 0; }
     player.grounded = false;
     player.squash = -0.25;
@@ -2504,16 +3107,10 @@ function updatePlayer(dt) {
   player.shootCd -= dt;
   const wantShoot = input.shoot || input.shootGamepad;
   const w = player.weapon;
-  if (w.auto || w.melee) {
-    // full-auto & melee: hold to fire, capped by the weapon's rate of fire
-    if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0) {
-      fireWeapon();
-      player.shootCd = 60 / w.rpm;
-    }
-  } else if (input.shootPressed && player.shootCd <= 0) {
-    // semi-auto & shotgun: one shot per trigger pull, as fast as you can pull it
+  // hold the trigger to keep firing; every weapon — full-auto, semi-auto & melee — cycles at its own rpm
+  if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0) {
     fireWeapon();
-    player.shootCd = 0.05; // tiny floor so a single click can't double-fire
+    player.shootCd = 60 / w.rpm;
   }
   input.shootPressed = false;
 
@@ -2530,31 +3127,42 @@ function updatePlayer(dt) {
     }
   }
 
-  // interact: crates + recruits
-  nearCrate = findNearCrate();
-  nearRecruit = findNearRecruit();
+  // interact: downed squadmates outrank crates + recruits
+  const nearDowned = findNearDowned();
+  nearCrate = nearDowned ? null : findNearCrate();
+  nearRecruit = nearDowned ? null : findNearRecruit();
   if (nearCrate && nearRecruit) {
     const dc = Math.hypot(nearCrate.pos.x - player.pos.x, nearCrate.pos.z - player.pos.z);
     const dr = Math.hypot(nearRecruit.pos.x - player.pos.x, nearRecruit.pos.z - player.pos.z);
     if (dc <= dr) nearRecruit = null; else nearCrate = null;
   }
-  const showPrompt = !!(nearCrate || nearRecruit);
-  hud.prompttxt.textContent = nearCrate ? 'Open Crate' : nearRecruit ? 'Recruit ' + nearRecruit.data.name : '';
+  let nearTrade = null;
+  if (!nearDowned && !nearCrate && !nearRecruit) nearTrade = findNearTrade();
+  const showPrompt = !!(nearDowned || nearCrate || nearRecruit || nearTrade);
+  hud.prompttxt.textContent = nearDowned ? 'Pick up ' + nearDowned.data.name
+    : nearCrate ? 'Open Crate'
+    : nearRecruit ? 'Recruit ' + nearRecruit.data.name
+    : nearTrade ? `Trade for ${nearTrade.data.name}'s ${(nearTrade.weapon || WEAPONS.pistol).name}` : '';
   hud.prompt.classList.toggle('hidden', !showPrompt || input.device === 'touch');
   if (isTouch) hud.btnInteract.style.display = showPrompt ? 'flex' : 'none';
   if (input.interact) {
-    if (nearCrate) openCrate(nearCrate);
+    if (nearDowned) reviveCousin(nearDowned);
+    else if (nearCrate) openCrate(nearCrate);
     else if (nearRecruit) recruitCousin(nearRecruit);
+    else if (nearTrade) tradeWeapons(nearTrade);
     input.interact = false;
   }
 
   if (game.time - player.lastHurtT > 6 && player.hp < player.maxHp) {
     player.hp = Math.min(player.maxHp, player.hp + 4 * dt);
   }
-  hud.health.style.width = (player.hp / player.maxHp * 100) + '%';
-  hud.health.style.background = player.hp > 50 ? 'linear-gradient(90deg,#2ecc71,#27ae60)' :
-    player.hp > 25 ? 'linear-gradient(90deg,#f39c12,#e67e22)' : 'linear-gradient(90deg,#e74c3c,#c0392b)';
-  hud.healthTxt.textContent = Math.ceil(player.hp) + ' HP';
+  const hpFrac = player.hp / player.maxHp;
+  hud.health.style.width = (hpFrac * 100) + '%';
+  // player's bar is colour-coded to the cousin we picked; it pulses red when critical
+  hud.health.style.background = player.colorHex || '#2ecc71';
+  hud.health.classList.toggle('low', hpFrac <= 0.25);
+  hud.healthTxt.innerHTML = Math.ceil(player.hp) + ' HP <span class="pnum">| Player 1</span>';
+  updateSquadBars();
   hud.vignette.style.opacity = player.hp < 40 ? (1 - player.hp / 40) * 0.9 :
     (game.time - player.lastHurtT < 0.4 && game.time > player.lastHurtT ? 0.7 : 0);
 
@@ -2570,11 +3178,13 @@ function updatePlayer(dt) {
   // shadow stays flat, projected onto whatever we're above (ground, car roofs...)
   placeShadow(b, player.pos.x, player.pos.z, player.pos.y);
 
-  // aim-down-sights: ease the view toward first person while the aim button is held on a gun
-  player.aiming = (input.aim || input.aimPad || input.aimTouch) && !w.melee && !player.dead;
+  // aim/zoom: hold to focus. third-person tightens over the shoulder & raises the weapon;
+  // first-person eases over the sights (or raises the melee weapon). fpv is the view toggle.
+  player.aiming = (input.aim || input.aimPad || input.aimTouch) && !player.dead;
   player.aimT = lerp(player.aimT, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
-  // hide our own head deep in first person so it doesn't block the view
-  b.head.visible = player.aimT < 0.6;
+  player.fpvT = lerp(player.fpvT, player.fpv ? 1 : 0, 1 - Math.exp(-12 * dt));
+  // hide our own head only in first person so it doesn't block the view
+  b.head.visible = player.fpvT < 0.55;
 
   // footsteps on each half of the walk cycle
   if (moving && player.grounded) {
@@ -2606,17 +3216,26 @@ function updatePlayer(dt) {
   const swing = Math.sin(player.walkPhase) * (moving ? 0.85 : 0.06) + (moving ? 0 : Math.sin(player.idlePhase * 1.1) * 0.05);
   b.legs[0].rotation.x = swing + stumbleLean * 0.3;
   b.legs[1].rotation.x = -swing - stumbleLean * 0.2;
+  const aimAmt = player.aimT;
   if (w.melee) {
-    // alternate the punching arm each swing
     const punching = game.time - player.lastShotT < 0.18;
-    b.arms[0].rotation.x = -swing * 0.8;
-    b.arms[1].rotation.x = swing * 0.8;
-    if (punching) b.arms[player.meleeArm].rotation.x = -1.9;
-    else if (stumbling) { b.arms[0].rotation.x -= stumbleLean * 1.0; b.arms[1].rotation.x -= stumbleLean * 1.0; }
+    if (w.id === 'fists') {
+      // fists: alternate the punching arm each swing
+      b.arms[0].rotation.x = -swing * 0.8;
+      b.arms[1].rotation.x = swing * 0.8;
+      if (punching) b.arms[player.meleeArm].rotation.x = -1.9;
+      else if (stumbling) { b.arms[0].rotation.x -= stumbleLean * 1.0; b.arms[1].rotation.x -= stumbleLean * 1.0; }
+    } else {
+      // armed melee: the weapon hand swings; hold it raised & ready while focusing
+      const ready = -0.55 - aimAmt * 1.0;
+      b.arms[b.gunArm].rotation.x = punching ? -2.3 : ready + Math.sin(player.walkPhase) * (moving ? 0.14 : 0.04);
+      b.arms[b.offArm].rotation.x = -swing * 0.6 - aimAmt * 0.35;
+      if (stumbling) { b.arms[b.gunArm].rotation.x -= stumbleLean * 0.6; b.arms[b.offArm].rotation.x -= stumbleLean * 1.0; }
+    }
   } else {
-    const aimPitch = Math.asin(clamp(recentShot ? getAimDir(_aimDir).y : 0, -0.9, 0.9));
+    const aimPitch = Math.asin(clamp((recentShot || player.aiming) ? getAimDir(_aimDir).y : 0, -0.9, 0.9));
     b.arms[b.gunArm].rotation.x = -Math.PI / 2 - aimPitch * 0.8;
-    b.arms[b.offArm].rotation.x = wantShoot || recentShot ? b.arms[b.gunArm].rotation.x : -swing * 0.8;
+    b.arms[b.offArm].rotation.x = (wantShoot || recentShot || aimAmt > 0.2) ? b.arms[b.gunArm].rotation.x : -swing * 0.8;
     const kick = game.time - player.lastShotT < 0.09 ? 0.35 : 0;
     b.arms[b.gunArm].rotation.x += kick;
   }
@@ -2650,8 +3269,9 @@ function updateCompanions(dt) {
     const b = c.blob;
     const gy = groundHeight(c.pos.x, c.pos.z);
     updateFlash(b, dt);
-    placeShadow(b, c.pos.x, c.pos.z);
+    placeShadow(b, c.pos.x, c.pos.z, c.y);
     if (!c.recruited) {
+      c.y = gy;
       // idle at their spot, bob & look around — but keep the gun levelled, not pointing at the dirt
       b.root.position.set(c.pos.x, gy, c.pos.z);
       b.wob.scale.y = 1 + Math.sin(performance.now() * 0.002 + c.walkPhase) * 0.03;
@@ -2664,6 +3284,24 @@ function updateCompanions(dt) {
       }
       continue;
     }
+    // downed: kneel where they fell, flashing red under a rescue beacon, until
+    // someone comes and picks them up by hand
+    if (c.downed) {
+      c.y = gy; c.vy = 0; c.grounded = true;
+      b.root.position.set(c.pos.x, gy, c.pos.z);
+      b.wob.rotation.x = 0.55; b.wob.scale.set(1, 0.7, 1);
+      b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.2;
+      b.arms[0].rotation.x = -0.3; b.arms[1].rotation.x = -0.3;
+      c.downFlashT = (c.downFlashT || 0) - dt;
+      if (c.downFlashT <= 0) { c.downFlashT = 0.55; flashBlob(b); }
+      if (c.beacon) {
+        c.beacon.material.opacity = 0.22 + Math.sin(performance.now() * 0.004) * 0.12;
+        c.beacon.rotation.y += dt * 0.8;
+      }
+      continue;
+    }
+    // steady regen once they've been out of a bite for a few seconds
+    if (game.time - (c.lastHurtT || -9) > 5 && c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + 5 * dt);
     // seek my formation slot
     const i = c.slotIdx || 0, n = c.slotN || 1;
     let tx2, tz2;
@@ -2682,11 +3320,16 @@ function updateCompanions(dt) {
     if (pd > 30) { // teleport catch-up if left far behind
       c.pos.x = player.pos.x + bkX * (2 + i * 1.5);
       c.pos.z = player.pos.z + bkZ * (2 + i * 1.5);
+      c.y = groundHeight(c.pos.x, c.pos.z); c.vy = 0; c.grounded = true;
     } else if (dist > 0.4) {
       const sp = Math.min(dist > 8 ? 7.3 : dist > 2 ? 5.4 : 2.8, dist / dt);
-      let nx = c.pos.x + dx / dist * sp * dt;
-      let nz = c.pos.z + dz / dist * sp * dt;
-      [nx, nz] = resolveCollision(nx, nz, 0.42, gy);
+      const step = sp * dt;
+      let nx = c.pos.x + dx / dist * step;
+      let nz = c.pos.z + dz / dist * step;
+      [nx, nz] = resolveCollision(nx, nz, 0.42, c.y);
+      // hop over whatever is blocking the way back to the formation slot
+      const movedD = Math.hypot(nx - c.pos.x, nz - c.pos.z);
+      if (c.grounded && dist > 1.1 && movedD < step * 0.4) { c.vy = 7.4; c.grounded = false; }
       c.pos.x = nx; c.pos.z = nz;
       if (dist > 1) {
         c.walkPhase += dt * 10;
@@ -2694,42 +3337,85 @@ function updateCompanions(dt) {
         moving = true;
       }
     }
+    // gravity: cousins stand on (and jump onto) the same tops we can
+    const supY = supportTop(c.pos.x, c.pos.z, c.y);
+    if (c.grounded) {
+      if (supY < c.y - 0.05) { c.grounded = false; c.vy = 0; }
+      else c.y = supY;
+    }
+    if (!c.grounded) {
+      c.vy -= 20 * dt;
+      c.y += c.vy * dt;
+      if (c.vy <= 0 && c.y <= supY) { c.y = supY; c.vy = 0; c.grounded = true; }
+    }
     // auto-loot: grab a gun from any crate we're standing next to
     for (const cr of allCrates) {
       if (cr.opened) continue;
-      if (Math.hypot(cr.pos.x - c.pos.x, cr.pos.z - c.pos.z) < 2.1 && Math.abs(cr.pos.y - gy) < 2.4) {
+      if (Math.hypot(cr.pos.x - c.pos.x, cr.pos.z - c.pos.z) < 2.1 && Math.abs(cr.pos.y - c.y) < 2.4) {
         companionLoot(c, cr);
         break;
       }
     }
-    // fight: shoot nearest zombie with whatever weapon we're carrying
+    // fight: swing or shoot at the nearest zombie with whatever we're carrying
     const cw = c.weapon || WEAPONS.pistol;
     c.shootCd -= dt;
+    if (c.meleeT > 0) c.meleeT -= dt;
     let tgt = null, tD = 15;
     for (const z of zombies) {
-      if (z.state === 'dying') continue;
+      if (z.state !== 'chase' && z.state !== 'wake') continue; // ignore sleepers, emergers & the dormant boss
       const d = Math.hypot(z.pos.x - c.pos.x, z.pos.z - c.pos.z);
       if (d < tD) { tD = d; tgt = z; }
     }
     if (tgt) c.yaw = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
     else if (still && !moving) c.yaw = fYaw; // stand at attention facing where you face
     if (tgt && c.shootCd <= 0) {
-      c.shootCd = (cw.auto ? 0.32 : cw.id === 'shotgun' ? 0.6 : 0.7) + Math.random() * 0.15;
-      const zy = tgt.blob.root.position.y + 0.7 * tgt.scale;
-      _cv.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 1.0, c.pos.z);
       const kx = (tgt.pos.x - c.pos.x) / tD, kz = (tgt.pos.z - c.pos.z) / tD;
-      const shots = cw.id === 'shotgun' ? 3 : 1;
-      for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(tgt.pos.x + (Math.random() - 0.5) * s, zy, tgt.pos.z + (Math.random() - 0.5) * s));
-      damageZombie(tgt, (cw.dmg || 20) * 1.25 * shots, kx, kz, 1, { weapon: cw, dist: tD, isHead: false });
-      if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
+      if (cw.melee) {
+        // melee cousins swing once the target shambles into reach
+        if (tD < cw.range + 0.5) {
+          c.shootCd = 60 / cw.rpm + 0.2;
+          c.meleeT = 0.16;
+          damageZombie(tgt, cw.dmg * 1.1, kx, kz, 2.2, { weapon: cw, dist: tD, isHead: false });
+          if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
+        }
+      } else {
+        c.shootCd = (cw.auto ? 0.32 : cw.id === 'shotgun' ? 0.6 : 0.7) + Math.random() * 0.15;
+        // cousin gunfire rings out just as loud as ours: blind zombies home in on it too
+        game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
+        const sy = c.y + 1.0;
+        const zy = tgt.blob.root.position.y + 0.7 * tgt.scale;
+        // cousin bullets obey the same walls, cars and crates ours do
+        let ddx = tgt.pos.x - c.pos.x, ddy = zy - sy, ddz = tgt.pos.z - c.pos.z;
+        const dl = Math.hypot(ddx, ddy, ddz);
+        ddx /= dl; ddy /= dl; ddz /= dl;
+        let tWall = rayGround(c.pos.x, sy, c.pos.z, ddx, ddy, ddz, dl + 4);
+        for (const col of nearbyColliders(c.pos.x, c.pos.z)) {
+          const t = rayAABB(c.pos.x, sy, c.pos.z, ddx, ddy, ddz, col);
+          if (t < tWall) tWall = t;
+        }
+        _cv.set(c.pos.x, sy, c.pos.z);
+        if (tWall < dl - 0.35) {
+          // blocked: the shot smacks the obstacle instead of magically reaching the zombie
+          const hx = c.pos.x + ddx * tWall, hy = sy + ddy * tWall, hz = c.pos.z + ddz * tWall;
+          spawnTracer(_cv.clone(), new THREE.Vector3(hx, hy, hz));
+          spawnParticles(hx, hy, hz, 0x9a9a8a, 3, 2, 0.3);
+        } else {
+          const shots = cw.id === 'shotgun' ? 3 : 1;
+          for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(tgt.pos.x + (Math.random() - 0.5) * s, zy, tgt.pos.z + (Math.random() - 0.5) * s));
+          damageZombie(tgt, (cw.dmg || 20) * 1.25 * shots, kx, kz, 1, { weapon: cw, dist: tD, isHead: false });
+        }
+        if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
+      }
     }
-    b.root.position.set(c.pos.x, gy, c.pos.z);
+    b.root.position.set(c.pos.x, c.y, c.pos.z);
     b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
     const swing = Math.sin(c.walkPhase) * (moving ? 0.8 : 0.05);
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
-    b.arms[b.gunArm].rotation.x = -Math.PI / 2; // gun always levelled forward
+    // guns held levelled; melee carried ready, whipping forward on a swing
+    b.arms[b.gunArm].rotation.x = cw.melee ? (c.meleeT > 0 ? -2.3 : -0.75) : -Math.PI / 2;
+    if (!c.grounded) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
   }
@@ -2754,22 +3440,91 @@ function updateZombies(dt) {
       continue;
     }
     const pDist = Math.hypot(player.pos.x - z.pos.x, player.pos.z - z.pos.z);
-    if (pDist > 75) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
+    if (pDist > (z.despawnR || 85) && !z.isBoss) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
 
-    // pick what draws this zombie: blind ones only home in on the last gunshot noise
-    let tx, tz, hasTarget = true;
+    // boss: sleeps by the bank until approached, then sends waves at damage thresholds
+    if (z.isBoss) {
+      updateBossState(z, pDist);
+      if (z.state === 'dormant') {
+        b.root.position.set(z.pos.x, groundHeight(z.pos.x, z.pos.z), z.pos.z);
+        b.root.rotation.y = z.yaw;
+        b.wob.scale.y = 1 + Math.sin(performance.now() * 0.001) * 0.03;
+        placeShadow(b, z.pos.x, z.pos.z);
+        continue;
+      }
+    }
+
+    // visible entrances instead of popping into view: clawing out of the dirt...
+    if (z.state === 'emerge') {
+      z.emergeT += dt;
+      const t = Math.min(z.emergeT / 1.7, 1);
+      const gy = groundHeight(z.pos.x, z.pos.z);
+      b.root.position.set(z.pos.x, gy - 1.5 * (1 - t), z.pos.z);
+      b.root.rotation.y = z.yaw;
+      b.arms[0].rotation.x = -2.7 + t * 1.3;
+      b.arms[1].rotation.x = -2.3 + t * 0.9;
+      if (Math.random() < 0.25) spawnParticles(z.pos.x + (Math.random() - 0.5) * 0.6, gy + 0.05, z.pos.z + (Math.random() - 0.5) * 0.6, 0x5a4a34, 2, 1.6, 0.4);
+      placeShadow(b, z.pos.x, z.pos.z);
+      if (t >= 1) z.state = 'chase';
+      continue;
+    }
+    // ...or lying sprawled on the pavement until something comes close
+    if (z.state === 'sleep') {
+      const gy = groundHeight(z.pos.x, z.pos.z);
+      b.root.position.set(z.pos.x, gy + 0.05, z.pos.z);
+      b.root.rotation.x = -1.45;
+      placeShadow(b, z.pos.x, z.pos.z);
+      if (pDist < 24) { z.state = 'wake'; z.emergeT = 0; }
+      continue;
+    }
+    if (z.state === 'wake') {
+      z.emergeT += dt;
+      const t = Math.min(z.emergeT / 0.9, 1);
+      const gy = groundHeight(z.pos.x, z.pos.z);
+      b.root.rotation.x = -1.45 * (1 - t);
+      b.root.position.set(z.pos.x, gy + 0.05 * (1 - t), z.pos.z);
+      placeShadow(b, z.pos.x, z.pos.z);
+      if (t >= 1) { z.state = 'chase'; b.root.rotation.x = 0; }
+      continue;
+    }
+
+    // pick what draws this zombie: blind ones only home in on the last gunshot noise,
+    // and otherwise wander the streets
+    let tx, tz, hasTarget = true, tgtC = null, wander = false;
     if (z.blind) {
-      if (game.time - game.lastShotT < 14) { tx = game.lastShot.x; tz = game.lastShot.z; }
-      else { hasTarget = false; tx = z.pos.x; tz = z.pos.z; }
+      const heard = game.time - game.lastShotT < 14 && game.lastShotT > z.shotIgnoreT;
+      if (heard) {
+        tx = game.lastShot.x; tz = game.lastShot.z;
+        // reached where the bang came from and found nothing: shrug, wander off again
+        if (Math.hypot(tx - z.pos.x, tz - z.pos.z) < 2.2) { z.shotIgnoreT = game.lastShotT; wander = true; }
+      } else wander = true;
+      if (wander) {
+        z.wanderT -= dt;
+        if (z.wanderT <= 0) { z.wanderT = 2.5 + Math.random() * 4; z.wanderYaw = Math.random() * TAU; }
+        tx = z.pos.x + Math.sin(z.wanderYaw) * 6;
+        tz = z.pos.z + Math.cos(z.wanderYaw) * 6;
+      }
     } else {
       tx = player.pos.x; tz = player.pos.z;
       let tDist = player.dead ? Infinity : pDist;
       for (const c of companions) {
-        if (!c.recruited) continue;
+        if (!c.recruited || c.downed) continue;
         const d = Math.hypot(c.pos.x - z.pos.x, c.pos.z - z.pos.z);
-        if (d < tDist) { tDist = d; tx = c.pos.x; tz = c.pos.z; }
+        if (d < tDist) { tDist = d; tx = c.pos.x; tz = c.pos.z; tgtC = c; }
       }
       if (tDist === Infinity) hasTarget = false;
+    }
+    // houses only admit zombies through the door: prey holed up inside pulls them to
+    // the doorway first, and a zombie left inside an empty house (kited, then abandoned)
+    // files back out the door to repath instead of grinding arms-first into a wall
+    if (!z.isBoss && hasTarget) {
+      const myBld = buildingAt(z.pos.x, z.pos.z);
+      const tgtBld = buildingAt(tx, tz);
+      if (myBld && myBld !== tgtBld) {
+        tx = myBld.doorOutX; tz = myBld.doorOutZ;
+      } else if (!myBld && tgtBld && Math.hypot(tgtBld.doorX - z.pos.x, tgtBld.doorZ - z.pos.z) > 1.3) {
+        tx = tgtBld.doorX; tz = tgtBld.doorZ;
+      }
     }
     const dx = tx - z.pos.x, dz = tz - z.pos.z;
     const dist = hasTarget ? Math.hypot(dx, dz) : Infinity;
@@ -2777,8 +3532,9 @@ function updateZombies(dt) {
     z.groanT -= dt;
     if (z.groanT < 0) { z.groanT = 4 + Math.random() * 7; if (pDist < 26) play3d(z.pos.x, z.pos.z, () => SFX.groan()); }
 
+    if (z.isBoss && z.dashT > 0) z.dashT -= dt;
     if (dist > 1.5 && dist < Infinity) {
-      const sp = z.speed * (dist < 3 ? 1.25 : 1);
+      const sp = z.speed * (dist < 3 ? 1.25 : 1) * (wander ? 0.45 : 1) * (z.isBoss && z.dashT > 0 ? 5 : 1);
       let nx = z.pos.x + dx / dist * sp * dt;
       let nz = z.pos.z + dz / dist * sp * dt;
       for (const o of zombies) {
@@ -2795,10 +3551,20 @@ function updateZombies(dt) {
       if (z.stepT <= 0) { z.stepT = 0.55; if (pDist < 22) play3d(z.pos.x, z.pos.z, () => SFX.step(false)); }
     }
     z.attackT -= dt;
-    // bite whoever is actually within reach (blind zombies still bite point-blank)
-    if (z.attackT <= 0 && !player.dead && pDist < 1.7) {
-      z.attackT = 0.9;
-      hurtPlayer(9 + Math.random() * 6, player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+    // bite whoever is actually within reach — player first, else the cousin it's chasing.
+    // vertical reach matters too: perched on a roof/awning above them means no bites from below
+    if (z.attackT <= 0) {
+      const reach = z.isBoss ? 3.4 : 1.7;
+      const vReach = z.isBoss ? 2.4 : 1.25;
+      // no biting through house walls: both parties must be in the same room (or both outside)
+      const sameRoom = z.isBoss || buildingAt(z.pos.x, z.pos.z) === buildingAt(player.pos.x, player.pos.z);
+      if (!player.dead && sameRoom && pDist < reach && player.pos.y - b.root.position.y < vReach) {
+        z.attackT = z.isBoss ? 1.1 : 0.9;
+        hurtPlayer(z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6, player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+      } else if (tgtC && !tgtC.downed && (tgtC.y || 0) - b.root.position.y < vReach) {
+        const cd = Math.hypot(tgtC.pos.x - z.pos.x, tgtC.pos.z - z.pos.z);
+        if (cd < (z.isBoss ? 3.2 : 1.6)) { z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, z.isBoss ? 22 : 7 + Math.random() * 5); }
+      }
     }
 
     if (dist < Infinity) z.yaw = angLerp(z.yaw, Math.atan2(dx, dz), 1 - Math.exp(-6 * dt));
@@ -2831,18 +3597,155 @@ function updateZombies(dt) {
 function updateSpawner(dt) {
   if (game.time < 15 || settings.zombieSpawn <= 0) return;
   game.spawnT -= dt;
+  // cleanup phase after the boss falls: never spawn past the clear target, so the last
+  // stragglers can be hunted down to exactly the next hundred
+  if (game.cleanup) {
+    const alive = zombies.reduce((n, zz) => n + (zz.state !== 'dying' ? 1 : 0), 0);
+    if (game.kills + alive >= game.clearTarget) return;
+  }
   const maxZ = Math.round(Math.min(26, 4 + Math.floor(game.time / 22) + Math.floor(game.kills / 7)) * settings.zombieSpawn);
   const interval = Math.max(0.35, (3.6 - game.time / 80) / settings.zombieSpawn);
   if (game.spawnT <= 0 && zombies.length < maxZ) {
     game.spawnT = interval;
-    const ang = Math.random() * TAU;
-    const d = 32 + Math.random() * 22;
-    let x = player.pos.x + Math.sin(ang) * d;
-    let z = player.pos.z + Math.cos(ang) * d;
-    [x, z] = resolveCollision(x, z, 0.5);
+    const runner = Math.random() < 0.22; // far spawns already running our way
+    let x = 0, z = 0, ok = false;
+    for (let tries = 0; tries < 8 && !ok; tries++) {
+      const ang = Math.random() * TAU;
+      const d = runner ? 80 + Math.random() * 34 : 32 + Math.random() * 22;
+      x = player.pos.x + Math.sin(ang) * d;
+      z = player.pos.z + Math.cos(ang) * d;
+      [x, z] = resolveCollision(x, z, 0.5);
+      ok = !insideBuilding(x, z); // zombies never appear inside buildings on their own
+    }
+    if (!ok) return;
     const power = 1 + game.time / 240;
-    spawnZombie(x, z, power);
+    // near spawns claw out of the dirt or wake from the pavement — no popping into view.
+    // during cleanup everything actively hunts, so the last stragglers come find you
+    const mode = runner ? 'runner'
+      : game.cleanup ? 'grave'
+      : (onRoad(x, z, 0.5) || Math.random() < 0.35) ? 'sleeper' : 'grave';
+    spawnZombie(x, z, power, { mode });
   }
+}
+
+// ---------- boss: the Two Horned One ----------
+const bossState = { boss: null, beam: null, spawned: false, defeated: false };
+const bossBarEl = document.getElementById('bossbar');
+const bossHpEl = document.getElementById('bosshp');
+// unlocked once the whole clan has been recruited
+function maybeSpawnBoss() {
+  if (bossState.spawned || bossState.defeated || game.state !== 'playing') return;
+  if (companions.length === 0 || companions.some(c => !c.recruited)) return;
+  spawnBoss();
+}
+function spawnBoss() {
+  bossState.spawned = true;
+  const bx = 0, bz = -33.5;                   // the open ground between the fountain and the bank steps
+  const blob = buildBlob({ color: 0x8a2be2, zombie: true, scale: 2.7 });
+  for (const s of [-1, 1]) {                  // horns
+    const horn = cyl(0.02, 0.15, 0.55, 0x2a1a3a, 6);
+    horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
+    blob.head.add(horn);
+  }
+  blob.root.position.set(bx, groundHeight(bx, bz), bz);
+  scene.add(blob.root);
+  const hp = Math.round(4200 * (1 + 0.4 * game.cycle)); // each cleared block wakes a tougher one
+  const z = {
+    blob, pos: new THREE.Vector3(bx, 0, bz), hp, maxHp: hp, speed: 1.15, yaw: 0, state: 'dormant',
+    attackT: 0, deadT: 0, walkPhase: 0, groanT: 2, scale: 2.7,
+    brainExposed: false, blind: false, stepT: 0, bleeding: false, dripT: 0, isBoss: true, wavesFired: 0,
+    dashT: 0, dashCdT: -9,
+  };
+  zombies.push(z);
+  bossState.boss = z;
+  // giant beam over the bank pointing the way
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.7, 1.7, 130, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xb03cff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+  );
+  beam.position.set(bx, groundHeight(bx, bz) + 64, bz);
+  scene.add(beam);
+  bossState.beam = beam;
+  bossBarEl.classList.remove('show');         // the bar appears once it aggros
+  toast('THE CLAN IS WHOLE — THE TWO HORNED ONE STIRS BY THE BANK', true);
+  initAudio(); play3d(bx, bz, () => SFX.groan());
+}
+function wakeBoss(z) {
+  if (z.state !== 'dormant') return;
+  z.state = 'chase';
+  bossBarEl.classList.add('show');
+  toast('THE TWO HORNED ONE AWAKENS!', true);
+  shakeAmp = Math.max(shakeAmp, 0.4);
+  rumble(400, 1, 1);
+  play3d(z.pos.x, z.pos.z, () => { noiseBurst(0.5, 200, 0.9); tone(60, 0.6, 0.5, 'sawtooth', 30); });
+}
+// a short roaring lunge straight at his prey — triggered by taking a hit or sending a wave
+function bossDash(z) {
+  if (z.state === 'dying') return;
+  z.dashT = 0.85;
+  z.dashCdT = game.time + 4;
+  shakeAmp = Math.max(shakeAmp, 0.15);
+  play3d(z.pos.x, z.pos.z, () => tone(95, 0.45, 0.45, 'sawtooth', 38));
+}
+function updateBossState(z, pDist) {
+  if (z.state === 'dormant') {
+    // sleeps until the player draws near, then aggros
+    if (!player.dead && pDist < 18) wakeBoss(z);
+    return;
+  }
+  // damage-taken thresholds send bigger swarms boiling out of the bank
+  const taken = 1 - z.hp / z.maxHp;
+  if (z.wavesFired < 1 && taken >= 0.33) fireBossWave(z, 1);
+  else if (z.wavesFired < 2 && taken >= 0.50) fireBossWave(z, 2);
+  else if (z.wavesFired < 3 && taken >= 0.75) fireBossWave(z, 3);
+}
+// while any horned wave zombie stands, the boss takes no damage at all
+function bossShielded() {
+  return zombies.some(zz => zz.hornWave && zz.state !== 'dying');
+}
+function fireBossWave(z, n) {
+  z.wavesFired = n;
+  const count = 4 + n * 3;                     // wave size grows 7 -> 10 -> 13
+  for (let k = 0; k < count; k++) {
+    // the only zombies allowed to walk out of a building: they pour from the bank doors.
+    // half the wave are purple horned guards (his shield); the rest are plain green fodder
+    const [x, zz] = resolveCollision((Math.random() - 0.5) * 12, -36.6 + Math.random() * 1.8, 0.5);
+    const guard = k < Math.ceil(count / 2);
+    spawnZombie(x, zz, 1 + game.time / 240, { purple: guard, horns: guard });
+  }
+  bossDash(z);
+  toast(`WAVE ${n}: HORNED GUARDS POUR FROM THE BANK — THE BOSS IS IMMUNE UNTIL THEY FALL`, true);
+  play3d(z.pos.x, z.pos.z, () => SFX.groan());
+  shakeAmp = Math.max(shakeAmp, 0.2);
+}
+function onBossDefeated(z) {
+  bossState.defeated = true;
+  if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+  bossBarEl.classList.remove('show');
+  // cleanup phase: kills must reach the NEXT full hundred so it's always 100+ more —
+  // at 299 kills the target is 400, never a one-kill cheese to 300
+  game.cleanup = true;
+  game.clearTarget = Math.ceil((game.kills + 1 + 100) / 100) * 100;
+  toast(`THE TWO HORNED ONE FALLS! CLEAR OUT THE REMAINING ZOMBIES — ${game.clearTarget} KILLS SECURES THE BLOCK`, true);
+  for (let k = 0; k < 40; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xb03cff, 0x6fd8ff][k % 3], 1, 6, 1.2);
+  rumble(600, 1, 1);
+}
+// every straggler hunted down: roll the sky forward, reroll the weather, wake the next boss
+function completeCleanup() {
+  game.cleanup = false;
+  game.cycle++;
+  game.phase = (game.phase + 1) % PHASES.length;
+  game.weather = rollWeather();
+  applyEnvironment();
+  bossState.spawned = false; bossState.defeated = false; bossState.boss = null;
+  maybeSpawnBoss();
+  toast(`BLOCK SECURED! ${PHASES[game.phase].name} ROLLS IN — ${game.weather.toUpperCase()} SKIES. THE TWO HORNED ONE STIRS AGAIN BY THE BANK…`, true);
+  rumble(300, 0.5, 0.5);
+}
+function updateBossFx() {
+  if (bossState.beam) bossState.beam.material.opacity = 0.16 + Math.sin(performance.now() * 0.004) * 0.08;
+  const z = bossState.boss;
+  if (z && z.state !== 'dormant') bossHpEl.style.width = clamp(z.hp / z.maxHp, 0, 1) * 100 + '%';
 }
 
 function updateCrates(dt) {
@@ -2909,22 +3812,25 @@ function updatePickups(dt) {
 function updateCamera(dt) {
   const cy = player.camYaw, cp = player.camPitch;
   const aimT = player.aimT || 0;
-  // ---- third-person over-the-shoulder rig (shoulder offset fades out as we aim) ----
+  const fpv = player.fpvT || 0;   // 0 = third-person .. 1 = first-person
+  const wz = player.weapon;
+  // ---- third-person over-the-shoulder rig: aiming tightens the shoulder & pulls the camera in close ----
   const rightX = Math.cos(cy), rightZ = -Math.sin(cy);
-  const shoulder = 0.7 * (1 - aimT);
+  const shoulder = 0.7 * (1 - aimT * 0.35);
   const pivotX = player.pos.x + rightX * shoulder;
   const pivotY = player.pos.y + 1.5;
   const pivotZ = player.pos.z + rightZ * shoulder;
-  const tpX = pivotX + Math.sin(cy) * Math.cos(cp) * camDist;
-  const tpY = pivotY - Math.sin(cp) * camDist;
-  const tpZ = pivotZ + Math.cos(cy) * Math.cos(cp) * camDist;
+  const tpDist = camDist * (1 - aimT * 0.5);     // zoom closer over the shoulder while aiming
+  const tpX = pivotX + Math.sin(cy) * Math.cos(cp) * tpDist;
+  const tpY = pivotY - Math.sin(cp) * tpDist;
+  const tpZ = pivotZ + Math.cos(cy) * Math.cos(cp) * tpDist;
   // ---- first-person eye + forward look ----
   const fwdX = -Math.sin(cy) * Math.cos(cp), fwdY = Math.sin(cp), fwdZ = -Math.cos(cy) * Math.cos(cp);
   const eyeX = player.pos.x + fwdX * 0.16;
   const eyeY = player.pos.y + 1.52 + fwdY * 0.16;
   const eyeZ = player.pos.z + fwdZ * 0.16;
-  // ---- blend the two rigs by how far we're aiming ----
-  const tX = lerp(tpX, eyeX, aimT), tY = lerp(tpY, eyeY, aimT), tZ = lerp(tpZ, eyeZ, aimT);
+  // ---- blend the two rigs by the view toggle ----
+  const tX = lerp(tpX, eyeX, fpv), tY = lerp(tpY, eyeY, fpv), tZ = lerp(tpZ, eyeZ, fpv);
   const k = 1 - Math.exp(-14 * dt);
   camera.position.set(
     lerp(camera.position.x, tX, k),
@@ -2934,19 +3840,28 @@ function updateCamera(dt) {
   const minY = groundHeight(camera.position.x, camera.position.z) + 0.35;
   if (camera.position.y < minY) camera.position.y = minY;
   // look target eases from the blob itself (TP) to far ahead along the aim (FP)
-  const lx = lerp(pivotX, eyeX + fwdX * 8, aimT);
-  const ly = lerp(pivotY + 0.15, eyeY + fwdY * 8, aimT);
-  const lz = lerp(pivotZ, eyeZ + fwdZ * 8, aimT);
+  const lx = lerp(pivotX, eyeX + fwdX * 8, fpv);
+  const ly = lerp(pivotY + 0.15, eyeY + fwdY * 8, fpv);
+  const lz = lerp(pivotZ, eyeZ + fwdZ * 8, fpv);
   camera.lookAt(lx, ly, lz);
-  // gentle zoom while aiming down sights
-  const fov = lerp(70, 58, aimT);
+  // zoom focus: snipers punch in hard through the scope, guns focus modestly, melee barely
+  let zoomedFov;
+  if (wz.id === 'sniper') zoomedFov = 22;
+  else if (wz.melee) zoomedFov = 62;
+  else zoomedFov = fpv > 0.5 ? 45 : 52;
+  const fov = lerp(70, zoomedFov, aimT);
   if (Math.abs(fov - camera.fov) > 0.04) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  // sniper scope overlay only when actually aiming a sniper (hide the normal crosshair behind it)
+  const scoped = wz.id === 'sniper' && aimT > 0.55;
+  if (scopeEl) scopeEl.style.opacity = scoped ? (aimT - 0.55) / 0.45 : 0;
+  hud.crosshair.style.opacity = scoped ? '0' : '';
   if (shakeAmp > 0.001) {
     camera.position.x += (Math.random() - 0.5) * shakeAmp;
     camera.position.y += (Math.random() - 0.5) * shakeAmp;
     shakeAmp *= Math.exp(-10 * dt);
   }
-  moon.position.set(player.pos.x - 30, 50, player.pos.z - 20);
+  skyDome.position.copy(camera.position); // the sky rides along so it never has edges
+  moon.position.set(player.pos.x + moonOff.x, moonOff.y, player.pos.z + moonOff.z);
   moon.target.position.copy(player.pos);
   moon.target.updateMatrixWorld();
 }
@@ -2993,10 +3908,9 @@ function updateFx(dt) {
     else t.mesh.material.opacity = t.life / 0.07 * 0.85;
   }
   if (flashT > 0) { flashT -= dt; if (flashT <= 0) flash.visible = false; }
-  // crosshair follows the free-aim cursor on kbm, but centers on gamepad / when aiming down sights
-  const centered = input.device !== 'kbm' || player.aimT >= 0.5;
-  const cx = centered ? innerWidth / 2 : aimX;
-  const cyp = centered ? innerHeight / 2 : aimY;
+  // crosshair is always centred now (camera-relative aim in both third and first person)
+  const cx = innerWidth / 2;
+  const cyp = innerHeight / 2;
   hud.crosshair.style.left = cx + 'px';
   hud.crosshair.style.top = cyp + 'px';
   hud.hitmarker.style.left = cx + 'px';
@@ -3048,6 +3962,8 @@ function updateFx(dt) {
 refreshControlsBar();
 equipWeapon('fists');
 buildTown();
+game.weather = rollWeather();
+applyEnvironment(); // morning sky behind the menus too
 updateChunks(0, 0);
 player.pos.y = groundHeight(0, 0);
 playerBlob.root.position.copy(player.pos);
@@ -3064,6 +3980,58 @@ window.__dbg = {
   get playerBlob() { return playerBlob; },
   fire: () => fireWeapon(),
   hurt: (dmg, ax, az) => hurtPlayer(dmg, ax, az),
+  toggleFPV, bossState, spawnBoss, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
+  setSky: (phase, weather) => { game.phase = phase; if (weather) game.weather = weather; applyEnvironment(); },
+  recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateFx(dt); },
 };
+
+// ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------
+(function livingTab() {
+  const link = document.createElement('link');
+  link.rel = 'icon'; link.type = 'image/png';
+  document.head.appendChild(link);
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
+  const fx = cv.getContext('2d');
+  function roundRect(x, y, w, h, r) {
+    const [tl, tr, br, bl] = r;
+    fx.beginPath();
+    fx.moveTo(x + tl, y);
+    fx.lineTo(x + w - tr, y); fx.arcTo(x + w, y, x + w, y + tr, tr);
+    fx.lineTo(x + w, y + h - br); fx.arcTo(x + w, y + h, x + w - br, y + h, br);
+    fx.lineTo(x + bl, y + h); fx.arcTo(x, y + h, x, y + h - bl, bl);
+    fx.lineTo(x, y + tl); fx.arcTo(x, y, x + tl, y, tl);
+    fx.closePath();
+  }
+  function faceIcon(color) {
+    fx.clearRect(0, 0, 64, 64);
+    fx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+    roundRect(8, 6, 48, 52, [24, 24, 20, 20]); fx.fill();        // rounded blob head
+    fx.fillStyle = 'rgba(0,0,0,.14)';
+    roundRect(8, 42, 48, 16, [0, 0, 20, 20]); fx.fill();          // soft chin shading
+    for (const ex of [24, 40]) {                                  // two googly eyes
+      fx.fillStyle = '#fff';
+      fx.beginPath(); fx.ellipse(ex, 27, 7, 8, 0, 0, TAU); fx.fill();
+      fx.fillStyle = '#222';
+      fx.beginPath(); fx.arc(ex + 1.5, 29, 3.2, 0, TAU); fx.fill();
+    }
+    return cv.toDataURL('image/png');
+  }
+  let ci = 0, li = 0;
+  function tick() {
+    const c = COUSINS[ci];
+    if (li === 0) link.href = faceIcon(c.color);   // swap to this cousin's pic as their name begins
+    li++;
+    if (li >= c.name.length) {
+      document.title = c.name + ' .ᐟ';              // finished: name + flourish
+      ci = (ci + 1) % COUSINS.length; li = 0;       // then move on to the next cousin
+      setTimeout(tick, 900);
+    } else {
+      document.title = c.name.slice(0, li);         // one more letter (every .5s)
+      setTimeout(tick, 500);
+    }
+  }
+  tick();
+})();
+
 animate();

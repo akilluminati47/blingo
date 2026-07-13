@@ -45,8 +45,35 @@
 
   #bottomleft { position:absolute; left:calc(14px + env(safe-area-inset-left)); bottom:calc(14px + env(safe-area-inset-bottom)); color:#fff; }
   #healthwrap { width:210px; height:16px; background:rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.25); border-radius:9px; overflow:hidden; }
-  #healthbar { height:100%; width:100%; background:linear-gradient(90deg,#2ecc71,#27ae60); border-radius:8px; transition:width .15s; }
+  #healthbar { height:100%; width:100%; background:linear-gradient(90deg,#2ecc71,#27ae60); border-radius:8px; transition:width .15s, background .2s; }
+  #healthbar.low { animation:hpLow .7s ease-in-out infinite; }
+  @keyframes hpLow { 50% { box-shadow:inset 0 0 12px rgba(255,40,40,.9); } }
   #healthtxt { font-size:11px; opacity:.85; margin-top:3px; text-shadow:0 1px 2px #000; }
+  #healthtxt .pnum { opacity:.6; font-weight:400; }
+  /* recruited-cousin health bars, stacked above the player's own bar */
+  #squadbars { display:flex; flex-direction:column; gap:3px; margin-bottom:5px; }
+  .sqrow { display:flex; align-items:center; gap:6px; }
+  .sqrow .sqwrap { width:150px; height:9px; background:rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.22); border-radius:5px; overflow:hidden; }
+  .sqrow .sqbar { height:100%; width:100%; border-radius:4px; transition:width .18s, opacity .2s; }
+  .sqrow.down .sqbar { opacity:.25; }
+  .sqrow .sqname { font-size:10px; letter-spacing:.5px; text-shadow:0 1px 2px #000; min-width:52px; }
+  .sqrow.down .sqname { opacity:.5; text-decoration:line-through; }
+
+  /* sniper scope overlay */
+  #scope { position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .12s; z-index:11;
+    background:radial-gradient(circle at 50% 50%, transparent 0 27vh, rgba(0,0,0,.55) 27vh 30vh, #000 31vh 200vh); }
+  #scope::before, #scope::after { content:''; position:absolute; left:50%; top:50%; background:rgba(0,0,0,.9); }
+  #scope::before { width:2px; height:100vh; transform:translate(-50%,-50%); }
+  #scope::after { height:2px; width:100vw; transform:translate(-50%,-50%); }
+  #scopehair { position:absolute; left:50%; top:50%; width:6px; height:6px; border-radius:50%; background:#ff5252; transform:translate(-50%,-50%); box-shadow:0 0 6px #ff5252; }
+
+  /* boss health bar */
+  #bossbar { position:absolute; top:calc(64px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); width:min(70vw,560px);
+    display:none; flex-direction:column; align-items:center; gap:3px; }
+  #bossbar.show { display:flex; }
+  #bosslabel { font-size:13px; letter-spacing:4px; text-transform:uppercase; color:#e0b3ff; text-shadow:0 0 10px rgba(176,60,255,.7); }
+  #bosswrap { width:100%; height:15px; background:rgba(0,0,0,.6); border:1px solid rgba(210,140,255,.55); border-radius:8px; overflow:hidden; box-shadow:0 0 16px rgba(150,40,255,.4); }
+  #bosshp { height:100%; width:100%; background:linear-gradient(90deg,#c264ff,#7a1fd0); transition:width .2s; }
 
   #bottomright { position:absolute; right:calc(16px + env(safe-area-inset-right)); bottom:calc(14px + env(safe-area-inset-bottom)); text-align:right; color:#fff; }
   #weaponname { font-size:13px; letter-spacing:3px; text-transform:uppercase; opacity:.85; text-shadow:0 1px 3px #000; }
@@ -68,7 +95,8 @@
   #controls .row img { height:22px; width:auto; }
   #controls .devname { font-size:9px; letter-spacing:2px; text-transform:uppercase; opacity:.5; margin-bottom:2px; }
   #controls.collapsed .row, #controls.collapsed .devname { display:none; }
-  #controls.collapsed::after { content:'?'; color:#ddd; font-size:14px; font-weight:700; }
+  /* collapsed state shows a labelled chip (not a bare "?") so Tab-hiding reads as intended */
+  #controls.collapsed::after { content:'☰ CONTROLS'; color:#ccc; font-size:10px; font-weight:700; letter-spacing:2px; }
   #controls { pointer-events:auto; cursor:pointer; }
 
   /* ---------- touch controls (Roblox style) ---------- */
@@ -87,6 +115,8 @@
   #btnAim { width:60px; height:60px; right:calc(206px + env(safe-area-inset-right)); bottom:calc(150px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
   #btnAim.pressed { background:rgba(120,200,255,.5); }
   #btnCycle { width:58px; height:58px; right:calc(126px + env(safe-area-inset-right)); bottom:calc(268px + env(safe-area-inset-bottom)); font-size:10px; letter-spacing:.5px; text-align:center; line-height:1.05; }
+  #btnView { width:52px; height:52px; right:calc(212px + env(safe-area-inset-right)); bottom:calc(214px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnView.pressed { background:rgba(120,200,255,.5); }
   #btnReload { width:52px; height:52px; right:calc(34px + env(safe-area-inset-right)); bottom:calc(200px + env(safe-area-inset-bottom)); font-size:10px; }
   #btnInteract { width:60px; height:60px; right:calc(120px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
   #btnSprint { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
@@ -168,9 +198,15 @@
 <div id="hud">
   <div id="vignette"></div>
   <div id="bloodsplat"></div>
+  <div id="scope"><div id="scopehair"></div></div>
   <div id="crosshair"></div>
   <div id="hitmarker"></div>
   <div id="btnPauseHud" title="Pause">❚❚</div>
+
+  <div id="bossbar">
+    <div id="bosslabel">The Two Horned One</div>
+    <div id="bosswrap"><div id="bosshp"></div></div>
+  </div>
 
   <div id="topbar">
     <div class="stat" id="kills"><b>0</b><span>Kills</span></div>
@@ -184,6 +220,7 @@
   </div>
 
   <div id="bottomleft">
+    <div id="squadbars"></div>
     <div id="healthwrap"><div id="healthbar"></div></div>
     <div id="healthtxt">100 HP</div>
   </div>
@@ -203,6 +240,7 @@
   <div class="tbtn" id="btnJump">JUMP</div>
   <div class="tbtn" id="btnShoot"><img src="icons/touch/touch_tap.png" alt="shoot"></div>
   <div class="tbtn" id="btnAim">AIM</div>
+  <div class="tbtn" id="btnView">VIEW</div>
   <div class="tbtn" id="btnCycle">GUN</div>
   <div class="tbtn" id="btnReload">R</div>
   <div class="tbtn" id="btnInteract"><img src="icons/touch/touch_tap_hold.png" alt="interact"></div>
