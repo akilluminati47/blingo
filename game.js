@@ -580,25 +580,30 @@ let shakeAmp = 0;
 // melee: swung, infinite ammo. execute: any hit (limb, chest, head) detonates the target
 // in an instant kill. slot: which inventory group the weapon sorts into (melee first, then guns).
 const WEAPONS = {
-  fists:   { id: 'fists',   name: 'Fists',        melee: true, slot: 'melee', dmg: 42, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
-  pipe:    { id: 'pipe',    name: 'Lead Pipe',    melee: true, slot: 'melee', dmg: 80, range: 3.1, rpm: 150, mag: Infinity, kick: 0.03, rmb: [80, 0.5, 0.3], cqc: 0, dismember: 0.28, color: 0x8b9099 },
-  bat:     { id: 'bat',     name: 'Slugger Bat',  melee: true, slot: 'melee', dmg: 92, range: 3.4, rpm: 130, mag: Infinity, kick: 0.04, rmb: [90, 0.55, 0.35], cqc: 0, dismember: 0.34, color: 0x8a5a2a },
-  machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 112, range: 3.2, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
-  katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 130, range: 3.7, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
-  sledge:  { id: 'sledge',  name: 'Sledgehammer', melee: true, slot: 'melee', dmg: 190, range: 3.1, rpm: 72, mag: Infinity, kick: 0.09, rmb: [150, 0.95, 0.5], cqc: 0, dismember: 0.6, gib: true, color: 0x5c6068 },
-  axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 152, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
-  pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 34, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14 },
-  smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 15, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1 },
-  rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 32, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, skullcrack: true },
-  shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 12, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true },
-  magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 62, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true },
-  sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 145,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [180, 1, 0.8],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
+  fists:   { id: 'fists',   name: 'Fists',        melee: true, slot: 'melee', dmg: 6, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
+  pipe:    { id: 'pipe',    name: 'Lead Pipe',    melee: true, slot: 'melee', dmg: 12, range: 3.1, rpm: 150, mag: Infinity, kick: 0.03, rmb: [80, 0.5, 0.3], cqc: 0, dismember: 0.28, color: 0x8b9099 },
+  bat:     { id: 'bat',     name: 'Slugger Bat',  melee: true, slot: 'melee', dmg: 14, range: 3.4, rpm: 130, mag: Infinity, kick: 0.04, rmb: [90, 0.55, 0.35], cqc: 0, dismember: 0.34, color: 0x8a5a2a },
+  machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 17, range: 3.2, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
+  katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 20, range: 3.7, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
+  sledge:  { id: 'sledge',  name: 'Sledgehammer', melee: true, slot: 'melee', dmg: 29, range: 3.1, rpm: 72, mag: Infinity, kick: 0.09, rmb: [150, 0.95, 0.5], cqc: 0, dismember: 0.6, gib: true, color: 0x5c6068 },
+  axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 23, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
+  pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 5, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14, fRange: 14 },
+  smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 2, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1, fRange: 9 },
+  rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 5, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, skullcrack: true, fRange: 30 },
+  shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 2, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true, fRange: 7 },
+  magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18 },
+  sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 22,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [180, 1, 0.8],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
 };
 // inventory slot order: melee group first (fists then found melee by weight), then guns by tier
 const SLOT_ORDER = ['fists', 'pipe', 'bat', 'machete', 'katana', 'sledge', 'axe', 'pistol', 'smg', 'rifle', 'shotgun', 'magnum', 'sniper'];
 function slotRank(id) { const i = SLOT_ORDER.indexOf(id); return i < 0 ? 99 : i; }
 // point-blank damage multiplier for a hit at distance d
 function closeBonus(w, d) { return 1 + (w.cqc || 0) * clamp(1 - d / 8, 0, 1); }
+// bullets lose steam past a gun's comfy range (fRange, metres); snipers never drop off
+function rangeFactor(w, d) {
+  if (!w || w.melee || !w.fRange || d <= w.fRange) return 1;
+  return Math.max(0.4, 1 - (d - w.fRange) * 0.035);
+}
 const LOOT_TABLE = [
   ['pistol', 20], ['smg', 16], ['shotgun', 15], ['rifle', 13], ['magnum', 9], ['sniper', 5], ['ammo', 14], ['medkit', 8],
 ];
@@ -2069,6 +2074,7 @@ function hurtCompanion(c, dmg) {
   c.hp -= dmg;
   c.lastHurtT = game.time;
   flashBlob(c.blob);
+  spawnDamageNumber(c.pos.x, (c.y || 0) + 1.8, c.pos.z, dmg, '#' + c.data.color.toString(16).padStart(6, '0'));
   if (c.hp <= 0) {
     // downed, not dead — but they stay down until you walk over and pick them up
     c.hp = 0; c.downed = true;
@@ -2122,6 +2128,7 @@ function hurtPlayer(dmg, awayX, awayZ) {
   if (player.dead) return;
   player.hp -= dmg;
   player.lastHurtT = game.time;
+  spawnDamageNumber(player.pos.x, player.pos.y + 1.8, player.pos.z, dmg, player.colorHex);
   const d = Math.hypot(awayX, awayZ) || 1;
   player.stumbleX = awayX / d; player.stumbleZ = awayZ / d;
   player.stumbleT = 0.42;
@@ -2243,7 +2250,7 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   scene.add(blob.root);
   zombies.push({
     blob, pos: new THREE.Vector3(x, 0, z),
-    hp: (55 + Math.random() * 40) * scale * powerScale * (purple ? 1.2 : 1),
+    hp: (9 + Math.random() * 6) * scale * powerScale * (purple ? 1.2 : 1),
     speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1) * (purple ? 1.33 : 1) * (mode === 'runner' ? 1.5 : 1),
     yaw: Math.random() * TAU,
     state: mode === 'grave' ? 'emerge' : mode === 'sleeper' ? 'sleep' : 'chase',
@@ -2358,6 +2365,42 @@ function exposeBrain(z) {
   const b = z.blob;
   if (b.brainMesh) b.brainMesh.visible = true;
   if (b.skull) b.skull.visible = false;
+}
+
+// ---------- floating damage numbers ----------
+// one number per bullet/punch/bite, never stacked: it pops, drifts straight up and
+// fades. White for damage dealt; damage taken shows in the victim's hero colour.
+const dmgNums = [];
+const dmgLayer = document.getElementById('dmgnums');
+const _dnv = new THREE.Vector3();
+function spawnDamageNumber(x, y, z, val, color) {
+  if (dmgNums.length > 40) { const old = dmgNums.shift(); old.el.remove(); }
+  const el = document.createElement('div');
+  el.className = 'dmgnum';
+  el.textContent = Math.max(1, Math.round(val));
+  if (color) el.style.color = color;
+  dmgLayer.appendChild(el);
+  dmgNums.push({ el, x: x + (Math.random() - 0.5) * 0.4, y, z: z + (Math.random() - 0.5) * 0.4, t: 0, life: 0.85 });
+}
+function updateDamageNumbers(dt) {
+  for (let i = dmgNums.length - 1; i >= 0; i--) {
+    const n = dmgNums[i];
+    n.t += dt;
+    if (n.t >= n.life) { n.el.remove(); dmgNums.splice(i, 1); continue; }
+    _dnv.set(n.x, n.y + n.t * 1.9, n.z);       // rises straight up in world space
+    _dnv.project(camera);
+    if (_dnv.z > 1) { n.el.style.display = 'none'; continue; }
+    n.el.style.display = '';
+    const pop = 1 + 0.6 * Math.max(0, 1 - n.t / 0.14); // lands big, settles fast
+    n.el.style.left = ((_dnv.x * 0.5 + 0.5) * innerWidth) + 'px';
+    n.el.style.top = ((-_dnv.y * 0.5 + 0.5) * innerHeight) + 'px';
+    n.el.style.transform = `translate(-50%,-50%) scale(${pop.toFixed(3)})`;
+    n.el.style.opacity = (1 - Math.pow(n.t / n.life, 1.6)).toFixed(3);
+  }
+}
+function clearDamageNumbers() {
+  for (const n of dmgNums) n.el.remove();
+  dmgNums.length = 0;
 }
 // limb hitboxes in the zombie's facing frame: [kind, idx, localX, localY, localZ, radius].
 // a bullet that strikes one of these severs that exact limb (dismemberment local to the shot).
@@ -2510,6 +2553,7 @@ function resetGame() {
   bossBarEl.classList.remove('show');
   for (const p of pickups) scene.remove(p.mesh);
   pickups.length = 0;
+  clearDamageNumbers();
   for (const k in reserves) delete reserves[k];
   equipWeapon('fists');
   scatterCousins();
@@ -2731,8 +2775,9 @@ function fireWeapon() {
         const ang = Math.atan2(dx, dz);
         let diff = Math.abs(((ang - player.lastAimYaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
         if (diff < 1.15) {
-          // fists send them staggering back; armed melee shoves a bit too
-          damageZombie(z, w.dmg * player.dmgMult * closeBonus(w, d), dx / d, dz / d, w.id === 'fists' ? 11 : 3.5, { weapon: w, dist: d, isHead: false });
+          // fists land 6 with the left, 7 with the right; fists also send them staggering back
+          const base = w.id === 'fists' ? (player.meleeArm ? 7 : 6) : w.dmg;
+          damageZombie(z, base * player.dmgMult * closeBonus(w, d), dx / d, dz / d, w.id === 'fists' ? 11 : 3.5, { weapon: w, dist: d, isHead: false });
           rumble(...w.rmb);
           break;
         }
@@ -2802,7 +2847,7 @@ function fireWeapon() {
     if (best) {
       anyHit = true;
       const dHit = bestT;
-      const dmg = w.dmg * player.dmgMult * (best.isHead ? 2 : 1) * closeBonus(w, dHit);
+      const dmg = w.dmg * player.dmgMult * (best.isHead ? 2 : 1) * closeBonus(w, dHit) * rangeFactor(w, dHit);
       damageZombie(best.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: best.isHead, limb: best.limb });
     } else if (bestT < 80) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
@@ -2855,16 +2900,22 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   const limb = opts.limb || null;   // {kind, idx} when a specific arm/leg took the hit
 
   // sniper execute: any hit — limb, chest or head — is an instant, explosive kill (bosses are immune)
-  if (w && w.execute && !z.isBoss) { executeZombie(z, kx, kz, limb); return; }
+  if (w && w.execute && !z.isBoss) {
+    spawnDamageNumber(z.pos.x, b.root.position.y + 1.1 * z.scale, z.pos.z, dmg);
+    executeZombie(z, kx, kz, limb);
+    return;
+  }
 
   // heavy weapons, or any hit on an already-exposed brain, burst the head: instant kill, head vanishes
   if (isHead && !b.headGone && !z.isBoss && ((w && w.gib) || z.brainExposed)) {
+    spawnDamageNumber(z.pos.x, b.root.position.y + 1.45 * z.scale, z.pos.z, dmg);
     killZombie(z, kx, kz, true);
     return;
   }
 
   z.hp -= dmg;
   flashBlob(b);
+  spawnDamageNumber(z.pos.x, b.root.position.y + (isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
   z.pos.x += kx * knock * 0.12;
   z.pos.z += kz * knock * 0.12;
   spawnBlood(z.pos.x, b.root.position.y + (isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, isHead ? 1.3 : 1);
@@ -3057,6 +3108,7 @@ function animate() {
   }
   updateCamera(dt);
   updateFx(dt);
+  updateDamageNumbers(dt);
   updateRain(dt);
   renderer.render(scene, camera);
 }
@@ -3444,7 +3496,7 @@ function updateCompanions(dt) {
         } else {
           const shots = cw.id === 'shotgun' ? 3 : 1;
           for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(tgt.pos.x + (Math.random() - 0.5) * s, zy, tgt.pos.z + (Math.random() - 0.5) * s));
-          damageZombie(tgt, (cw.dmg || 20) * 1.25 * shots, kx, kz, 1, { weapon: cw, dist: tD, isHead: false });
+          damageZombie(tgt, (cw.dmg || 5) * 1.25 * shots * rangeFactor(cw, tD), kx, kz, 1, { weapon: cw, dist: tD, isHead: false });
         }
         if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
       }
@@ -3691,7 +3743,7 @@ function spawnBoss() {
   }
   blob.root.position.set(bx, groundHeight(bx, bz), bz);
   scene.add(blob.root);
-  const hp = Math.round(4200 * (1 + 0.4 * game.cycle)); // each cleared block wakes a tougher one
+  const hp = Math.round(650 * (1 + 0.4 * game.cycle)); // each cleared block wakes a tougher one
   const z = {
     blob, pos: new THREE.Vector3(bx, 0, bz), hp, maxHp: hp, speed: 1.15, yaw: 0, state: 'dormant',
     attackT: 0, deadT: 0, walkPhase: 0, groanT: 2, scale: 2.7,

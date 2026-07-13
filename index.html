@@ -122,6 +122,12 @@
   #btnInteract { width:60px; height:60px; right:calc(120px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
   #btnSprint { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
 
+  /* floating damage numbers: OpenDyslexic, pop then rise + fade (JS drives motion) */
+  #dmgnums { position:fixed; inset:0; pointer-events:none; z-index:9; overflow:hidden; }
+  .dmgnum { position:absolute; transform:translate(-50%,-50%); white-space:nowrap;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-size:15px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000, 0 0 7px rgba(0,0,0,.65); }
+
   /* full-screen fade used when a secured block hands the run back to the menu */
   #fade { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity .9s; z-index:40; }
   #fade.show { opacity:1; }
@@ -247,6 +253,7 @@
   <div id="prompt" class="hidden"><img id="promptimg" src="" alt=""><span id="prompttxt">Open Crate</span></div>
   <div id="toast"></div>
 </div>
+<div id="dmgnums"></div>
 <div id="fade"></div>
 
 <div id="touchlayer">
