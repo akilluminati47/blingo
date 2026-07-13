@@ -589,7 +589,7 @@ const WEAPONS = {
   axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 152, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
   pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 34, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14 },
   smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 15, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1 },
-  rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 32, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32 },
+  rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 32, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, skullcrack: true },
   shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 12, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true },
   magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 62, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true },
   sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 145,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [180, 1, 0.8],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
@@ -2882,8 +2882,9 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   }
 
   if (z.hp > 0) {
-    // weak or far headshot that doesn't kill cracks the skull open, revealing the weak spot
-    if (isHead && !z.brainExposed && !z.isBoss && w && (w.weak || dist > 26)) exposeBrain(z);
+    // weak, far or skullcrack (marksman rifle) headshot that doesn't kill cracks the
+    // skull open, revealing the weak spot: one tap opens it, the next tap pops it
+    if (isHead && !z.brainExposed && !z.isBoss && w && (w.weak || w.skullcrack || dist > 26)) exposeBrain(z);
     return;
   }
   killZombie(z, kx, kz, isHead && (!w || w.gib || z.brainExposed));
