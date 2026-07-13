@@ -1953,6 +1953,50 @@ const COUSINS = [
 ];
 const CLAN_LORE = 'The immune cousins of Clan Blob are clearing the wasteland so the rest of blob-kind can move back home.';
 let selectedCousin = 'blingo';
+
+// ---------- prestige (persisted across runs; shown as badges on the menu) ----------
+const prestige = { blocks: {}, bestTime: 0, bestHero: '' };
+try {
+  const saved = JSON.parse(localStorage.getItem('blingo-prestige') || '{}');
+  if (saved && typeof saved === 'object') {
+    if (saved.blocks && typeof saved.blocks === 'object')
+      for (const k in saved.blocks) if (Number.isInteger(saved.blocks[k]) && saved.blocks[k] > 0) prestige.blocks[k] = saved.blocks[k];
+    if (typeof saved.bestTime === 'number' && saved.bestTime > 0) prestige.bestTime = saved.bestTime;
+    if (typeof saved.bestHero === 'string') prestige.bestHero = saved.bestHero;
+  }
+} catch (e) {}
+function recordPrestige() {
+  prestige.blocks[selectedCousin] = (prestige.blocks[selectedCousin] | 0) + 1;
+  if (!prestige.bestTime || game.time < prestige.bestTime) { prestige.bestTime = game.time; prestige.bestHero = selectedCousin; }
+  try { localStorage.setItem('blingo-prestige', JSON.stringify(prestige)); } catch (e) {}
+  renderPrestige();
+}
+function fmtTime(t) { return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); }
+// badge strip: total blocks, per-hero counts in that hero's colour, and the record
+// time in the colour of the hero who set it
+function renderPrestige() {
+  const el = document.getElementById('prestige');
+  el.innerHTML = '';
+  const mkBadge = (txt, hex) => {
+    const b = document.createElement('div');
+    b.className = 'badge';
+    if (hex) b.style.setProperty('--bc', hex);
+    b.textContent = txt;
+    el.appendChild(b);
+  };
+  let total = 0;
+  for (const c of COUSINS) total += prestige.blocks[c.id] | 0;
+  if (total > 0) mkBadge(`BLOCKS SECURED x${total}`);
+  for (const c of COUSINS) {
+    const n = prestige.blocks[c.id] | 0;
+    if (n) mkBadge(`${c.name.toUpperCase()} x${n}`, '#' + c.color.toString(16).padStart(6, '0'));
+  }
+  if (prestige.bestTime > 0) {
+    const hero = COUSINS.find(c => c.id === prestige.bestHero);
+    mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#' + (hero ? hero.color : 0xffd24a).toString(16).padStart(6, '0'));
+  }
+  el.style.display = el.children.length ? 'flex' : 'none';
+}
 const companions = []; // {data, blob, beacon, pos, recruited, shootCd, walkPhase, yaw}
 
 function scatterCousins() {
@@ -2036,7 +2080,7 @@ function hurtCompanion(c, dmg) {
     );
     c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 17, c.pos.z);
     scene.add(c.beacon);
-    toast(`${c.data.name.toUpperCase()} IS DOWN — PICK THEM UP!`);
+    toast(`${c.data.name.toUpperCase()} IS DOWN .ᐟ`);
   }
 }
 // haul a downed cousin back onto their feet at half health
@@ -2430,7 +2474,7 @@ let hitmarkT = 0;
 
 // ---------- game state ----------
 const game = { state: 'menu', time: 0, kills: 0, cratesOpened: 0, spawnT: 2, lastShot: new THREE.Vector3(), lastShotT: -99,
-  phase: 0, weather: 'sunny', cycle: 0, cleanup: false, clearTarget: 0 };
+  phase: 0, weather: 'sunny', cycle: 0, cleanup: false, clearTarget: 0, celebrateT: 0 };
 
 function resetGame() {
   applyCousin(selectedCousin);
@@ -2441,13 +2485,17 @@ function resetGame() {
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
   player.slideT = 0; player.hopT = 0;
-  player.owned = ['fists']; player.aiming = false; player.aimT = 0;
+  // the hero starts with bare fists plus their own signature melee; recruits keep theirs
+  player.owned = ['fists', COUSINS.find(c => c.id === selectedCousin).melee];
+  player.owned.sort((a, b) => slotRank(a) - slotRank(b));
+  player.aiming = false; player.aimT = 0;
   player.fpv = false; player.fpvT = 0;
   input.aim = false; input.aimPad = false; input.aimTouch = false;
   const vb = document.getElementById('btnView'); if (vb) vb.classList.remove('pressed');
   game.time = 0; game.kills = 0; game.cratesOpened = 0; game.spawnT = 2; game.lastShotT = -99;
   // every run starts on a fresh morning; the sky rolls forward as blocks are cleared
   game.phase = 0; game.cycle = 0; game.weather = rollWeather(); game.cleanup = false; game.clearTarget = 0;
+  game.celebrateT = 0;
   applyEnvironment();
   // clear ground gore from the last run
   for (const d of decals) { scene.remove(d); d.material.dispose(); }
@@ -2537,6 +2585,7 @@ function quitToMenu() {
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   stopTheme();
+  renderPrestige();
 }
 function togglePause() {
   if (game.state === 'playing') pauseGame();
@@ -2951,16 +3000,7 @@ function recruitCousin(c) {
   c.beacon = null;
   SFX.recruit();
   rumble(160, 0.5, 0.7);
-  // every cousin hands you their signature melee weapon (into the melee slot), no forced swap
-  const mid = c.data.melee;
-  let mtxt = '';
-  if (mid && !player.owned.includes(mid)) {
-    player.owned.push(mid);
-    player.owned.sort((a, b) => slotRank(a) - slotRank(b));
-    updateWeaponBtn();
-    mtxt = ` +${WEAPONS[mid].name.toUpperCase()}`;
-  }
-  toast(`${c.data.name.toUpperCase()} JOINED!${mtxt} — ${c.data.lore}`, true);
+  toast(`${c.data.name.toUpperCase()} JOINED .ᐟ`);
   updateCousinHUD();
   rebuildSquadBars();
   maybeSpawnBoss();
@@ -3010,6 +3050,7 @@ function animate() {
     updatePickups(dt);
     updateSpawner(dt);
     updateBossFx();
+    updateCelebration(dt);
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
   }
@@ -3595,7 +3636,7 @@ function updateZombies(dt) {
 }
 
 function updateSpawner(dt) {
-  if (game.time < 15 || settings.zombieSpawn <= 0) return;
+  if (game.time < 15 || settings.zombieSpawn <= 0 || game.celebrateT > 0) return;
   game.spawnT -= dt;
   // cleanup phase after the boss falls: never spawn past the clear target, so the last
   // stragglers can be hunted down to exactly the next hundred
@@ -3667,7 +3708,7 @@ function spawnBoss() {
   scene.add(beam);
   bossState.beam = beam;
   bossBarEl.classList.remove('show');         // the bar appears once it aggros
-  toast('THE CLAN IS WHOLE — THE TWO HORNED ONE STIRS BY THE BANK', true);
+  toast('CLAN COMPLETE . . SOMETHING STIRS BY THE BANK .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
 }
 function wakeBoss(z) {
@@ -3714,7 +3755,7 @@ function fireBossWave(z, n) {
     spawnZombie(x, zz, 1 + game.time / 240, { purple: guard, horns: guard });
   }
   bossDash(z);
-  toast(`WAVE ${n}: HORNED GUARDS POUR FROM THE BANK — THE BOSS IS IMMUNE UNTIL THEY FALL`, true);
+  toast(`WAVE ${n}: KILL THE HORNED GUARDS TO BREAK HIS SHIELD`, true);
   play3d(z.pos.x, z.pos.z, () => SFX.groan());
   shakeAmp = Math.max(shakeAmp, 0.2);
 }
@@ -3726,21 +3767,39 @@ function onBossDefeated(z) {
   // at 299 kills the target is 400, never a one-kill cheese to 300
   game.cleanup = true;
   game.clearTarget = Math.ceil((game.kills + 1 + 100) / 100) * 100;
-  toast(`THE TWO HORNED ONE FALLS! CLEAR OUT THE REMAINING ZOMBIES — ${game.clearTarget} KILLS SECURES THE BLOCK`, true);
+  toast(`BOSS DOWN .ᐟ REACH ${game.clearTarget} KILLS TO SECURE THE BLOCK .ᐟ`, true);
   for (let k = 0; k < 40; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xb03cff, 0x6fd8ff][k % 3], 1, 6, 1.2);
   rumble(600, 1, 1);
 }
-// every straggler hunted down: roll the sky forward, reroll the weather, wake the next boss
+// every straggler hunted down: the block is secured for good. Record it on the
+// prestige page, throw a street party, then fade back to the menu for a new run.
 function completeCleanup() {
   game.cleanup = false;
-  game.cycle++;
-  game.phase = (game.phase + 1) % PHASES.length;
-  game.weather = rollWeather();
-  applyEnvironment();
-  bossState.spawned = false; bossState.defeated = false; bossState.boss = null;
-  maybeSpawnBoss();
-  toast(`BLOCK SECURED! ${PHASES[game.phase].name} ROLLS IN — ${game.weather.toUpperCase()} SKIES. THE TWO HORNED ONE STIRS AGAIN BY THE BANK…`, true);
-  rumble(300, 0.5, 0.5);
+  game.celebrateT = 5.5;
+  recordPrestige();
+  toast('BLOCK SECURED .ᐟ', true);
+  rumble(600, 1, 1);
+}
+const fadeEl = document.getElementById('fade');
+// the street party: fireworks + bouncing cousins, then fade out to the prestige menu
+function updateCelebration(dt) {
+  if (game.celebrateT <= 0) return;
+  game.celebrateT -= dt;
+  if (Math.random() < dt * 7) {
+    const ang = Math.random() * TAU, r = 2.5 + Math.random() * 6;
+    const x = player.pos.x + Math.sin(ang) * r, z = player.pos.z + Math.cos(ang) * r;
+    const cols = [0xffd24a, 0xff5b5b, 0x6fd8ff, 0x9bff6a, 0xb06fff];
+    spawnParticles(x, player.pos.y + 2.5 + Math.random() * 3.5, z, cols[(Math.random() * cols.length) | 0], 12, 5.5, 1.1);
+    play3d(x, z, () => tone(500 + Math.random() * 900, 0.25, 0.18, 'square', 180));
+  }
+  for (const c of companions) {
+    if (c.recruited && !c.downed && c.grounded && Math.random() < dt * 2.5) { c.vy = 5.5 + Math.random() * 3; c.grounded = false; }
+  }
+  if (game.celebrateT <= 1) fadeEl.classList.add('show');
+  if (game.celebrateT <= 0) {
+    quitToMenu();
+    setTimeout(() => fadeEl.classList.remove('show'), 300);
+  }
 }
 function updateBossFx() {
   if (bossState.beam) bossState.beam.material.opacity = 0.16 + Math.sin(performance.now() * 0.004) * 0.08;
@@ -3960,6 +4019,7 @@ function updateFx(dt) {
 
 // ---------- boot ----------
 refreshControlsBar();
+renderPrestige();
 equipWeapon('fists');
 buildTown();
 game.weather = rollWeather();
@@ -3983,7 +4043,7 @@ window.__dbg = {
   toggleFPV, bossState, spawnBoss, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
   setSky: (phase, weather) => { game.phase = phase; if (weather) game.weather = weather; applyEnvironment(); },
   recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),
-  step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateFx(dt); },
+  step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateCelebration(dt); updateFx(dt); },
 };
 
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------

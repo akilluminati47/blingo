@@ -121,6 +121,16 @@
   #btnInteract { width:60px; height:60px; right:calc(120px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
   #btnSprint { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
 
+  /* full-screen fade used when a secured block hands the run back to the menu */
+  #fade { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity .9s; z-index:40; }
+  #fade.show { opacity:1; }
+
+  /* prestige badges on the menu: hero-coloured chips for secured blocks + record time */
+  #prestige { display:none; gap:8px; margin:12px 0 2px; flex-wrap:wrap; justify-content:center; }
+  #prestige .badge { --bc:#ffd24a; border:2px solid var(--bc); color:var(--bc); border-radius:20px; padding:5px 14px;
+    font-size:11px; font-weight:700; letter-spacing:1.5px; background:rgba(0,0,0,.35);
+    box-shadow:0 0 12px -3px var(--bc); text-shadow:0 0 9px var(--bc); }
+
   /* ---------- start / death screens ---------- */
   .screen { position:fixed; inset:0; z-index:30; display:flex; flex-direction:column; align-items:center; justify-content:center;
     background:rgba(5,7,10,.88); color:#fff; text-align:center; padding:16px; overflow-y:auto; }
@@ -232,6 +242,7 @@
   <div id="prompt" class="hidden"><img id="promptimg" src="" alt=""><span id="prompttxt">Open Crate</span></div>
   <div id="toast"></div>
 </div>
+<div id="fade"></div>
 
 <div id="touchlayer">
   <div id="joyBase"><div id="joyKnob"></div></div>
@@ -250,6 +261,7 @@
   <p class="lore">When the horde came, every blob turned… except six cousins. The bites never took.</p>
   <p class="lore">Now the Immune Cousins of Clan Blob are clearing the wasteland, block by block, so the rest of blob-kind can finally move back home.</p>
   <p>Pick your cousin. The other five are out there somewhere, find them, recruit them, fight together. Loot the glowing crates for guns &amp; ammo.</p>
+  <div id="prestige"></div>
   <div id="cousincards"></div>
   <button class="bigbtn" id="playbtn">PLAY</button>
 </div>
