@@ -168,14 +168,12 @@
   /* pause panel: hero-coloured badge with snappy 5-notch setting bars */
   #pausepanel { background:rgba(10,12,18,.94); border:2px solid var(--hero); border-radius:18px; padding:20px 24px 0;
     width:min(92vw,660px); box-shadow:0 0 46px rgba(0,0,0,.65); }
-  #pausepanel h1 { color:var(--hero); font-size:34px; letter-spacing:6px; margin-bottom:2px; text-shadow:none; }
-  .phint { font-size:10px; opacity:.55; margin:0 0 10px; }
+  #pausepanel h1 { color:var(--hero); font-size:34px; letter-spacing:6px; margin-bottom:12px; text-shadow:none; }
   #settingsGrid { display:grid; grid-template-columns:1fr 1fr; grid-auto-flow:column; grid-template-rows:repeat(5,auto);
     gap:2px 28px; text-align:left; }
   .srow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 9px; border-radius:9px;
     color:#ddd; font-size:12.5px; border:1px solid transparent; }
   .srow.focus { background:rgba(255,255,255,.07); border-color:var(--hero); }
-  .srow.locked { opacity:.35; pointer-events:none; }
   .srow[data-key="extraGore"] span { color:#ff9d5c; }
   .notches { display:flex; gap:5px; pointer-events:auto; }
   .pip { width:20px; height:11px; border-radius:3px; background:rgba(255,255,255,.13); cursor:pointer;
@@ -266,7 +264,6 @@
 <div class="screen hidden" id="pausescreen">
   <div id="pausepanel">
     <h1>PAUSED</h1>
-    <p class="phint">Click pips — or on a pad: ↑↓ pick a row, ←→ set notches, Ⓐ confirm. Hero music plays here; max Music 5/5 to unlock it in gameplay. Max Gore to unlock Extra Gore.</p>
     <div id="settingsGrid"></div>
     <div id="pausebtns">
       <button id="resumebtn">RESUME</button>

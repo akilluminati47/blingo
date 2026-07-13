@@ -2571,7 +2571,8 @@ function saveNotches() { try { localStorage.setItem('blingo-notches', JSON.strin
 function notchClickSfx(level) { initAudio(); tone(280 + level * 90, 0.05, 0.22, 'square'); }
 function setNotch(key, n, silent) {
   n = clamp(Math.round(n), 0, 5);
-  if (key === 'extraGore' && notches.gore < 5) n = 0; // locked until gore is maxed
+  // "extra" means more than full: dialing up Extra Gore quietly fills the Gore bar first
+  if (key === 'extraGore' && n > 0 && notches.gore < 5) setNotch('gore', 5, true);
   if (key === 'gore' && n < 5 && notches.extraGore > 0) { notches.extraGore = 0; refreshRow('extraGore'); }
   if (n === notches[key]) return;
   notches[key] = n;
@@ -2606,7 +2607,6 @@ for (const [key, label] of SETTING_DEFS) {
 function refreshRow(key) {
   const row = rowEls[key];
   const n = notches[key];
-  row.classList.toggle('locked', key === 'extraGore' && notches.gore < 5);
   row.querySelectorAll('.pip').forEach((p, i) => {
     const on = i < n;
     if (on && !p.classList.contains('on')) { p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop'); }
