@@ -79,6 +79,9 @@
   .tbtn img { width:55%; height:55%; opacity:.9; pointer-events:none; }
   #btnJump { width:86px; height:86px; right:calc(26px + env(safe-area-inset-right)); bottom:calc(96px + env(safe-area-inset-bottom)); font-size:11px; }
   #btnShoot { width:74px; height:74px; right:calc(126px + env(safe-area-inset-right)); bottom:calc(180px + env(safe-area-inset-bottom)); background:rgba(255,80,80,.22); border-color:rgba(255,120,120,.6); }
+  #btnAim { width:60px; height:60px; right:calc(206px + env(safe-area-inset-right)); bottom:calc(150px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
+  #btnAim.pressed { background:rgba(120,200,255,.5); }
+  #btnCycle { width:58px; height:58px; right:calc(126px + env(safe-area-inset-right)); bottom:calc(268px + env(safe-area-inset-bottom)); font-size:10px; letter-spacing:.5px; text-align:center; line-height:1.05; }
   #btnReload { width:52px; height:52px; right:calc(34px + env(safe-area-inset-right)); bottom:calc(200px + env(safe-area-inset-bottom)); font-size:10px; }
   #btnInteract { width:60px; height:60px; right:calc(120px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
   #btnSprint { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
@@ -185,6 +188,8 @@
   <div id="joyBase"><div id="joyKnob"></div></div>
   <div class="tbtn" id="btnJump">JUMP</div>
   <div class="tbtn" id="btnShoot"><img src="icons/touch/touch_tap.png" alt="shoot"></div>
+  <div class="tbtn" id="btnAim">AIM</div>
+  <div class="tbtn" id="btnCycle">GUN</div>
   <div class="tbtn" id="btnReload">R</div>
   <div class="tbtn" id="btnInteract"><img src="icons/touch/touch_tap_hold.png" alt="interact"></div>
   <div class="tbtn" id="btnSprint">RUN</div>

@@ -274,6 +274,17 @@ const SFX = {
   hurt() { tone(160, 0.25, 0.4, 'sawtooth', 60); },
   groan() { tone(70 + Math.random() * 50, 0.5, 0.12, 'sawtooth', 45); },
   reload() { tone(700, 0.05, 0.2, 'square'); setTimeout(() => tone(900, 0.05, 0.2, 'square'), 130); },
+  // distinct mechanical "chk-chk" per gun when you cycle to it
+  swap(w) {
+    const id = w && w.id;
+    if (id === 'shotgun') { noiseBurst(0.05, 260, 0.4); tone(150, 0.07, 0.3, 'square', 90); setTimeout(() => { noiseBurst(0.05, 220, 0.45); tone(110, 0.08, 0.32, 'square', 70); }, 120); }
+    else if (id === 'sniper') { tone(320, 0.05, 0.28, 'square', 180); setTimeout(() => tone(240, 0.09, 0.3, 'sawtooth', 120), 150); }
+    else if (id === 'magnum') { tone(520, 0.04, 0.28, 'triangle', 700); setTimeout(() => { noiseBurst(0.04, 500, 0.3); tone(180, 0.06, 0.3, 'square', 110); }, 110); }
+    else if (id === 'rifle') { noiseBurst(0.04, 900, 0.3); tone(400, 0.05, 0.28, 'square', 260); setTimeout(() => tone(300, 0.06, 0.3, 'square', 200), 90); }
+    else if (id === 'smg') { tone(680, 0.03, 0.26, 'square', 520); setTimeout(() => tone(560, 0.03, 0.26, 'square', 440), 60); setTimeout(() => tone(760, 0.03, 0.24, 'square', 600), 120); }
+    else if (id === 'pistol') { tone(760, 0.04, 0.28, 'square', 560); setTimeout(() => tone(600, 0.05, 0.3, 'square', 440), 80); }
+    else { noiseBurst(0.05, 320, 0.25); } // fists: soft whoosh
+  },
   crate() { tone(300, 0.1, 0.3, 'triangle', 500); setTimeout(() => tone(600, 0.15, 0.3, 'triangle', 900), 100); },
   pickup() { tone(500, 0.08, 0.25, 'sine', 800); },
   jump() { tone(250, 0.12, 0.15, 'sine', 420); },
@@ -358,14 +369,15 @@ let shakeAmp = 0;
 // cqc = extra close-range damage (fades to 0 by cqcRange metres)
 // weak = weapon too puny to reliably pop a healthy head (far/weak headshots expose brain instead)
 // dismember = base chance to sever a limb on a hit; gib = head bursts on any headshot (insta-kill)
+// mags are arcade-sized (generous). semi-auto guns fire as fast as you can pull the trigger.
 const WEAPONS = {
-  fists:   { id: 'fists',   name: 'Fists',        melee: true, dmg: 42, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [60, 0.4, 0.2], cqc: 0, weak: true, dismember: 0.08 },
-  pistol:  { id: 'pistol',  name: 'Pistol',       dmg: 34, mag: 12, rpm: 320, auto: false, spread: 0.012, ammo: 48,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.06 },
-  smg:     { id: 'smg',     name: 'SMG',          dmg: 15, mag: 32, rpm: 800, auto: true,  spread: 0.038, ammo: 96,  color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.05 },
-  shotgun: { id: 'shotgun', name: 'Shotgun',      dmg: 11, mag: 6,  rpm: 80,  auto: false, spread: 0.07,  ammo: 24, pellets: 8, color: 0x6e3d1f, kick: 0.07, rmb: [140, 0.9, 0.6], cqc: 1.9, dismember: 0.55, gib: true },
-  rifle:   { id: 'rifle',   name: 'Assault Rifle',dmg: 28, mag: 30, rpm: 560, auto: true,  spread: 0.022, ammo: 90,  color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.22 },
-  magnum:  { id: 'magnum',  name: 'Magnum',       dmg: 62, mag: 6,  rpm: 160, auto: false, spread: 0.008, ammo: 30,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true },
-  sniper:  { id: 'sniper',  name: 'Sniper Rifle', dmg: 145,mag: 5,  rpm: 45,  auto: false, spread: 0.002, ammo: 20,  color: 0x2f4a35, kick: 0.09, rmb: [160, 1, 0.7],  cqc: 0.2,  dismember: 0.9, gib: true },
+  fists:   { id: 'fists',   name: 'Fists',        melee: true, dmg: 42, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [60, 0.4, 0.2], cqc: 0, weak: true, dismember: 0.12 },
+  pistol:  { id: 'pistol',  name: 'Pistol',       dmg: 34, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14 },
+  smg:     { id: 'smg',     name: 'SMG',          dmg: 15, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1 },
+  shotgun: { id: 'shotgun', name: 'Shotgun',      dmg: 12, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true },
+  rifle:   { id: 'rifle',   name: 'Assault Rifle',dmg: 28, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32 },
+  magnum:  { id: 'magnum',  name: 'Magnum',       dmg: 62, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true },
+  sniper:  { id: 'sniper',  name: 'Sniper Rifle', dmg: 145,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.09, rmb: [160, 1, 0.7],  cqc: 0.2,  dismember: 0.9, gib: true },
 };
 // point-blank damage multiplier for a hit at distance d
 function closeBonus(w, d) { return 1 + (w.cqc || 0) * clamp(1 - d / 8, 0, 1); }
@@ -425,34 +437,44 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, belly = true, 
     wob.add(bellyM);
   }
 
-  // pre-wounded gore: dark blood patches on the torso
+  // pre-wounded gore: blood stains painted flat onto the torso (not floating blobs)
+  const stainCount = { n: 0 };
   if (wounded) {
-    for (let i = 0; i < 3; i++) {
-      const patch = ball(0.09 + Math.random() * 0.08, 0x5a0d0d);
-      patch.scale.set(1, 0.55, 0.4);
-      const a = (Math.random() - 0.5) * 1.6, yy = 0.45 + Math.random() * 0.55;
-      patch.position.set(Math.sin(a) * 0.32, yy, 0.27 + Math.random() * 0.05);
-      wob.add(patch);
-    }
+    for (let i = 0; i < 4; i++) stainBody(wob, stainCount, (Math.random() - 0.5) * 2.6, -0.2 + Math.random() * 0.9, 1.1);
   }
 
   const head = new THREE.Group();
   head.position.y = 1.28;
   wob.add(head);
+  // intact skull (full head)
   const skull = ball(0.42, color);
   skull.scale.set(0.42, 0.4, 0.4);
   head.add(skull);
 
-  // exposed brain cap (hidden until brain shows / gets blown open)
+  // exposed-brain variant: skull cap sliced off (craniotomy) with pink brain welling up.
+  // built on every character so a runtime headshot can crack it open; hidden until then.
   const brainMesh = new THREE.Group();
+  // open skull "bowl": the head minus its top cap, so you look down into the opening
+  const bowl = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 16, 12, 0, TAU, 0.92, Math.PI - 0.92),
+    mat(color, { side: THREE.DoubleSide })
+  );
+  bowl.scale.set(0.42, 0.4, 0.4);
+  brainMesh.add(bowl);
+  // pink brain filling the opening, with lobed bumps poking out of the sliced cap
+  const brainDome = ball(0.31, 0xd77a8e);
+  brainDome.scale.set(0.31, 0.24, 0.31);
+  brainDome.position.y = 0.15;
+  brainMesh.add(brainDome);
   for (let i = 0; i < 5; i++) {
-    const lobe = ball(0.09 + Math.random() * 0.05, 0xdb8b9b);
-    const a = Math.random() * TAU, rr = Math.random() * 0.13;
-    lobe.position.set(Math.cos(a) * rr, 0.14 + Math.random() * 0.05, Math.sin(a) * rr - 0.02);
-    head.add(lobe);
+    const lobe = ball(0.07 + Math.random() * 0.045, 0xc76b80);
+    const a = Math.random() * TAU, rr = 0.05 + Math.random() * 0.11;
+    lobe.position.set(Math.cos(a) * rr, 0.19 + Math.random() * 0.05, Math.sin(a) * rr);
     brainMesh.add(lobe);
   }
+  head.add(brainMesh);
   brainMesh.visible = brain;
+  skull.visible = !brain; // showing the brain means the intact skull cap is gone
 
   const eyes = [];
   for (const s of [-1, 1]) {
@@ -512,14 +534,22 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, belly = true, 
   gunSocket.position.set(0, -0.58, -0.05);
   arms[1].add(gunSocket);
 
-  root.add(makeShadow(0.55 * scale));
   root.scale.setScalar(scale);
+  // shadow lives in world space (not parented to the body) so it stays flat on the
+  // ground when the character jumps and stays under their center when they topple over.
+  const shadow = makeShadow(0.55 * scale);
+  scene.add(shadow);
 
   // collect skin meshes for red damage flash
   const skinList = [];
   root.traverse(o => { if (o.isMesh && o.material !== shadowMat) skinList.push({ mesh: o, mat: o.material }); });
-  return { root, wob, head, arms, legs, gunSocket, body, skull, brainMesh, eyes, skinList, flashT: 0,
+  return { root, wob, head, arms, legs, gunSocket, body, skull, brainMesh, eyes, shadow, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
+}
+// keep a blob's ground shadow pinned flat under its centre, regardless of jump height / death tilt
+function placeShadow(blob, x, z) {
+  if (!blob.shadow) return;
+  blob.shadow.position.set(x, groundHeight(x, z) + 0.02, z);
 }
 const FLASH_RED = new THREE.MeshBasicMaterial({ color: 0xff2525 });
 function flashBlob(blob) {
@@ -1150,7 +1180,7 @@ function buildTown() {
 const input = {
   moveX: 0, moveY: 0, lookDX: 0, lookDY: 0,
   jump: false, sprint: false, shoot: false, shootPressed: false,
-  interact: false, reload: false,
+  interact: false, reload: false, aim: false, aimPad: false, aimTouch: false,
   device: 'kbm', gamepadKind: 'xbox',
   sprintGamepad: false, shootGamepad: false,
 };
@@ -1163,6 +1193,7 @@ addEventListener('keydown', e => {
   input.device = 'kbm';
   if (e.code === 'KeyE') input.interact = true;
   if (e.code === 'KeyR') input.reload = true;
+  if ((e.code === 'KeyQ' || e.code === 'KeyF') && !e.repeat) cycleWeapon(1);
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
   if (e.code === 'Tab') { e.preventDefault(); toggleControlsBar(); }
   refreshControlsBar();
@@ -1181,11 +1212,12 @@ addEventListener('mousemove', e => {
 canvas.addEventListener('mousedown', e => {
   initAudio();
   if (e.button === 0 && game.state === 'playing') { input.shoot = true; input.shootPressed = true; }
-  if (e.button === 2) { rmbDrag = true; lastMX = e.clientX; lastMY = e.clientY; }
+  // right mouse: aim down sights (ease to first person). drag still fine-tunes the look.
+  if (e.button === 2) { rmbDrag = true; input.aim = true; lastMX = e.clientX; lastMY = e.clientY; }
 });
 addEventListener('mouseup', e => {
   if (e.button === 0) input.shoot = false;
-  if (e.button === 2) rmbDrag = false;
+  if (e.button === 2) { rmbDrag = false; input.aim = false; }
 });
 addEventListener('wheel', e => {
   if (game.state === 'playing') camDist = clamp(camDist + e.deltaY * 0.004, 2.6, 9.5);
@@ -1215,6 +1247,8 @@ function bindBtn(id, down, up) {
 }
 bindBtn('btnJump', () => { input.jump = true; });
 bindBtn('btnShoot', () => { input.shoot = true; input.shootPressed = true; }, () => { input.shoot = false; });
+bindBtn('btnAim', () => { input.aimTouch = true; }, () => { input.aimTouch = false; });
+bindBtn('btnCycle', () => { cycleWeapon(1); });
 bindBtn('btnReload', () => { input.reload = true; });
 bindBtn('btnInteract', () => { input.interact = true; });
 bindBtn('btnSprint', () => {
@@ -1300,11 +1334,14 @@ function pollGamepad(dt) {
   if (justPressed(0)) input.jump = true;
   if (justPressed(1)) input.reload = true;
   if (justPressed(2)) input.interact = true;
+  if (justPressed(3)) cycleWeapon(1);              // Y / Triangle: cycle weapon
   if (justPressed(10)) input.sprintGamepad = !input.sprintGamepad;
   const rt = gp.buttons[7] && (gp.buttons[7].pressed || gp.buttons[7].value > 0.4);
   if (rt && !gpPrev.rt) input.shootPressed = true;
   gpPrev.rt = rt;
   input.shootGamepad = rt;
+  // left trigger: aim down sights (ease to first person)
+  input.aimPad = !!(gp.buttons[6] && (gp.buttons[6].pressed || gp.buttons[6].value > 0.35));
   if (justPressed(9)) togglePause();     // Start: pause menu
   if (justPressed(8)) toggleControlsBar(); // Back/Select: controls help
 }
@@ -1329,7 +1366,8 @@ const CONTROL_SCHEMES = {
       [['kbm', 'keyboard_w'], ['kbm', 'keyboard_a'], ['kbm', 'keyboard_s'], ['kbm', 'keyboard_d'], 'Move'],
       [['kbm', 'mouse_move'], 'Free aim'],
       [['kbm', 'mouse_left'], 'Shoot'],
-      [['kbm', 'mouse_right'], 'Rotate camera'],
+      [['kbm', 'mouse_right'], 'Aim (1st person)'],
+      [['kbm', 'keyboard_f'], 'Swap weapon'],
       [['kbm', 'mouse_scroll'], 'Zoom'],
       [['kbm', 'keyboard_e'], 'Loot / Recruit'],
       [['kbm', 'keyboard_r'], 'Reload'],
@@ -1344,6 +1382,8 @@ const CONTROL_SCHEMES = {
       [['xbox', 'xbox_stick_l'], 'Move'],
       [['xbox', 'xbox_stick_r'], 'Look'],
       [['xbox', 'xbox_rt'], 'Shoot'],
+      [['xbox', 'xbox_lt'], 'Aim (1st person)'],
+      [['xbox', 'xbox_button_color_y'], 'Swap weapon'],
       [['xbox', 'xbox_button_color_x'], 'Loot / Recruit'],
       [['xbox', 'xbox_button_color_b'], 'Reload'],
       [['xbox', 'xbox_button_color_a'], 'Jump'],
@@ -1357,6 +1397,8 @@ const CONTROL_SCHEMES = {
       [['ps', 'playstation_stick_l'], 'Move'],
       [['ps', 'playstation_stick_r'], 'Look'],
       [['ps', 'playstation_trigger_r2'], 'Shoot'],
+      [['ps', 'playstation_trigger_l2'], 'Aim (1st person)'],
+      [['ps', 'playstation_button_triangle'], 'Swap weapon'],
       [['ps', 'playstation_button_square'], 'Loot / Recruit'],
       [['ps', 'playstation_button_circle'], 'Reload'],
       [['ps', 'playstation_button_cross'], 'Jump'],
@@ -1369,7 +1411,7 @@ const CONTROL_SCHEMES = {
     rows: [
       [['touch', 'touch_swipe_move'], 'Left side: joystick'],
       [['touch', 'touch_swipe_horizontal'], 'Right side: look'],
-      [['touch', 'touch_tap'], 'Buttons: shoot / jump'],
+      [['touch', 'touch_tap'], 'Shoot / Aim / GUN swap'],
     ],
     prompt: ['touch', 'touch_tap'],
   },
@@ -1418,6 +1460,7 @@ const companions = []; // {data, blob, beacon, pos, recruited, shootCd, walkPhas
 function scatterCousins() {
   for (const c of companions) {
     scene.remove(c.blob.root);
+    if (c.blob.shadow) scene.remove(c.blob.shadow);
     if (c.beacon) scene.remove(c.beacon);
   }
   companions.length = 0;
@@ -1439,7 +1482,8 @@ function scatterCousins() {
     scene.add(beacon);
     const gun = buildGunMesh('pistol');
     blob.gunSocket.add(gun);
-    companions.push({ data, blob, beacon, pos: new THREE.Vector3(x, 0, z), recruited: false, shootCd: 0, walkPhase: Math.random() * 9, yaw: Math.random() * TAU });
+    companions.push({ data, blob, beacon, pos: new THREE.Vector3(x, 0, z), recruited: false, shootCd: 0, walkPhase: Math.random() * 9, yaw: Math.random() * TAU,
+      weapon: WEAPONS.pistol, gunMesh: gun });
     i++;
   }
   updateCousinHUD();
@@ -1466,6 +1510,7 @@ const player = {
   walkPhase: 0, squash: 0, dead: false, idlePhase: 0,
   stumbleT: 0, stumbleX: 0, stumbleZ: 0, meleeArm: 0,
   dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1,
+  owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=third-person .. 1=first-person ADS
 };
 const reserves = {};
 
@@ -1493,6 +1538,7 @@ function applyCousin(id) {
   selectedCousin = id;
   const data = COUSINS.find(c => c.id === id);
   scene.remove(playerBlob.root);
+  if (playerBlob.shadow) scene.remove(playerBlob.shadow);
   playerBlob = buildBlob({ color: data.color, belly: false });
   scene.add(playerBlob.root);
   startTheme(id);
@@ -1507,6 +1553,7 @@ function applyCousin(id) {
 
 function equipWeapon(id) {
   player.weapon = WEAPONS[id];
+  if (!player.owned.includes(id)) player.owned.push(id);
   if (gunMesh) { player.reloading = 0; gunMesh.removeFromParent(); gunMesh = null; }
   if (!player.weapon.melee) {
     gunMesh = buildGunMesh(id);
@@ -1517,7 +1564,21 @@ function equipWeapon(id) {
     player.clip = Infinity;
   }
   updateAmmoHUD();
+  updateWeaponBtn();
   document.getElementById('weaponname').textContent = player.weapon.name;
+}
+// cycle to the next weapon the player owns, with that gun's own switch sound
+function cycleWeapon(dir = 1) {
+  if (player.dead || player.owned.length < 2) return;
+  let idx = player.owned.indexOf(player.weapon.id);
+  if (idx < 0) idx = 0;
+  idx = (idx + dir + player.owned.length) % player.owned.length;
+  const id = player.owned[idx];
+  if (id === player.weapon.id) return;
+  equipWeapon(id);
+  SFX.swap(WEAPONS[id]);
+  toast(WEAPONS[id].name.toUpperCase());
+  rumble(40, 0.2, 0.3);
 }
 
 // ---------- zombies ----------
@@ -1542,6 +1603,7 @@ function spawnZombie(x, z, powerScale = 1) {
     state: 'chase', attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
     brainExposed: brain, blind, stepT: Math.random(),
+    bleeding: wounded, dripT: 0,
   });
 }
 
@@ -1583,7 +1645,7 @@ function spawnParticles(x, y, z, color, n, speed = 3, life = 0.5) {
 const gibs = [];
 const gibGeo = new THREE.BoxGeometry(0.16, 0.16, 0.16);
 const decals = [];
-const MAX_DECALS = 70;
+const MAX_DECALS = 200; // higher cap so bleeding trails stay visible for a while
 const decalGeo = new THREE.CircleGeometry(1, 12);
 const BLOOD = 0x7a0f0f;
 // how much blood to throw: base gore slider, boosted by the unlocked extra-gore slider
@@ -1613,6 +1675,21 @@ function groundSplat(x, z, r) {
   decals.push(m);
   if (decals.length > MAX_DECALS) { const old = decals.shift(); scene.remove(old); old.material.dispose(); }
 }
+// paint a flattened blood stain onto a blob's body ellipsoid, so blood reads as being ON
+// the body rather than a separate blob floating in front. `count` ({n}) caps accumulation.
+function stainBody(wob, count, angY, heightT, mult = 1) {
+  if (goreAmt() <= 0.02 || (count && count.n >= 7)) return null;
+  if (count) count.n++;
+  const ny = clamp(heightT, -0.8, 0.85);
+  const rXZ = Math.sqrt(Math.max(0, 1 - ny * ny));
+  const nx = Math.sin(angY) * rXZ, nz = Math.cos(angY) * rXZ;
+  const s = (0.11 + Math.random() * 0.07) * mult;
+  const stain = ball(s, BLOOD);
+  stain.scale.set(s, s * 0.55, s);          // thin splat that hugs the body surface
+  stain.position.set(0.55 * nx * 0.92, 0.62 + 0.6 * ny, 0.5 * nz * 0.92);
+  wob.add(stain);
+  return stain;
+}
 function spawnGib(x, y, z, color, kx, kz) {
   if (gibs.length > 60) return;
   const m = new THREE.Mesh(gibGeo, mat(color));
@@ -1623,18 +1700,21 @@ function spawnGib(x, y, z, color, kx, kz) {
     vx: (kx || 0) * 3 + (Math.random() - 0.5) * 4, vy: 3 + Math.random() * 4, vz: (kz || 0) * 3 + (Math.random() - 0.5) * 4,
     spin: (Math.random() - 0.5) * 14 });
 }
-// reveal the brain (weak spot) on a zombie's head
+// reveal the brain (weak spot) on a zombie's head: crack the skull cap open
 function exposeBrain(z) {
   if (z.brainExposed) return;
   z.brainExposed = true;
-  if (z.blob.brainMesh) z.blob.brainMesh.visible = true;
+  const b = z.blob;
+  if (b.brainMesh) b.brainMesh.visible = true;
+  if (b.skull) b.skull.visible = false;
 }
-// sever an arm or leg; returns true if one came off
+// sever an arm or leg; returns true if one came off. arms are weighted higher so you can
+// reliably shoot arms off.
 function blowLimb(z, kx, kz) {
   const b = z.blob;
   const opts = [];
-  if (!b.armGone[0]) opts.push(['arm', 0]);
-  if (!b.armGone[1]) opts.push(['arm', 1]);
+  if (!b.armGone[0]) { opts.push(['arm', 0]); opts.push(['arm', 0]); }
+  if (!b.armGone[1]) { opts.push(['arm', 1]); opts.push(['arm', 1]); }
   if (!b.legGone[0]) opts.push(['leg', 0]);
   if (!b.legGone[1]) opts.push(['leg', 1]);
   if (!opts.length) return false;
@@ -1712,6 +1792,11 @@ function updateAmmoHUD() {
     hud.res.textContent = ' / ' + (reserves[player.weapon.id] | 0);
   }
 }
+// label on the touch weapon-cycle button
+function updateWeaponBtn() {
+  const el = document.getElementById('btnCycle');
+  if (el) el.textContent = player.weapon.melee ? 'FIST' : player.weapon.id.slice(0, 4).toUpperCase();
+}
 let toastT = 0;
 function toast(txt, long) {
   hud.toast.textContent = txt;
@@ -1732,13 +1817,15 @@ function resetGame() {
   player.reloading = 0;
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
+  player.owned = ['fists']; player.aiming = false; player.aimT = 0;
+  input.aim = false; input.aimPad = false; input.aimTouch = false;
   game.time = 0; game.kills = 0; game.cratesOpened = 0; game.spawnT = 2; game.lastShotT = -99;
   // clear ground gore from the last run
   for (const d of decals) { scene.remove(d); d.material.dispose(); }
   decals.length = 0;
   for (const gb of gibs) scene.remove(gb.mesh);
   gibs.length = 0;
-  for (const z of zombies) scene.remove(z.blob.root);
+  for (const z of zombies) { scene.remove(z.blob.root); if (z.blob.shadow) scene.remove(z.blob.shadow); }
   zombies.length = 0;
   for (const p of pickups) scene.remove(p.mesh);
   pickups.length = 0;
@@ -1857,7 +1944,8 @@ syncSettingsUI();
 // ---------- aiming ----------
 const _aimDir = new THREE.Vector3(), _ndc = new THREE.Vector3();
 function getAimDir(out) {
-  if (input.device === 'kbm') {
+  // free-aim cursor on kbm, but once we're aiming down sights the crosshair centers
+  if (input.device === 'kbm' && player.aimT < 0.5) {
     _ndc.set((aimX / innerWidth) * 2 - 1, -(aimY / innerHeight) * 2 + 1, 0.5);
     out.copy(_ndc).unproject(camera).sub(camera.position).normalize();
   } else {
@@ -1980,6 +2068,12 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   z.pos.x += kx * knock * 0.12;
   z.pos.z += kz * knock * 0.12;
   spawnBlood(z.pos.x, b.root.position.y + (isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, isHead ? 1.3 : 1);
+  // wounds bleed: leave a stain on the body itself and start dripping a ground trail
+  z.bleeding = true;
+  if (!isHead && Math.random() < 0.75) {
+    const localAng = Math.atan2(-kx, -kz) - (z.yaw || 0);
+    stainBody(b.wob, b.stainCount, localAng + (Math.random() - 0.5) * 0.6, -0.1 + Math.random() * 0.55, 1);
+  }
 
   // limb dismemberment on body hits (chance scales with close range + whether it killed)
   if (!isHead && w && w.dismember && Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : 0.55)) {
@@ -2071,6 +2165,31 @@ function recruitCousin(c) {
   toast(`${c.data.name.toUpperCase()} JOINED! - ${c.data.lore}`, true);
   updateCousinHUD();
 }
+// weapon-only loot roll (companions only ever grab guns from crates)
+function rollLootWeapon(rng) {
+  for (let i = 0; i < 8; i++) { const id = rollLoot(rng); if (id !== 'ammo' && id !== 'medkit') return id; }
+  return 'pistol';
+}
+// swap a companion's held weapon + its visible gun model
+function setCompanionWeapon(c, id) {
+  c.weapon = WEAPONS[id];
+  if (c.gunMesh) c.gunMesh.removeFromParent();
+  c.gunMesh = c.weapon.melee ? null : buildGunMesh(id);
+  if (c.gunMesh) c.blob.gunSocket.add(c.gunMesh);
+}
+// a companion opens a crate it walked up to and equips whatever gun it finds
+function companionLoot(c, cr) {
+  cr.opened = true;
+  game.cratesOpened++;
+  hud.crates.textContent = game.cratesOpened;
+  cr.glow.visible = false;
+  cr.trim.visible = false;
+  play3d(cr.pos.x, cr.pos.z, () => SFX.crate());
+  const id = rollLootWeapon(Math.random);
+  setCompanionWeapon(c, id);
+  toast(`${c.data.name.toUpperCase()} FOUND A ${WEAPONS[id].name.toUpperCase()}`);
+  play3d(cr.pos.x, cr.pos.z, () => SFX.swap(WEAPONS[id]));
+}
 
 // ---------- main loop ----------
 const clock = new THREE.Clock();
@@ -2155,11 +2274,16 @@ function updatePlayer(dt) {
   player.shootCd -= dt;
   const wantShoot = input.shoot || input.shootGamepad;
   const w = player.weapon;
-  if ((wantShoot && (w.auto || w.melee)) || input.shootPressed) {
-    if (player.shootCd <= 0) {
+  if (w.auto || w.melee) {
+    // full-auto & melee: hold to fire, capped by the weapon's rate of fire
+    if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0) {
       fireWeapon();
       player.shootCd = 60 / w.rpm;
     }
+  } else if (input.shootPressed && player.shootCd <= 0) {
+    // semi-auto & shotgun: one shot per trigger pull, as fast as you can pull it
+    fireWeapon();
+    player.shootCd = 0.05; // tiny floor so a single click can't double-fire
   }
   input.shootPressed = false;
 
@@ -2212,6 +2336,14 @@ function updatePlayer(dt) {
   const b = playerBlob;
   b.root.position.copy(player.pos);
   updateFlash(b, dt);
+  // shadow stays flat on the ground even mid-jump (it isn't parented to the body)
+  placeShadow(b, player.pos.x, player.pos.z);
+
+  // aim-down-sights: ease the view toward first person while the aim button is held on a gun
+  player.aiming = (input.aim || input.aimPad || input.aimTouch) && !w.melee && !player.dead;
+  player.aimT = lerp(player.aimT, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
+  // hide our own head deep in first person so it doesn't block the view
+  b.head.visible = player.aimT < 0.6;
 
   // footsteps on each half of the walk cycle
   if (moving && player.grounded) {
@@ -2221,7 +2353,7 @@ function updatePlayer(dt) {
 
   const recentShot = game.time - player.lastShotT < 2.2 && !w.melee;
   let targetYaw;
-  if (recentShot || wantShoot) {
+  if (recentShot || wantShoot || player.aiming) {
     getAimDir(_aimDir);
     targetYaw = Math.atan2(_aimDir.x, _aimDir.z);
   }
@@ -2273,11 +2405,14 @@ function updateCompanions(dt) {
     const b = c.blob;
     const gy = groundHeight(c.pos.x, c.pos.z);
     updateFlash(b, dt);
+    placeShadow(b, c.pos.x, c.pos.z);
     if (!c.recruited) {
-      // idle at their spot, bob & look around
+      // idle at their spot, bob & look around — but keep the gun levelled, not pointing at the dirt
       b.root.position.set(c.pos.x, gy, c.pos.z);
       b.wob.scale.y = 1 + Math.sin(performance.now() * 0.002 + c.walkPhase) * 0.03;
       b.root.rotation.y = c.yaw + Math.sin(performance.now() * 0.0006 + c.walkPhase) * 0.6;
+      b.arms[1].rotation.x = -Math.PI / 2;
+      b.arms[0].rotation.x = -0.1;
       if (c.beacon) {
         c.beacon.material.opacity = 0.2 + Math.sin(performance.now() * 0.003) * 0.1;
         c.beacon.rotation.y += dt * 0.5;
@@ -2301,7 +2436,16 @@ function updateCompanions(dt) {
       c.yaw = Math.atan2(dx, dz);
       moving = true;
     }
-    // fight: shoot nearest zombie
+    // auto-loot: grab a gun from any crate we're standing next to
+    for (const cr of allCrates) {
+      if (cr.opened) continue;
+      if (Math.hypot(cr.pos.x - c.pos.x, cr.pos.z - c.pos.z) < 2.1 && Math.abs(cr.pos.y - gy) < 2.4) {
+        companionLoot(c, cr);
+        break;
+      }
+    }
+    // fight: shoot nearest zombie with whatever weapon we're carrying
+    const cw = c.weapon || WEAPONS.pistol;
     c.shootCd -= dt;
     let tgt = null, tD = 15;
     for (const z of zombies) {
@@ -2311,12 +2455,14 @@ function updateCompanions(dt) {
     }
     if (tgt) c.yaw = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
     if (tgt && c.shootCd <= 0) {
-      c.shootCd = 0.85 + Math.random() * 0.3;
+      c.shootCd = (cw.auto ? 0.32 : cw.id === 'shotgun' ? 0.6 : 0.7) + Math.random() * 0.15;
       const zy = tgt.blob.root.position.y + 0.7 * tgt.scale;
       _cv.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 1.0, c.pos.z);
-      spawnTracer(_cv.clone(), new THREE.Vector3(tgt.pos.x, zy, tgt.pos.z));
-      damageZombie(tgt, 20, (tgt.pos.x - c.pos.x) / tD, (tgt.pos.z - c.pos.z) / tD, 1);
-      if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) tone(200, 0.05, 0.12, 'square', 90);
+      const kx = (tgt.pos.x - c.pos.x) / tD, kz = (tgt.pos.z - c.pos.z) / tD;
+      const shots = cw.id === 'shotgun' ? 3 : 1;
+      for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(tgt.pos.x + (Math.random() - 0.5) * s, zy, tgt.pos.z + (Math.random() - 0.5) * s));
+      damageZombie(tgt, (cw.dmg || 20) * 1.25 * shots, kx, kz, 1, { weapon: cw, dist: tD, isHead: false });
+      if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
     }
     b.root.position.set(c.pos.x, gy, c.pos.z);
     b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
@@ -2324,7 +2470,7 @@ function updateCompanions(dt) {
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
     b.arms[0].rotation.x = -swing * 0.7;
-    b.arms[1].rotation.x = tgt ? -Math.PI / 2 : swing * 0.7;
+    b.arms[1].rotation.x = -Math.PI / 2; // gun always levelled forward
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
   }
@@ -2340,14 +2486,16 @@ function updateZombies(dt) {
       z.deadT += dt;
       b.root.rotation.x = Math.min(z.deadT * 4, Math.PI / 2);
       if (z.deadT > 1.2) b.root.position.y -= dt * 0.8;
+      // shadow stays flat under the corpse's centre while the body topples/sinks
+      placeShadow(b, z.pos.x, z.pos.z);
       if (z.deadT > 2.4) {
-        scene.remove(b.root);
+        scene.remove(b.root); if (b.shadow) scene.remove(b.shadow);
         zombies.splice(i, 1);
       }
       continue;
     }
     const pDist = Math.hypot(player.pos.x - z.pos.x, player.pos.z - z.pos.z);
-    if (pDist > 75) { scene.remove(b.root); zombies.splice(i, 1); continue; }
+    if (pDist > 75) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
 
     // pick what draws this zombie: blind ones only home in on the last gunshot noise
     let tx, tz, hasTarget = true;
@@ -2397,6 +2545,16 @@ function updateZombies(dt) {
     if (dist < Infinity) z.yaw = angLerp(z.yaw, Math.atan2(dx, dz), 1 - Math.exp(-6 * dt));
     b.root.position.set(z.pos.x, groundHeight(z.pos.x, z.pos.z), z.pos.z);
     b.root.rotation.y = z.yaw;
+    placeShadow(b, z.pos.x, z.pos.z);
+
+    // wounded zombies drip a blood trail on the ground as they move
+    if (z.bleeding && goreAmt() > 0.02) {
+      z.dripT -= dt;
+      if (z.dripT <= 0) {
+        z.dripT = 0.22 + Math.random() * 0.2;
+        groundSplat(z.pos.x + (Math.random() - 0.5) * 0.3, z.pos.z + (Math.random() - 0.5) * 0.3, 0.14 + Math.random() * 0.16);
+      }
+    }
 
     const sw = Math.sin(z.walkPhase);
     b.legs[0].rotation.x = sw * 0.7;
@@ -2485,24 +2643,40 @@ function updatePickups(dt) {
 }
 
 function updateCamera(dt) {
-  // over-the-shoulder pivot: up + slightly right of the blob so aim is visible
   const cy = player.camYaw, cp = player.camPitch;
+  const aimT = player.aimT || 0;
+  // ---- third-person over-the-shoulder rig (shoulder offset fades out as we aim) ----
   const rightX = Math.cos(cy), rightZ = -Math.sin(cy);
-  const pivotX = player.pos.x + rightX * 0.7;
+  const shoulder = 0.7 * (1 - aimT);
+  const pivotX = player.pos.x + rightX * shoulder;
   const pivotY = player.pos.y + 1.5;
-  const pivotZ = player.pos.z + rightZ * 0.7;
-  const cx = pivotX + Math.sin(cy) * Math.cos(cp) * camDist;
-  const cyy = pivotY - Math.sin(cp) * camDist;
-  const cz = pivotZ + Math.cos(cy) * Math.cos(cp) * camDist;
+  const pivotZ = player.pos.z + rightZ * shoulder;
+  const tpX = pivotX + Math.sin(cy) * Math.cos(cp) * camDist;
+  const tpY = pivotY - Math.sin(cp) * camDist;
+  const tpZ = pivotZ + Math.cos(cy) * Math.cos(cp) * camDist;
+  // ---- first-person eye + forward look ----
+  const fwdX = -Math.sin(cy) * Math.cos(cp), fwdY = Math.sin(cp), fwdZ = -Math.cos(cy) * Math.cos(cp);
+  const eyeX = player.pos.x + fwdX * 0.16;
+  const eyeY = player.pos.y + 1.52 + fwdY * 0.16;
+  const eyeZ = player.pos.z + fwdZ * 0.16;
+  // ---- blend the two rigs by how far we're aiming ----
+  const tX = lerp(tpX, eyeX, aimT), tY = lerp(tpY, eyeY, aimT), tZ = lerp(tpZ, eyeZ, aimT);
   const k = 1 - Math.exp(-14 * dt);
   camera.position.set(
-    lerp(camera.position.x, cx, k),
-    lerp(camera.position.y, cyy, k),
-    lerp(camera.position.z, cz, k),
+    lerp(camera.position.x, tX, k),
+    lerp(camera.position.y, tY, k),
+    lerp(camera.position.z, tZ, k),
   );
   const minY = groundHeight(camera.position.x, camera.position.z) + 0.35;
   if (camera.position.y < minY) camera.position.y = minY;
-  camera.lookAt(pivotX, pivotY + 0.15, pivotZ);
+  // look target eases from the blob itself (TP) to far ahead along the aim (FP)
+  const lx = lerp(pivotX, eyeX + fwdX * 8, aimT);
+  const ly = lerp(pivotY + 0.15, eyeY + fwdY * 8, aimT);
+  const lz = lerp(pivotZ, eyeZ + fwdZ * 8, aimT);
+  camera.lookAt(lx, ly, lz);
+  // gentle zoom while aiming down sights
+  const fov = lerp(70, 58, aimT);
+  if (Math.abs(fov - camera.fov) > 0.04) { camera.fov = fov; camera.updateProjectionMatrix(); }
   if (shakeAmp > 0.001) {
     camera.position.x += (Math.random() - 0.5) * shakeAmp;
     camera.position.y += (Math.random() - 0.5) * shakeAmp;
@@ -2555,9 +2729,10 @@ function updateFx(dt) {
     else t.mesh.material.opacity = t.life / 0.07 * 0.85;
   }
   if (flashT > 0) { flashT -= dt; if (flashT <= 0) flash.visible = false; }
-  // crosshair follows the free-aim cursor on kbm, centers otherwise
-  const cx = input.device === 'kbm' ? aimX : innerWidth / 2;
-  const cyp = input.device === 'kbm' ? aimY : innerHeight / 2;
+  // crosshair follows the free-aim cursor on kbm, but centers on gamepad / when aiming down sights
+  const centered = input.device !== 'kbm' || player.aimT >= 0.5;
+  const cx = centered ? innerWidth / 2 : aimX;
+  const cyp = centered ? innerHeight / 2 : aimY;
   hud.crosshair.style.left = cx + 'px';
   hud.crosshair.style.top = cyp + 'px';
   hud.hitmarker.style.left = cx + 'px';
@@ -2606,7 +2781,8 @@ window.__dbg = {
   hurtZombie: (z, dmg, opts) => damageZombie(z, dmg, 0, 1, 2, opts),
   blowLimb: z => blowLimb(z, 0, 1),
   popHead: z => popHead(z, 0, 1),
-  exposeBrain, killZombie, pauseGame, resumeGame,
+  exposeBrain, killZombie, pauseGame, resumeGame, scene, allCrates, cycleWeapon,
+  get playerBlob() { return playerBlob; },
   fire: () => fireWeapon(),
   hurt: (dmg, ax, az) => hurtPlayer(dmg, ax, az),
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateFx(dt); },
