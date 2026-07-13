@@ -83,7 +83,7 @@ function roadAxisDist(v) {
 }
 // town footprint rectangles [x0,z0,x1,z1] - flattened terrain + no random spawns inside
 const TOWN_RECTS = [
-  [4, -44, 110, 6],    // main street, shops, town hall, courthouse
+  [-16, -50, 110, 6],  // main street, shops, bank, town hall, courthouse
   [8, 12, 78, 64],     // shopping plaza + parking
   [36, -16, 46, 18],   // plaza driveway
 ];
@@ -146,33 +146,6 @@ const roofMats = [
   new THREE.MeshLambertMaterial({ map: shingleTex, color: 0x9a9aa8 }),
   new THREE.MeshLambertMaterial({ map: shingleTex, color: 0x7a8a6a }),
 ];
-// a few distinct cracked-glass patterns: jagged spokes from a random impact point + rings
-function makeGlassTex(variant) {
-  const bases = ['#141824', '#1a1e2a', '#101420', '#171b25'];
-  return canvasTex(64, 64, ctx => {
-    ctx.fillStyle = bases[variant % bases.length]; ctx.fillRect(0, 0, 64, 64);
-    ctx.strokeStyle = 'rgba(255,255,255,.65)';
-    ctx.lineWidth = 1 + Math.random();
-    const ix = 12 + Math.random() * 40, iy = 12 + Math.random() * 40;
-    const spokes = 5 + ((Math.random() * 5) | 0);
-    for (let i = 0; i < spokes; i++) {
-      const a = (i / spokes) * TAU + Math.random() * 0.7;
-      const len = 22 + Math.random() * 40, segs = 2 + ((Math.random() * 2) | 0);
-      let x = ix, y = iy;
-      ctx.beginPath(); ctx.moveTo(x, y);
-      for (let s = 0; s < segs; s++) {
-        x += Math.cos(a) * len / segs + (Math.random() - 0.5) * 10;
-        y += Math.sin(a) * len / segs + (Math.random() - 0.5) * 10;
-        ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-    for (let r = 5; r < 22; r += 5 + Math.random() * 4) { ctx.beginPath(); ctx.arc(ix, iy, r, 0, TAU); ctx.stroke(); }
-  });
-}
-const brokenGlassMats = [];
-for (let i = 0; i < 4; i++) brokenGlassMats.push(new THREE.MeshLambertMaterial({ map: makeGlassTex(i), side: THREE.DoubleSide }));
-function randomGlassMat() { return brokenGlassMats[(Math.random() * brokenGlassMats.length) | 0]; }
 const darkGlassMat = new THREE.MeshLambertMaterial({ color: 0x11131a, side: THREE.DoubleSide });
 const glowTex = canvasTex(64, 64, ctx => {
   const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
@@ -199,12 +172,30 @@ function makeShadow(r) {
   return s;
 }
 
-// ---------- settings (tunable from pause menu) ----------
-const settings = {
-  master: 0.6, sfx: 1, music: 0.6, ambience: 0.5,
-  zombieSpawn: 1, lootSpawn: 1,
-  gore: 0.6, extraGore: 0,
-};
+// ---------- settings (5-notch bars in the pause menu, persisted) ----------
+// notches: integer 0..5 per setting. `settings` holds the derived engine values.
+const NOTCH_KEYS = ['master', 'sfx', 'music', 'ambience', 'mouseSens', 'padSens', 'zombieSpawn', 'lootSpawn', 'gore', 'extraGore'];
+const notches = { master: 3, sfx: 5, music: 3, ambience: 2, mouseSens: 3, padSens: 3, zombieSpawn: 2, lootSpawn: 2, gore: 3, extraGore: 0 };
+try {
+  const saved = JSON.parse(localStorage.getItem('blingo-notches') || '{}');
+  for (const k of NOTCH_KEYS) if (Number.isInteger(saved[k]) && saved[k] >= 0 && saved[k] <= 5) notches[k] = saved[k];
+} catch (e) {}
+const SENS_MULT = [0.5, 0.5, 0.75, 1, 1.4, 1.9];
+const SPAWN_MULT = [0, 0.5, 1, 1.6, 2.2, 3];
+const settings = {};
+function syncDerived() {
+  settings.master = notches.master / 5;
+  settings.sfx = notches.sfx / 5;
+  settings.music = notches.music / 5;
+  settings.ambience = notches.ambience / 5;
+  settings.mouseSens = SENS_MULT[notches.mouseSens];
+  settings.padSens = SENS_MULT[notches.padSens];
+  settings.zombieSpawn = SPAWN_MULT[notches.zombieSpawn];
+  settings.lootSpawn = SPAWN_MULT[notches.lootSpawn];
+  settings.gore = notches.gore / 5;
+  settings.extraGore = notches.extraGore / 5;
+}
+syncDerived();
 
 // ---------- audio (procedural, 3D) ----------
 const AC = window.AudioContext || window.webkitAudioContext;
@@ -295,6 +286,7 @@ const SFX = {
   headpop() { noiseBurst(0.16, 420, 0.75); tone(140, 0.22, 0.4, 'sawtooth', 50); },
   limb() { noiseBurst(0.2, 360, 0.6); tone(110, 0.16, 0.3, 'square', 60); },
   land() { noiseBurst(0.09, 200, 0.25); },
+  slide() { noiseBurst(0.3, 480, 0.32); tone(220, 0.22, 0.12, 'sawtooth', 90); },
 };
 
 // ---------- ambience + persona themes ----------
@@ -330,7 +322,10 @@ function startTheme(id) {
   const t = THEMES[id] || THEMES.blingo;
   themeStep = 0;
   const tick = () => {
-    if (game.state === 'playing') {
+    // hero music lives in the pause menu / screens; it only plays during
+    // gameplay when the music bar is maxed at 5/5 notches
+    const audible = actx && (game.state !== 'playing' || notches.music >= 5);
+    if (audible) {
       const note = t.seq[themeStep % t.seq.length];
       tone(NF(note), t.tempo * 0.9, 0.13, t.wave, undefined, musicGain);
       if (themeStep % 2 === 0) {
@@ -340,7 +335,7 @@ function startTheme(id) {
       themeStep++;
       themeTimer = setTimeout(tick, t.tempo * 1000);
     } else {
-      themeTimer = setTimeout(tick, 220); // idle while paused/menu, keep the beat ready
+      themeTimer = setTimeout(tick, 220); // idle, keep the beat ready
     }
   };
   tick();
@@ -375,7 +370,7 @@ const WEAPONS = {
   pistol:  { id: 'pistol',  name: 'Pistol',       dmg: 34, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14 },
   smg:     { id: 'smg',     name: 'SMG',          dmg: 15, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1 },
   shotgun: { id: 'shotgun', name: 'Shotgun',      dmg: 12, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true },
-  rifle:   { id: 'rifle',   name: 'Assault Rifle',dmg: 28, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32 },
+  rifle:   { id: 'rifle',   name: 'Assault Rifle',dmg: 32, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32 },
   magnum:  { id: 'magnum',  name: 'Magnum',       dmg: 62, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true },
   sniper:  { id: 'sniper',  name: 'Sniper Rifle', dmg: 145,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.09, rmb: [160, 1, 0.7],  cqc: 0.2,  dismember: 0.9, gib: true },
 };
@@ -419,7 +414,7 @@ function buildGunMesh(id) {
 }
 
 // ---------- blob character builder ----------
-function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, belly = true, droopy = false, brain = false, blind = false, wounded = false }) {
+function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'right', droopy = false, brain = false, blind = false, wounded = false }) {
   const root = new THREE.Group();
   const wob = new THREE.Group();
   root.add(wob);
@@ -428,14 +423,6 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, belly = true, 
   body.scale.set(0.55, 0.62, 0.5);
   body.position.y = 0.62;
   wob.add(body);
-
-  // belly patch: NPCs only (hero has none)
-  if (belly) {
-    const bellyM = ball(0.34, zombie ? 0x9fb86a : 0xffe0b8);
-    bellyM.scale.set(0.34, 0.4, 0.25);
-    bellyM.position.set(0, 0.58, 0.28);
-    wob.add(bellyM);
-  }
 
   // pre-wounded gore: blood stains painted flat onto the torso (not floating blobs)
   const stainCount = { n: 0 };
@@ -482,7 +469,7 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, belly = true, 
     eye.position.set(0.16 * s, droopy ? -0.02 : 0.05, 0.32);
     head.add(eye);
     const pupil = ball(0.055, blind ? 0xbfc3c6 : (zombie ? 0x7a1010 : 0x1a1a1a));
-    pupil.position.set(0.16 * s, droopy ? -0.06 : 0.05, 0.43);
+    pupil.position.set(0.16 * s, droopy ? -0.06 : 0.05, 0.415); // recessed flush with the cornea
     head.add(pupil);
     eyes.push(eye);
     if (droopy) {
@@ -530,9 +517,13 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, belly = true, 
     legs.push(hip);
   }
 
+  // weapon socket: right hand by default (Blondie is the clan lefty). rotated so the
+  // barrel points straight out of the fist when the arm is raised, not down at the dirt.
+  const gunArm = gunHand === 'left' ? 1 : 0; // arms[0] is the character's right hand
   const gunSocket = new THREE.Group();
-  gunSocket.position.set(0, -0.58, -0.05);
-  arms[1].add(gunSocket);
+  gunSocket.position.set(0, -0.56, 0.02);
+  gunSocket.rotation.x = -Math.PI / 2;
+  arms[gunArm].add(gunSocket);
 
   root.scale.setScalar(scale);
   // shadow lives in world space (not parented to the body) so it stays flat on the
@@ -543,13 +534,15 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, belly = true, 
   // collect skin meshes for red damage flash
   const skinList = [];
   root.traverse(o => { if (o.isMesh && o.material !== shadowMat) skinList.push({ mesh: o, mat: o.material }); });
-  return { root, wob, head, arms, legs, gunSocket, body, skull, brainMesh, eyes, shadow, stainCount, skinList, flashT: 0,
+  return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, shadow, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
 }
-// keep a blob's ground shadow pinned flat under its centre, regardless of jump height / death tilt
-function placeShadow(blob, x, z) {
+// keep a blob's shadow pinned flat under its centre, projected onto whatever surface
+// is below (terrain, car roofs, crates...) — it follows you up and slices onto lower tops
+function placeShadow(blob, x, z, y) {
   if (!blob.shadow) return;
-  blob.shadow.position.set(x, groundHeight(x, z) + 0.02, z);
+  const sy = supportTop(x, z, y === undefined ? groundHeight(x, z) : y, 0.1);
+  blob.shadow.position.set(x, sy + 0.02, z);
 }
 const FLASH_RED = new THREE.MeshBasicMaterial({ color: 0xff2525 });
 function flashBlob(blob) {
@@ -570,9 +563,26 @@ const chunks = new Map();
 const allCrates = [];
 const townColliders = [];
 
-function aabb(x, z, hw, hd, h, y0) {
-  if (y0 === undefined) y0 = groundHeight(x, z) - 0.5;
-  return { x, z, hw, hd, y0, y1: y0 + h + 0.5 };
+// tight collision/hit box. y0..y1 hug the mesh so bullets pass over/around without
+// invisible walls. optional rot = yaw for oriented boxes (cars). tops are standable.
+function aabb(x, z, hw, hd, h, y0, rot = 0) {
+  if (y0 === undefined) y0 = groundHeight(x, z) - 0.05;
+  return { x, z, hw, hd, y0, y1: y0 + h, rot };
+}
+// highest standable surface under (x,z) for feet at feetY: terrain, or any collider
+// top within maxStep above the feet
+function supportTop(x, z, feetY, maxStep = 0.45) {
+  let top = groundHeight(x, z);
+  for (const c of nearbyColliders(x, z)) {
+    if (c.y1 > feetY + maxStep || c.y1 <= top) continue;
+    let lx = x - c.x, lz = z - c.z;
+    if (c.rot) {
+      const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
+      const tx = lx * cs - lz * sn; lz = lx * sn + lz * cs; lx = tx;
+    }
+    if (Math.abs(lx) <= c.hw + 0.1 && Math.abs(lz) <= c.hd + 0.1) top = c.y1;
+  }
+  return top;
 }
 
 // displaced ground-following plane
@@ -615,7 +625,11 @@ function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf) {
   const crate = { mesh: g, lid, trim, glow, opened: false, shrink: 0, pos: new THREE.Vector3(x, y, z), t: rng() * 10, list: crateList };
   crateList.push(crate);
   allCrates.push(crate);
-  if (!onShelf) colliders.push(aabb(x, z, 0.4, 0.4, 1, y - 0.2));
+  if (!onShelf) {
+    crate.col = aabb(x, z, 0.38, 0.38, 0.72, y - 0.02);
+    crate.colList = colliders;
+    colliders.push(crate.col);
+  }
   return crate;
 }
 // respawn a crate somewhere random in a loaded chunk
@@ -654,7 +668,7 @@ function makeShelf(rng, x, z, rotY, group, colliders, crateList) {
   s.position.set(x, y0 - 0.1, z);
   s.rotation.y = rotY;
   group.add(s);
-  colliders.push(aabb(x, z, 1.0, 0.45, 1.9, y0 - 0.2));
+  colliders.push(aabb(x, z, 1.0, 0.45, 1.85, y0 - 0.1));
   const cos = Math.cos(rotY), sin = Math.sin(rotY);
   for (const y of [0.485, 1.185]) {
     if (rng() < 0.62) {
@@ -670,10 +684,9 @@ function makeShelf(rng, x, z, rotY, group, colliders, crateList) {
   }
 }
 
-// window pane helper: some broken
+// window pane helper (plain dark glass)
 function windowPane(rng, w, h) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), rng() < 0.42 ? randomGlassMat() : darkGlassMat);
-  return m;
+  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), darkGlassMat);
 }
 
 // pitched shingle roof + gables
@@ -726,13 +739,13 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
         const m = box(horiz ? segLen : t, h + 0.6, horiz ? t : segLen, wallC);
         m.position.set(sx, y0 + h / 2 - 0.3, sz);
         group.add(m);
-        colliders.push(aabb(sx, sz, horiz ? segLen / 2 : t / 2, horiz ? t / 2 : segLen / 2, h, y0 - 0.5));
+        colliders.push(aabb(sx, sz, horiz ? segLen / 2 : t / 2, horiz ? t / 2 : segLen / 2, h + 0.6, y0 - 0.6));
       }
     } else {
       const m = box(wall.hw * 2, h + 0.6, wall.hd * 2, wallC);
       m.position.set(wall.x, y0 + h / 2 - 0.3, wall.z);
       group.add(m);
-      colliders.push(aabb(wall.x, wall.z, wall.hw, wall.hd, h, y0 - 0.5));
+      colliders.push(aabb(wall.x, wall.z, wall.hw, wall.hd, h + 0.6, y0 - 0.6));
       if (rng() < 0.75) {
         const horiz = wall.hw > wall.hd;
         const win = windowPane(rng, 1.2, 0.9);
@@ -750,7 +763,7 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
   const floor = box(w, 0.6, d, 0x4a453e);
   floor.position.set(bx, y0 - 0.24, bz);
   group.add(floor);
-  addRoof(group, bx, y0 + h + 0.25, bz, w, d, rng);
+  addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng); // roof sits down onto the walls
   if (rng() < 0.85) makeShelf(rng, bx + (rng() - 0.5) * (w - 3), bz + (rng() - 0.5) * (d - 3), (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList);
   if (rng() < 0.7) makeCrate(rng, bx + (rng() - 0.5) * (w - 2.5), y0 + 0.08, bz + (rng() - 0.5) * (d - 2.5), group, colliders, crateList, false);
   // parked car near the building
@@ -758,6 +771,20 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
     const side = rng() < 0.5 ? -1 : 1;
     const cxr = bx + side * (w / 2 + 2.6), czr = bz + (rng() - 0.5) * d;
     if (!onRoad(cxr, czr, 1)) makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6 });
+  }
+  // barrels leaning against the outside walls
+  const nBar = (rng() * 3) | 0;
+  for (let i = 0; i < nBar; i++) {
+    const side = (rng() * 4) | 0;
+    const along = (rng() - 0.5) * (side < 2 ? w - 2 : d - 2);
+    const bx2 = side === 2 ? bx - w / 2 - 0.55 : side === 3 ? bx + w / 2 + 0.55 : bx + along;
+    const bz2 = side === 0 ? bz - d / 2 - 0.55 : side === 1 ? bz + d / 2 + 0.55 : bz + along;
+    if (onRoad(bx2, bz2, 0.5)) continue;
+    const by = groundHeight(bx2, bz2);
+    const barrel = cyl(0.34, 0.34, 0.9, [0x7a2e2e, 0x2e5a7a, 0x5a7a2e][(rng() * 3) | 0]);
+    barrel.position.set(bx2, by + 0.45, bz2);
+    group.add(barrel);
+    colliders.push(aabb(bx2, bz2, 0.36, 0.36, 0.9, by));
   }
 }
 
@@ -770,9 +797,9 @@ function makeTree(rng, x, z, group, colliders) {
   leaves.scale.y *= 1.15;
   leaves.position.set(x, y0 + 2.1 + rng() * 0.5, z);
   group.add(leaves);
-  colliders.push(aabb(x, z, 0.25, 0.25, 2, y0 - 0.5));
+  colliders.push(aabb(x, z, 0.25, 0.25, 2, y0));
 }
-function makeBush(rng, x, z, group) {
+function makeBush(rng, x, z, group, big = false) {
   const y0 = groundHeight(x, z);
   const g = new THREE.Group();
   const n = 2 + ((rng() * 2) | 0);
@@ -782,8 +809,26 @@ function makeBush(rng, x, z, group) {
     b.position.set((rng() - 0.5) * 0.7, 0.2 + rng() * 0.1, (rng() - 0.5) * 0.7);
     g.add(b);
   }
+  if (big) g.scale.setScalar(2); // jumbo hedge variant
   g.position.set(x, y0, z);
   group.add(g);
+}
+// evergreen: stacked dark conifer cones
+function makeEvergreen(rng, x, z, group, colliders) {
+  const y0 = groundHeight(x, z);
+  const trunk = cyl(0.12, 0.17, 1.1, 0x3e3020);
+  trunk.position.set(x, y0 + 0.55, z);
+  group.add(trunk);
+  const green = [0x2a4a2e, 0x2e5233, 0x27452b][(rng() * 3) | 0];
+  const s = 0.85 + rng() * 0.5;
+  let ty = y0 + 0.9;
+  for (const [r, h] of [[1.25, 1.5], [0.95, 1.3], [0.6, 1.1]]) {
+    const cone = cyl(0.02, r * s, h * s, green, 9);
+    cone.position.set(x, ty + h * s / 2, z);
+    group.add(cone);
+    ty += h * s * 0.62;
+  }
+  colliders.push(aabb(x, z, 0.28, 0.28, 1.6, y0));
 }
 function makeRock(rng, x, z, group, colliders, big) {
   const y0 = groundHeight(x, z);
@@ -794,7 +839,7 @@ function makeRock(rng, x, z, group, colliders, big) {
   rock.rotation.y = rng() * TAU;
   rock.position.set(x, y0 + r * 0.2, z);
   group.add(rock);
-  if (big) colliders.push(aabb(x, z, r * 0.8, r * 0.8, r, y0 - 0.5));
+  if (big) colliders.push(aabb(x, z, r * 0.8, r * 0.8, r * 0.75, y0));
 }
 
 function makeCar(rng, x, z, group, colliders, opts = {}) {
@@ -808,7 +853,7 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   const cab = box(1.5, 0.5, 1.7, c);
   cab.position.set(0, 1.05, -0.2);
   g.add(cab);
-  const winGlass = () => (opts.broken && rng() < 0.6) ? randomGlassMat() : darkGlassMat;
+  const winGlass = () => darkGlassMat;
   const windshield = new THREE.Mesh(new THREE.PlaneGeometry(1.32, 0.34), winGlass());
   windshield.position.set(0, 1.08, 0.66); g.add(windshield);
   const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(1.32, 0.34), winGlass());
@@ -824,13 +869,21 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
     g.add(wheel);
   }
   g.position.set(x, y0, z);
-  g.rotation.y = opts.rotY !== undefined ? opts.rotY : rng() * TAU;
+  const yaw = opts.rotY !== undefined ? opts.rotY : rng() * TAU;
+  g.rotation.y = yaw;
   if (opts.flipped) {
     g.rotation.z = Math.PI + (rng() - 0.5) * 0.3;
     g.position.y = y0 + 1.35;
   }
   group.add(g);
-  colliders.push(aabb(x, z, 2.1, 2.1, 1.6, y0 - 0.5));
+  // tight oriented boxes: low body + narrower cabin. bullets skim past the hood
+  // instead of hitting an invisible wall, and you can hop trunk -> roof.
+  if (opts.flipped) {
+    colliders.push(aabb(x, z, 1.02, 2.02, 1.45, y0, yaw));
+  } else {
+    colliders.push(aabb(x, z, 0.95, 2.02, 0.85, y0, yaw));
+    colliders.push(aabb(x - 0.2 * Math.sin(yaw), z - 0.2 * Math.cos(yaw), 0.78, 0.88, 1.32, y0, yaw));
+  }
 }
 // traffic pileup: cluster of wrecked cars, all broken windows, some flipped
 function makePileup(rng, x, z, along, group, colliders) {
@@ -892,42 +945,29 @@ function buildChunk(cx, cz) {
     const p = freeSpot(10, 4);
     if (p) makeBuilding(rng, p.x, p.z, group, colliders, crateList);
   }
-  const nS = (rng() * 2) | 0;
-  for (let i = 0; i < nS; i++) {
-    const p = freeSpot(3);
-    if (p) makeShelf(rng, p.x, p.z, rng() * TAU, group, colliders, crateList);
-  }
   if (cx === 0 && cz === 0) makeCrate(rng, 4.5, groundHeight(4.5, 5) + 0.02, 5, group, colliders, crateList, false);
   const nC = Math.round((1 + ((rng() * 2) | 0)) * clamp(settings.lootSpawn, 0, 3));
   for (let i = 0; i < nC; i++) {
     const p = freeSpot(2);
     if (p) makeCrate(rng, p.x, groundHeight(p.x, p.z) + 0.02, p.z, group, colliders, crateList, false);
   }
-  // foliage: trees + bushes + rocks (never on roads)
+  // foliage: leafy + evergreen trees, bushes (some jumbo), rocks — never on roads
   const nT = 2 + ((rng() * 4) | 0);
   for (let i = 0; i < nT; i++) {
     const p = freeSpot(2.5);
-    if (p) makeTree(rng, p.x, p.z, group, colliders);
+    if (!p) continue;
+    if (rng() < 0.4) makeEvergreen(rng, p.x, p.z, group, colliders);
+    else makeTree(rng, p.x, p.z, group, colliders);
   }
   const nBu = 3 + ((rng() * 4) | 0);
   for (let i = 0; i < nBu; i++) {
     const p = freeSpot(1.4);
-    if (p) makeBush(rng, p.x, p.z, group);
+    if (p) makeBush(rng, p.x, p.z, group, rng() < 0.25);
   }
   const nR = 2 + ((rng() * 3) | 0);
   for (let i = 0; i < nR; i++) {
     const p = freeSpot(1.4);
     if (p) makeRock(rng, p.x, p.z, group, colliders, rng() < 0.4);
-  }
-  // barrels
-  const nJ = 1 + ((rng() * 2) | 0);
-  for (let i = 0; i < nJ; i++) {
-    const p = freeSpot(1.5);
-    if (!p) continue;
-    const barrel = cyl(0.34, 0.34, 0.9, [0x7a2e2e, 0x2e5a7a, 0x5a7a2e][(rng() * 3) | 0]);
-    barrel.position.set(p.x, groundHeight(p.x, p.z) + 0.45, p.z);
-    group.add(barrel);
-    colliders.push(aabb(p.x, p.z, 0.36, 0.36, 1));
   }
   // traffic pileups on roads
   if (hasVRoad && rng() < 0.3 && !(cx === 0 && cz === 0)) {
@@ -970,23 +1010,50 @@ function nearbyColliders(x, z) {
   if (x > -50 && x < 140 && z > -70 && z < 90) out.push(...townColliders);
   return out;
 }
-function resolveCollision(x, z, r) {
+function resolveCollision(x, z, r, y) {
   for (const c of nearbyColliders(x, z)) {
-    const nx = clamp(x, c.x - c.hw, c.x + c.hw);
-    const nz = clamp(z, c.z - c.hd, c.z + c.hd);
-    const dx = x - nx, dz = z - nz;
-    const d2 = dx * dx + dz * dz;
-    if (d2 < r * r) {
-      const d = Math.sqrt(d2) || 0.0001;
-      const push = (r - d) / d;
-      x += dx * push; z += dz * push;
+    if (y !== undefined) {
+      if (y >= c.y1 - 0.25) continue;   // standing on top of it
+      if (c.y0 > y + 1.5) continue;     // walking underneath (awnings etc.)
+    }
+    if (c.rot) {
+      // oriented box: work in the collider's local frame
+      const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
+      const wx = x - c.x, wz = z - c.z;
+      const lx = wx * cs - wz * sn, lz = wx * sn + wz * cs;
+      const nx = clamp(lx, -c.hw, c.hw), nz = clamp(lz, -c.hd, c.hd);
+      const ddx = lx - nx, ddz = lz - nz;
+      const d2 = ddx * ddx + ddz * ddz;
+      if (d2 < r * r) {
+        const d = Math.sqrt(d2) || 0.0001;
+        const push = (r - d) / d;
+        const plx = lx + ddx * push, plz = lz + ddz * push;
+        x = c.x + plx * cs + plz * sn;
+        z = c.z - plx * sn + plz * cs;
+      }
+    } else {
+      const nx = clamp(x, c.x - c.hw, c.x + c.hw);
+      const nz = clamp(z, c.z - c.hd, c.z + c.hd);
+      const dx = x - nx, dz = z - nz;
+      const d2 = dx * dx + dz * dz;
+      if (d2 < r * r) {
+        const d = Math.sqrt(d2) || 0.0001;
+        const push = (r - d) / d;
+        x += dx * push; z += dz * push;
+      }
     }
   }
   return [x, z];
 }
 function rayAABB(ox, oy, oz, dx, dy, dz, c) {
-  const mn = [c.x - c.hw, c.y0, c.z - c.hd], mx = [c.x + c.hw, c.y1, c.z + c.hd];
-  const p = [ox, oy, oz], d = [dx, dy, dz];
+  let px = ox - c.x, pz = oz - c.z, rdx = dx, rdz = dz;
+  if (c.rot) {
+    const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
+    const tx = px * cs - pz * sn; pz = px * sn + pz * cs; px = tx;
+    const tdx = dx * cs - dz * sn; rdz = dx * sn + dz * cs; rdx = tdx;
+  }
+  const mn = [-c.hw, c.y0, -c.hd], mx = [c.hw, c.y1, c.hd];
+  const p = [px, oy, pz], d = [rdx, dy, rdz];
   let tmin = 0, tmax = Infinity;
   for (let i = 0; i < 3; i++) {
     if (Math.abs(d[i]) < 1e-8) { if (p[i] < mn[i] || p[i] > mx[i]) return Infinity; }
@@ -1027,41 +1094,45 @@ const townGroup = new THREE.Group();
 const townCrates = [];
 scene.add(townGroup);
 
-function grandBuilding(x, z, w, d, h, wallColor, label, rng) {
+// civic building: colonnaded facade on the faceDir side (+1 = faces +z, -1 = faces -z)
+function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   const y0 = groundHeight(x, z);
   const body = box(w, h, d, wallColor);
   body.position.set(x, y0 + h / 2, z);
   townGroup.add(body);
-  townColliders.push(aabb(x, z, w / 2, d / 2, h, y0 - 0.5));
-  // columns + steps on front (facing -z / toward main road)
+  townColliders.push(aabb(x, z, w / 2, d / 2, h, y0));
+  const fz = z + faceDir * d / 2; // facade plane, turned toward the road
+  // full-height columns whose capitals meet the portico slab above
   for (let i = 0; i < 4; i++) {
-    const col = cyl(0.28, 0.32, h * 0.85, 0xd8d2c4, 10);
-    col.position.set(x - w / 4 + i * (w / 6), y0 + h * 0.42, z - d / 2 - 1);
+    const col = cyl(0.28, 0.32, h, 0xd8d2c4, 10);
+    col.position.set(x - w / 4 + i * (w / 6), y0 + h / 2, fz + faceDir * 1);
     townGroup.add(col);
   }
+  // portico roof: underside rests on the column tops
+  const roofSlab = box(w + 1, 0.3, d + 2.6, 0x8b8577);
+  roofSlab.position.set(x, y0 + h + 0.15, z + faceDir * 0.8);
+  townGroup.add(roofSlab);
   const pedShape = new THREE.Shape();
   pedShape.moveTo(-w * 0.4, 0); pedShape.lineTo(w * 0.4, 0); pedShape.lineTo(0, 2.2); pedShape.closePath();
   const ped = new THREE.Mesh(new THREE.ShapeGeometry(pedShape), new THREE.MeshLambertMaterial({ color: 0xcfc9ba, side: THREE.DoubleSide }));
-  ped.position.set(x, y0 + h, z - d / 2 - 1.1);
+  ped.position.set(x, y0 + h + 0.28, fz + faceDir * 1.1);
   townGroup.add(ped);
-  const roofSlab = box(w + 1, 0.3, d + 2.6, 0x8b8577);
-  roofSlab.position.set(x, y0 + h + 0.15, z - 0.8);
-  townGroup.add(roofSlab);
   for (const s of [1.1, 0.55]) {
     const step = box(w * 0.55, 0.22, s, 0xbab4a6);
-    step.position.set(x, y0 + (s === 1.1 ? 0.11 : 0.33), z - d / 2 - 2.4 + s * 0.5);
+    step.position.set(x, y0 + (s === 1.1 ? 0.11 : 0.33), fz + faceDir * (2.4 - s * 0.5));
     townGroup.add(step);
   }
-  const plate = textPlate(label, 6, 1.5);
-  plate.position.set(x, y0 + h - 1, z - d / 2 - 0.02 - 1.05);
-  plate.rotation.y = Math.PI;
+  // name plate mounted flat on the wall face, behind the columns
+  const plate = textPlate(label, Math.min(w * 0.45, 9), Math.min(w * 0.11, 2.2));
+  plate.position.set(x, y0 + h - Math.min(w * 0.07, 1.4), fz + faceDir * 0.06);
+  plate.rotation.y = faceDir > 0 ? 0 : Math.PI;
   townGroup.add(plate);
-  // windows
+  // facade windows
   const rrng = rng || Math.random;
   for (let i = -1; i <= 1; i++) {
     const win = windowPane(rrng, 1.4, 1.6);
-    win.position.set(x + i * (w / 3.2), y0 + h * 0.45, z - d / 2 - 0.02);
-    win.rotation.y = Math.PI;
+    win.position.set(x + i * (w / 3.2), y0 + h * 0.42, fz + faceDir * 0.03);
+    win.rotation.y = faceDir > 0 ? 0 : Math.PI;
     townGroup.add(win);
   }
 }
@@ -1072,7 +1143,7 @@ function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
   const body = box(w, h, d, wallC);
   body.position.set(x, y0 + h / 2, z);
   townGroup.add(body);
-  townColliders.push(aabb(x, z, w / 2, d / 2, h, y0 - 0.5));
+  townColliders.push(aabb(x, z, w / 2, d / 2, h, y0)); // flat roof is standable
   const parapet = box(w + 0.2, 0.4, d + 0.2, 0x55493c);
   parapet.position.set(x, y0 + h + 0.2, z);
   townGroup.add(parapet);
@@ -1091,6 +1162,8 @@ function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
   awn.position.set(x, y0 + h * 0.62, z + faceDir * (d / 2 + 0.6));
   awn.rotation.x = faceDir * 0.25;
   townGroup.add(awn);
+  // thin standable ledge: jump car -> awning -> shop roof
+  townColliders.push(aabb(x, z + faceDir * (d / 2 + 0.6), w * 0.45, 0.72, 0.1, y0 + h * 0.62 - 0.05));
   const plate = textPlate(label, Math.min(w * 0.8, 4.5), 1.1);
   plate.position.set(x, y0 + h * 0.82, z + faceDir * (d / 2 + 0.05));
   plate.rotation.y = faceDir > 0 ? 0 : Math.PI;
@@ -1102,18 +1175,22 @@ function parkingLot(x, z, w, d, rows, rng) {
   const lineMat = mat(0xd8d8d0);
   for (let r = 0; r < rows; r++) {
     const rz = z - d / 2 + (r + 0.5) * (d / rows);
-    for (let i = 0; i < Math.floor(w / 3.2) - 1; i++) {
+    const nLines = Math.floor(w / 3.2) - 1;
+    for (let i = 0; i < nLines; i++) {
       const lx = x - w / 2 + 2.4 + i * 3.2;
       const line = new THREE.Mesh(BOX, lineMat);
       line.scale.set(0.14, 0.02, 2.6);
       line.position.set(lx, groundHeight(lx, rz) + 0.09, rz);
       townGroup.add(line);
     }
-    // a few abandoned cars in the lot
-    for (let i = 0; i < 2 + rows; i++) {
-      if (rng() < 0.4) {
-        const cx2 = x - w / 2 + 4 + rng() * (w - 8);
-        makeCar(rng, cx2, rz + (rng() - 0.5) * 1.5, townGroup, townColliders, { broken: rng() < 0.7, rotY: Math.PI / 2 + (rng() - 0.5) * 0.3 });
+    // abandoned cars sit properly inside the painted stalls, nose-in or backed-in
+    for (let i = 0; i < nLines - 1; i++) {
+      if (rng() < 0.3) {
+        const sx = x - w / 2 + 2.4 + i * 3.2 + 1.6;
+        makeCar(rng, sx, rz, townGroup, townColliders, {
+          broken: rng() < 0.7,
+          rotY: (rng() < 0.5 ? 0 : Math.PI) + (rng() - 0.5) * 0.08,
+        });
       }
     }
   }
@@ -1128,11 +1205,12 @@ function buildTown() {
     shopBuilding(12 + i * 13, -8.5, 9.5, 7, 3.4 + rng() * 0.8, -1, northNames[i], rng); // north side faces south (-z)
     shopBuilding(12 + i * 13, -26, 9.5, 7, 3.4 + rng() * 0.8, 1, southNames[i], rng);   // south side faces north (+z)
   }
-  // town hall & courthouse at the east end of main street
-  grandBuilding(94, -2, 18, 12, 6.5, 0x8a7f6a, 'TOWN HALL', rng);
-  grandBuilding(94, -34, 18, 12, 6, 0x9a9aa2, 'COURTHOUSE', rng);
-  // courthouse faces north toward road: rotate? simpler - both front-face -z; courthouse sits south so flip via second grand building mirrored:
-  // (accepted: courthouse front faces away from road, side visible)
+  // town hall & courthouse face each other across the east end of main street,
+  // pulled west of the x=103 cross road so nothing overlaps it
+  grandBuilding(88, -2, 18, 12, 6.5, 0x8a7f6a, 'TOWN HALL', rng, -1);
+  grandBuilding(88, -34, 18, 12, 6, 0x9a9aa2, 'COURTHOUSE', rng, 1);
+  // the bank anchors the west end of the shop road, a third grander than town hall
+  grandBuilding(0, -38, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
 
   // shopping plaza: long building north edge of plaza rect, parking in front
   const plazaShops = [['SUPER MART', 20], ['PHARMACY', 12], ['GYM', 10], ['CAFE', 10]];
@@ -1160,11 +1238,9 @@ function buildTown() {
   for (const [cx2, cz2] of spots) {
     if (rng() < 0.8) makeCrate(rng, cx2 + (rng() - 0.5) * 3, groundHeight(cx2, cz2) + 0.05, cz2 + (rng() - 0.5) * 3, townGroup, townColliders, townCrates, false);
   }
-  // street lamps along main street
-  for (let i = 0; i < 6; i++) {
-    const lx = 10 + i * 15;
-    for (const s of [-1, 1]) {
-      const lz = -17 + s * 4.6;
+  // street lamps tucked in the gaps between shopfronts, clear of the awnings
+  for (const lx of [5.5, 18.5, 31.5, 44.5, 57.5, 70.5]) {
+    for (const lz of [-12.9, -21.1]) {
       const y0 = groundHeight(lx, lz);
       const pole = cyl(0.07, 0.09, 4.2, 0x3a3d42);
       pole.position.set(lx, y0 + 2.1, lz);
@@ -1180,7 +1256,7 @@ function buildTown() {
 const input = {
   moveX: 0, moveY: 0, lookDX: 0, lookDY: 0,
   jump: false, sprint: false, shoot: false, shootPressed: false,
-  interact: false, reload: false, aim: false, aimPad: false, aimTouch: false,
+  interact: false, reload: false, aim: false, aimPad: false, aimTouch: false, slide: false,
   device: 'kbm', gamepadKind: 'xbox',
   sprintGamepad: false, shootGamepad: false,
 };
@@ -1194,6 +1270,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyE') input.interact = true;
   if (e.code === 'KeyR') input.reload = true;
   if ((e.code === 'KeyQ' || e.code === 'KeyF') && !e.repeat) cycleWeapon(1);
+  if ((e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyC') && !e.repeat) input.slide = true;
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
   if (e.code === 'Tab') { e.preventDefault(); toggleControlsBar(); }
   refreshControlsBar();
@@ -1201,19 +1278,47 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => { keys[e.code] = false; });
 
 addEventListener('mousemove', e => {
-  aimX = e.clientX; aimY = e.clientY;
-  if (rmbDrag) {
-    input.lookDX += (e.clientX - lastMX) * 0.0052;
-    input.lookDY += (e.clientY - lastMY) * 0.0052;
+  const sens = settings.mouseSens || 1;
+  if (document.pointerLockElement === canvas) {
+    // mouse is locked to the game window: drive a virtual cursor that can't
+    // wander onto another monitor mid-firefight
+    aimX = clamp(aimX + e.movementX, 0, innerWidth);
+    aimY = clamp(aimY + e.movementY, 0, innerHeight);
+    if (rmbDrag || player.aimT > 0.5) {
+      input.lookDX += e.movementX * 0.0052 * sens;
+      input.lookDY += e.movementY * 0.0052 * sens;
+    }
+  } else {
+    aimX = e.clientX; aimY = e.clientY;
+    if (rmbDrag) {
+      input.lookDX += (e.clientX - lastMX) * 0.0052 * sens;
+      input.lookDY += (e.clientY - lastMY) * 0.0052 * sens;
+    }
+    lastMX = e.clientX; lastMY = e.clientY;
   }
-  lastMX = e.clientX; lastMY = e.clientY;
   if (!isTouch && input.device !== 'kbm') { input.device = 'kbm'; refreshControlsBar(); }
 });
+function grabPointer() {
+  if (isTouch || document.pointerLockElement === canvas) return;
+  try {
+    const p = canvas.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  } catch (err) {}
+}
 canvas.addEventListener('mousedown', e => {
   initAudio();
+  if (game.state === 'playing') grabPointer();
   if (e.button === 0 && game.state === 'playing') { input.shoot = true; input.shootPressed = true; }
   // right mouse: aim down sights (ease to first person). drag still fine-tunes the look.
   if (e.button === 2) { rmbDrag = true; input.aim = true; lastMX = e.clientX; lastMY = e.clientY; }
+});
+// Esc naturally releases the pointer lock -> treat that as opening the pause menu
+let lockLossT = -9999;
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement !== canvas && game.state === 'playing' && input.device === 'kbm') {
+    lockLossT = performance.now();
+    pauseGame();
+  }
 });
 addEventListener('mouseup', e => {
   if (e.button === 0) input.shoot = false;
@@ -1329,13 +1434,22 @@ function pollGamepad(dt) {
   }
   if (mx || my) { input.moveX = mx; input.moveY = my; }
   else if (input.device === input.gamepadKind && joyTouchId === null) { input.moveX = 0; input.moveY = 0; }
-  input.lookDX += lx * 2.6 * dt;
-  input.lookDY += ly * 2.0 * dt;
+  // paused: the pad drives the menu instead of the blob
+  if (game.state === 'paused') {
+    padMenuNav(gp, dt, justPressed, mx, my);
+    if (justPressed(9)) resumeGame();
+    input.shootGamepad = false; gpPrev.rt = false;
+    return;
+  }
+  const padSens = settings.padSens || 1;
+  input.lookDX += lx * 2.6 * dt * padSens;
+  input.lookDY += ly * 2.0 * dt * padSens;
   if (justPressed(0)) input.jump = true;
   if (justPressed(1)) input.reload = true;
   if (justPressed(2)) input.interact = true;
   if (justPressed(3)) cycleWeapon(1);              // Y / Triangle: cycle weapon
   if (justPressed(10)) input.sprintGamepad = !input.sprintGamepad;
+  if (justPressed(11)) input.slide = true;         // R3: slide
   const rt = gp.buttons[7] && (gp.buttons[7].pressed || gp.buttons[7].value > 0.4);
   if (rt && !gpPrev.rt) input.shootPressed = true;
   gpPrev.rt = rt;
@@ -1373,6 +1487,7 @@ const CONTROL_SCHEMES = {
       [['kbm', 'keyboard_r'], 'Reload'],
       [['kbm', 'keyboard_space'], 'Jump'],
       [['kbm', 'keyboard_shift'], 'Sprint'],
+      [['kbm', 'keyboard_ctrl'], 'Slide'],
     ],
     prompt: ['kbm', 'keyboard_e'],
   },
@@ -1388,6 +1503,7 @@ const CONTROL_SCHEMES = {
       [['xbox', 'xbox_button_color_b'], 'Reload'],
       [['xbox', 'xbox_button_color_a'], 'Jump'],
       [['xbox', 'xbox_stick_side_l'], 'Sprint (L3)'],
+      [['xbox', 'xbox_stick_side_r'], 'Slide (R3)'],
     ],
     prompt: ['xbox', 'xbox_button_color_x'],
   },
@@ -1403,6 +1519,7 @@ const CONTROL_SCHEMES = {
       [['ps', 'playstation_button_circle'], 'Reload'],
       [['ps', 'playstation_button_cross'], 'Jump'],
       [['ps', 'playstation_stick_side_l'], 'Sprint (L3)'],
+      [['ps', 'playstation_stick_side_r'], 'Slide (R3)'],
     ],
     prompt: ['ps', 'playstation_button_square'],
   },
@@ -1464,6 +1581,7 @@ function scatterCousins() {
     if (c.beacon) scene.remove(c.beacon);
   }
   companions.length = 0;
+  recruitCounter = 0;
   let i = 0;
   for (const data of COUSINS) {
     if (data.id === selectedCousin) continue;
@@ -1471,7 +1589,7 @@ function scatterCousins() {
     const dist = 65 + i * 18 + Math.random() * 25;
     let x = Math.sin(ang) * dist, z = Math.cos(ang) * dist;
     [x, z] = resolveCollision(x, z, 0.6);
-    const blob = buildBlob({ color: data.color });
+    const blob = buildBlob({ color: data.color, gunHand: data.id === 'blondie' ? 'left' : 'right' });
     blob.root.position.set(x, groundHeight(x, z), z);
     scene.add(blob.root);
     const beacon = new THREE.Mesh(
@@ -1494,8 +1612,7 @@ function updateCousinHUD() {
 }
 
 // ---------- player ----------
-// hero has no belly patch (NPCs do)
-let playerBlob = buildBlob({ color: 0xff8c42, belly: false });
+let playerBlob = buildBlob({ color: 0xff8c42 });
 scene.add(playerBlob.root);
 let gunMesh = null;
 
@@ -1509,6 +1626,7 @@ const player = {
   reloading: 0, shootCd: 0, lastShotT: -9, lastHurtT: -9, lastAimYaw: 0,
   walkPhase: 0, squash: 0, dead: false, idlePhase: 0,
   stumbleT: 0, stumbleX: 0, stumbleZ: 0, meleeArm: 0,
+  slideT: 0, slideDX: 0, slideDZ: 0, hopT: 0,
   dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1,
   owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=third-person .. 1=first-person ADS
 };
@@ -1539,8 +1657,9 @@ function applyCousin(id) {
   const data = COUSINS.find(c => c.id === id);
   scene.remove(playerBlob.root);
   if (playerBlob.shadow) scene.remove(playerBlob.shadow);
-  playerBlob = buildBlob({ color: data.color, belly: false });
+  playerBlob = buildBlob({ color: data.color, gunHand: id === 'blondie' ? 'left' : 'right' });
   scene.add(playerBlob.root);
+  document.documentElement.style.setProperty('--hero', '#' + data.color.toString(16).padStart(6, '0'));
   startTheme(id);
   player.dmgMult = id === 'blazo' ? 1.15 : 1;
   player.sprintMult = id === 'blizzy' ? 1.12 : 1;
@@ -1670,7 +1789,8 @@ function spawnBlood(x, y, z, kx, kz, mult = 1) {
 function groundSplat(x, z, r) {
   const m = new THREE.Mesh(decalGeo, new THREE.MeshBasicMaterial({ color: BLOOD, transparent: true, opacity: 0.6, depthWrite: false }));
   m.rotation.x = -Math.PI / 2; m.rotation.z = Math.random() * TAU;
-  m.scale.setScalar(r); m.position.set(x, groundHeight(x, z) + 0.03, z); m.renderOrder = 1;
+  // lifted enough to sit on road/parking surfaces (+0.04/+0.05) too, not just grass
+  m.scale.setScalar(r); m.position.set(x, groundHeight(x, z) + 0.07, z); m.renderOrder = 1;
   scene.add(m);
   decals.push(m);
   if (decals.length > MAX_DECALS) { const old = decals.shift(); scene.remove(old); old.material.dispose(); }
@@ -1817,6 +1937,7 @@ function resetGame() {
   player.reloading = 0;
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
+  player.slideT = 0; player.hopT = 0;
   player.owned = ['fists']; player.aiming = false; player.aimT = 0;
   input.aim = false; input.aimPad = false; input.aimTouch = false;
   game.time = 0; game.kills = 0; game.cratesOpened = 0; game.spawnT = 2; game.lastShotT = -99;
@@ -1848,6 +1969,7 @@ document.getElementById('playbtn').addEventListener('click', () => {
   document.body.classList.add('playing');
   resetGame();
   game.state = 'playing';
+  if (input.device === 'kbm') grabPointer();
 });
 document.getElementById('respawnbtn').addEventListener('click', () => {
   initAudio();
@@ -1855,12 +1977,14 @@ document.getElementById('respawnbtn').addEventListener('click', () => {
   document.body.classList.add('playing');
   resetGame();
   game.state = 'playing';
+  if (input.device === 'kbm') grabPointer();
 });
 
 function die() {
   player.dead = true;
   game.state = 'dead';
   document.body.classList.remove('playing');
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
   rumble(500, 1, 1);
   const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
   const n = companions.filter(c => c.recruited).length;
@@ -1882,18 +2006,24 @@ function pauseGame() {
   syncSettingsUI();
   pauseScreen.classList.remove('hidden');
   document.body.classList.remove('playing');
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+  if (!themeTimer) startTheme(selectedCousin); // hero music plays over the pause menu
+  if (input.device === 'xbox' || input.device === 'ps') setPadFocus(0);
+  else clearPadFocus();
 }
 function resumeGame() {
   if (game.state !== 'paused') return;
   pauseScreen.classList.add('hidden');
   document.body.classList.add('playing');
   game.state = 'playing';
+  if (input.device === 'kbm') grabPointer();
 }
 function quitToMenu() {
   game.state = 'menu';
   pauseScreen.classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
   document.body.classList.remove('playing');
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
   stopTheme();
 }
 function togglePause() {
@@ -1907,39 +2037,111 @@ document.getElementById('quitbtn').addEventListener('click', quitToMenu);
   pb.addEventListener('click', e => { e.stopPropagation(); pauseGame(); });
   pb.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); pauseGame(); }, { passive: false });
 }
-addEventListener('keydown', e => { if (e.code === 'Escape' || e.code === 'KeyP') { e.preventDefault(); togglePause(); } });
+addEventListener('keydown', e => {
+  if (e.code === 'Escape' || e.code === 'KeyP') {
+    // pointer-lock release already paused us on this same Esc press
+    if (e.code === 'Escape' && performance.now() - lockLossT < 500) return;
+    e.preventDefault();
+    togglePause();
+  }
+});
 
-// wire each slider to its setting
-const S = id => document.getElementById(id);
-const pct = v => Math.round(v * 100) + '%';
-const mult = v => v.toFixed(2) + 'x';
-function bindSlider(id, valId, key, fmt, onChange) {
-  const el = S(id), val = S(valId);
-  el.addEventListener('input', () => {
-    settings[key] = parseFloat(el.value);
-    if (val) val.textContent = fmt(settings[key]);
-    if (onChange) onChange();
-  });
-  return () => { el.value = settings[key]; if (val) val.textContent = fmt(settings[key]); };
-}
-const settingSyncers = [
-  bindSlider('setMaster', 'valMaster', 'master', pct, applyAudioSettings),
-  bindSlider('setSfx', 'valSfx', 'sfx', pct, applyAudioSettings),
-  bindSlider('setMusic', 'valMusic', 'music', pct, applyAudioSettings),
-  bindSlider('setAmb', 'valAmb', 'ambience', pct, applyAudioSettings),
-  bindSlider('setZspawn', 'valZspawn', 'zombieSpawn', mult),
-  bindSlider('setLspawn', 'valLspawn', 'lootSpawn', mult),
-  bindSlider('setGore', 'valGore', 'gore', pct, updateGoreLock),
-  bindSlider('setExtraGore', 'valExtra', 'extraGore', pct),
+// ---------- settings UI: snappy 5-notch bars, two columns, gamepad navigable ----------
+const SETTING_DEFS = [
+  ['master', 'Master'], ['sfx', 'SFX'], ['music', 'Music'], ['ambience', 'Ambience'],
+  ['mouseSens', 'Mouse Sens'], ['padSens', 'Pad Sens'],
+  ['zombieSpawn', 'Zombies'], ['lootSpawn', 'Loot'],
+  ['gore', 'Gore'], ['extraGore', 'Extra Gore'],
 ];
-// the extra-gore slider only unlocks once base gore is maxed out
-function updateGoreLock() {
-  const unlocked = settings.gore >= 0.999;
-  document.getElementById('extraGoreRow').classList.toggle('locked', !unlocked);
-  if (!unlocked && settings.extraGore > 0) { settings.extraGore = 0; S('setExtraGore').value = 0; S('valExtra').textContent = pct(0); }
+const settingsGrid = document.getElementById('settingsGrid');
+const rowEls = {};
+function saveNotches() { try { localStorage.setItem('blingo-notches', JSON.stringify(notches)); } catch (e) {} }
+function notchClickSfx(level) { initAudio(); tone(280 + level * 90, 0.05, 0.22, 'square'); }
+function setNotch(key, n, silent) {
+  n = clamp(Math.round(n), 0, 5);
+  if (key === 'extraGore' && notches.gore < 5) n = 0; // locked until gore is maxed
+  if (key === 'gore' && n < 5 && notches.extraGore > 0) { notches.extraGore = 0; refreshRow('extraGore'); }
+  if (n === notches[key]) return;
+  notches[key] = n;
+  syncDerived();
+  applyAudioSettings();
+  saveNotches();
+  refreshRow(key);
+  if (key === 'gore') refreshRow('extraGore');
+  if (!silent) notchClickSfx(n);
 }
-function syncSettingsUI() { for (const s of settingSyncers) s(); updateGoreLock(); }
+function nudgeNotch(key, dir) { setNotch(key, notches[key] + dir); }
+for (const [key, label] of SETTING_DEFS) {
+  const row = document.createElement('div');
+  row.className = 'srow';
+  row.dataset.key = key;
+  const lab = document.createElement('span');
+  lab.textContent = label;
+  row.appendChild(lab);
+  const bar = document.createElement('div');
+  bar.className = 'notches';
+  for (let i = 0; i < 5; i++) {
+    const pip = document.createElement('div');
+    pip.className = 'pip';
+    // click the top lit pip to step down one; any other pip sets that level
+    pip.addEventListener('click', () => setNotch(key, (i + 1 === notches[key]) ? i : i + 1));
+    bar.appendChild(pip);
+  }
+  row.appendChild(bar);
+  settingsGrid.appendChild(row);
+  rowEls[key] = row;
+}
+function refreshRow(key) {
+  const row = rowEls[key];
+  const n = notches[key];
+  row.classList.toggle('locked', key === 'extraGore' && notches.gore < 5);
+  row.querySelectorAll('.pip').forEach((p, i) => {
+    const on = i < n;
+    if (on && !p.classList.contains('on')) { p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop'); }
+    p.classList.toggle('on', on);
+  });
+}
+function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); }
 syncSettingsUI();
+
+// ---------- gamepad menu navigation ----------
+let padFocus = 0, padNavT = 0;
+function padFocusables() {
+  return [...settingsGrid.querySelectorAll('.srow'), document.getElementById('resumebtn'), document.getElementById('quitbtn')];
+}
+function setPadFocus(i) {
+  const els = padFocusables();
+  padFocus = (i + els.length) % els.length;
+  els.forEach((el, j) => el.classList.toggle('focus', j === padFocus));
+}
+function clearPadFocus() { padFocusables().forEach(el => el.classList.remove('focus')); }
+function padMenuNav(gp, dt, justPressed, ax, ay) {
+  padNavT -= dt;
+  const sx = Math.abs(ax) > 0.5 ? Math.sign(ax) : 0;
+  const sy = Math.abs(ay) > 0.5 ? Math.sign(ay) : 0;
+  const stickReady = padNavT <= 0 && (sx || sy);
+  const up = justPressed(12) || (stickReady && sy < 0);
+  const down = justPressed(13) || (stickReady && sy > 0);
+  const left = justPressed(14) || (stickReady && sx < 0);
+  const right = justPressed(15) || (stickReady && sx > 0);
+  if (stickReady && (up || down || left || right)) padNavT = 0.22;
+  if (up) setPadFocus(padFocus - 1);
+  if (down) setPadFocus(padFocus + 1);
+  const els = padFocusables();
+  const el = els[padFocus];
+  if (!el) return;
+  if (el.classList.contains('srow')) {
+    const key = el.dataset.key;
+    if (left) nudgeNotch(key, -1);
+    if (right) nudgeNotch(key, 1);
+    if (justPressed(0)) nudgeNotch(key, 1);
+  } else {
+    if (left) setPadFocus(padFocus - 1);
+    if (right) setPadFocus(padFocus + 1);
+    if (justPressed(0)) el.click();
+  }
+  if (justPressed(1)) resumeGame();
+}
 
 // ---------- aiming ----------
 const _aimDir = new THREE.Vector3(), _ndc = new THREE.Vector3();
@@ -2156,8 +2358,10 @@ function giveWeapon(id) {
   }
   updateAmmoHUD();
 }
+let recruitCounter = 0;
 function recruitCousin(c) {
   c.recruited = true;
+  c.order = ++recruitCounter; // formation order = order found
   scene.remove(c.beacon);
   c.beacon = null;
   SFX.recruit();
@@ -2232,15 +2436,35 @@ function updatePlayer(dt) {
   if (ml > 1) { mx /= ml; my /= ml; }
 
   const sprinting = (keys['ShiftLeft'] || keys['ShiftRight'] || sprintToggle || input.sprintGamepad) && ml > 0.1;
-  const speed = (sprinting ? 6.6 * player.sprintMult : 4.3);
+  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73);
 
   // camera-relative: forward = away from camera
   const sin = Math.sin(player.camYaw), cos = Math.cos(player.camYaw);
   const vx = (mx * cos + my * sin) * speed;
   const vz = (my * cos - mx * sin) * speed;
 
-  // stumble: knocked-back drift after taking a hit (can still move & attack)
+  // slide: quick low dash along current motion; jump out of it for a slide-hop boost
+  if (input.slide && player.grounded && player.slideT <= 0 && ml > 0.1) {
+    player.slideT = 0.55;
+    const l = Math.hypot(vx, vz) || 1;
+    player.slideDX = vx / l; player.slideDZ = vz / l;
+    SFX.slide();
+    rumble(70, 0.3, 0.5);
+  }
+  input.slide = false;
+
   let mvx = vx, mvz = vz;
+  if (player.slideT > 0) {
+    player.slideT -= dt;
+    const s = Math.max(player.slideT, 0) / 0.55;
+    mvx += player.slideDX * 7.5 * s;
+    mvz += player.slideDZ * 7.5 * s;
+  }
+  if (player.hopT > 0) { // slide-hop momentum carried through the air
+    player.hopT -= dt;
+    mvx += player.slideDX * 6.5;
+    mvz += player.slideDZ * 6.5;
+  }
   if (player.stumbleT > 0) {
     player.stumbleT -= dt;
     const s = Math.max(player.stumbleT, 0) / 0.42;
@@ -2249,25 +2473,31 @@ function updatePlayer(dt) {
   }
   let nx = player.pos.x + mvx * dt;
   let nz = player.pos.z + mvz * dt;
-  [nx, nz] = resolveCollision(nx, nz, 0.45);
+  [nx, nz] = resolveCollision(nx, nz, 0.45, player.pos.y);
   player.pos.x = nx; player.pos.z = nz;
 
-  const groundY = groundHeight(player.pos.x, player.pos.z);
+  // ground = terrain or any standable top under us (crates, cars, rocks, awnings, roofs)
+  const groundY = supportTop(player.pos.x, player.pos.z, player.pos.y);
   if (input.jump && player.grounded) {
-    player.vy = 7.4; player.grounded = false;
+    const hop = player.slideT > 0;   // slide-hop: bigger jump, momentum kept
+    player.vy = hop ? 8.6 : 7.4;
+    if (hop) { player.hopT = 0.5; player.slideT = 0; }
+    player.grounded = false;
     player.squash = -0.25;
     SFX.jump();
     rumble(40, 0.15, 0.3);
   }
   input.jump = false;
   if (player.grounded) {
-    player.pos.y = groundY;
-  } else {
+    if (groundY < player.pos.y - 0.05) { player.grounded = false; player.vy = 0; } // walked off an edge
+    else player.pos.y = groundY;
+  }
+  if (!player.grounded) {
     player.vy -= 20 * dt;
     player.pos.y += player.vy * dt;
-    if (player.pos.y <= groundY) {
-      if (player.vy < -4) { player.squash = 0.3; rumble(60, 0.25, 0.4); }
-      player.pos.y = groundY; player.vy = 0; player.grounded = true;
+    if (player.vy <= 0 && player.pos.y <= groundY) {
+      if (player.vy < -4) { player.squash = 0.3; SFX.land(); rumble(60, 0.25, 0.4); }
+      player.pos.y = groundY; player.vy = 0; player.grounded = true; player.hopT = 0;
     }
   }
 
@@ -2330,14 +2560,15 @@ function updatePlayer(dt) {
 
   // --- blob animation ---
   const moving = ml > 0.1;
+  player.stillT = moving ? 0 : (player.stillT || 0) + dt;
   const stumbling = player.stumbleT > 0;
   player.walkPhase += dt * (moving ? (sprinting ? 13 : 9) : 2);
   player.idlePhase += dt;
   const b = playerBlob;
   b.root.position.copy(player.pos);
   updateFlash(b, dt);
-  // shadow stays flat on the ground even mid-jump (it isn't parented to the body)
-  placeShadow(b, player.pos.x, player.pos.z);
+  // shadow stays flat, projected onto whatever we're above (ground, car roofs...)
+  placeShadow(b, player.pos.x, player.pos.z, player.pos.y);
 
   // aim-down-sights: ease the view toward first person while the aim button is held on a gun
   player.aiming = (input.aim || input.aimPad || input.aimTouch) && !w.melee && !player.dead;
@@ -2384,14 +2615,20 @@ function updatePlayer(dt) {
     else if (stumbling) { b.arms[0].rotation.x -= stumbleLean * 1.0; b.arms[1].rotation.x -= stumbleLean * 1.0; }
   } else {
     const aimPitch = Math.asin(clamp(recentShot ? getAimDir(_aimDir).y : 0, -0.9, 0.9));
-    b.arms[1].rotation.x = -Math.PI / 2 - aimPitch * 0.8;
-    b.arms[0].rotation.x = wantShoot || recentShot ? b.arms[1].rotation.x : -swing * 0.8;
+    b.arms[b.gunArm].rotation.x = -Math.PI / 2 - aimPitch * 0.8;
+    b.arms[b.offArm].rotation.x = wantShoot || recentShot ? b.arms[b.gunArm].rotation.x : -swing * 0.8;
     const kick = game.time - player.lastShotT < 0.09 ? 0.35 : 0;
-    b.arms[1].rotation.x += kick;
+    b.arms[b.gunArm].rotation.x += kick;
+  }
+  if (player.slideT > 0) {
+    // slide posture: lean way back, legs out front, free arm thrown up
+    b.wob.rotation.x = -0.85;
+    b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35;
+    b.arms[b.offArm].rotation.x = -2.6;
   }
   if (!player.grounded) {
-    b.arms[0].rotation.x = -2.4;
-    if (w.melee) b.arms[1].rotation.x = -2.4;
+    b.arms[b.offArm].rotation.x = -2.4;
+    if (w.melee) b.arms[b.gunArm].rotation.x = -2.4;
     b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3;
   }
 
@@ -2401,6 +2638,14 @@ function updatePlayer(dt) {
 // ---------- companions ----------
 const _cv = new THREE.Vector3();
 function updateCompanions(dt) {
+  // formation slots in recruit order: single-file line behind you while moving,
+  // spread shoulder-to-shoulder like a firing squad once you stop
+  const squad = companions.filter(c => c.recruited).sort((a, b) => (a.order || 0) - (b.order || 0));
+  squad.forEach((c, i) => { c.slotIdx = i; c.slotN = squad.length; });
+  const fYaw = playerBlob.root.rotation.y;
+  const bkX = -Math.sin(fYaw), bkZ = -Math.cos(fYaw); // behind the player
+  const rtX = -Math.cos(fYaw), rtZ = Math.sin(fYaw);  // player's right
+  const still = (player.stillT || 0) > 0.5;
   for (const c of companions) {
     const b = c.blob;
     const gy = groundHeight(c.pos.x, c.pos.z);
@@ -2411,30 +2656,43 @@ function updateCompanions(dt) {
       b.root.position.set(c.pos.x, gy, c.pos.z);
       b.wob.scale.y = 1 + Math.sin(performance.now() * 0.002 + c.walkPhase) * 0.03;
       b.root.rotation.y = c.yaw + Math.sin(performance.now() * 0.0006 + c.walkPhase) * 0.6;
-      b.arms[1].rotation.x = -Math.PI / 2;
-      b.arms[0].rotation.x = -0.1;
+      b.arms[b.gunArm].rotation.x = -Math.PI / 2;
+      b.arms[b.offArm].rotation.x = -0.1;
       if (c.beacon) {
         c.beacon.material.opacity = 0.2 + Math.sin(performance.now() * 0.003) * 0.1;
         c.beacon.rotation.y += dt * 0.5;
       }
       continue;
     }
-    // follow the player
-    const dx = player.pos.x - c.pos.x, dz = player.pos.z - c.pos.z;
+    // seek my formation slot
+    const i = c.slotIdx || 0, n = c.slotN || 1;
+    let tx2, tz2;
+    if (still) {
+      const lateral = (i - (n - 1) / 2) * 1.7;
+      tx2 = player.pos.x + bkX * 2.3 + rtX * lateral;
+      tz2 = player.pos.z + bkZ * 2.3 + rtZ * lateral;
+    } else {
+      tx2 = player.pos.x + bkX * (1.8 + i * 1.5);
+      tz2 = player.pos.z + bkZ * (1.8 + i * 1.5);
+    }
+    const dx = tx2 - c.pos.x, dz = tz2 - c.pos.z;
     const dist = Math.hypot(dx, dz);
+    const pd = Math.hypot(player.pos.x - c.pos.x, player.pos.z - c.pos.z);
     let moving = false;
-    if (dist > 30) { // teleport catch-up if left far behind
-      c.pos.x = player.pos.x - dx / dist * 4;
-      c.pos.z = player.pos.z - dz / dist * 4;
-    } else if (dist > 3.2) {
-      const sp = dist > 10 ? 6.8 : 5.0;
+    if (pd > 30) { // teleport catch-up if left far behind
+      c.pos.x = player.pos.x + bkX * (2 + i * 1.5);
+      c.pos.z = player.pos.z + bkZ * (2 + i * 1.5);
+    } else if (dist > 0.4) {
+      const sp = Math.min(dist > 8 ? 7.3 : dist > 2 ? 5.4 : 2.8, dist / dt);
       let nx = c.pos.x + dx / dist * sp * dt;
       let nz = c.pos.z + dz / dist * sp * dt;
-      [nx, nz] = resolveCollision(nx, nz, 0.42);
+      [nx, nz] = resolveCollision(nx, nz, 0.42, gy);
       c.pos.x = nx; c.pos.z = nz;
-      c.walkPhase += dt * 10;
-      c.yaw = Math.atan2(dx, dz);
-      moving = true;
+      if (dist > 1) {
+        c.walkPhase += dt * 10;
+        c.yaw = Math.atan2(dx, dz);
+        moving = true;
+      }
     }
     // auto-loot: grab a gun from any crate we're standing next to
     for (const cr of allCrates) {
@@ -2454,6 +2712,7 @@ function updateCompanions(dt) {
       if (d < tD) { tD = d; tgt = z; }
     }
     if (tgt) c.yaw = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
+    else if (still && !moving) c.yaw = fYaw; // stand at attention facing where you face
     if (tgt && c.shootCd <= 0) {
       c.shootCd = (cw.auto ? 0.32 : cw.id === 'shotgun' ? 0.6 : 0.7) + Math.random() * 0.15;
       const zy = tgt.blob.root.position.y + 0.7 * tgt.scale;
@@ -2469,8 +2728,8 @@ function updateCompanions(dt) {
     const swing = Math.sin(c.walkPhase) * (moving ? 0.8 : 0.05);
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
-    b.arms[0].rotation.x = -swing * 0.7;
-    b.arms[1].rotation.x = -Math.PI / 2; // gun always levelled forward
+    b.arms[b.offArm].rotation.x = -swing * 0.7;
+    b.arms[b.gunArm].rotation.x = -Math.PI / 2; // gun always levelled forward
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
   }
@@ -2528,7 +2787,7 @@ function updateZombies(dt) {
         const sd = Math.hypot(sx, sz);
         if (sd < 0.85 && sd > 0.001) { nx += sx / sd * (0.85 - sd) * 0.5; nz += sz / sd * (0.85 - sd) * 0.5; }
       }
-      [nx, nz] = resolveCollision(nx, nz, 0.4 * z.scale);
+      [nx, nz] = resolveCollision(nx, nz, 0.4 * z.scale, b.root.position.y);
       z.pos.x = nx; z.pos.z = nz;
       z.walkPhase += dt * z.speed * 3.2;
       // shuffling footsteps (3D, throttled by distance)
@@ -2607,6 +2866,11 @@ function updateCrates(dt) {
         cr.mesh.removeFromParent();
         const li = cr.list.indexOf(cr);
         if (li >= 0) cr.list.splice(li, 1);
+        // take the collider with it — no invisible box where the crate used to be
+        if (cr.col && cr.colList) {
+          const ci = cr.colList.indexOf(cr.col);
+          if (ci >= 0) cr.colList.splice(ci, 1);
+        }
         allCrates.splice(i, 1);
         respawnCrateElsewhere();
       }
@@ -2737,8 +3001,23 @@ function updateFx(dt) {
   hud.crosshair.style.top = cyp + 'px';
   hud.hitmarker.style.left = cx + 'px';
   hud.hitmarker.style.top = cyp + 'px';
-  if (hitmarkT > 0) { hitmarkT -= dt; hud.hitmarker.style.opacity = 1; }
-  else hud.hitmarker.style.opacity = 0;
+  // the X flares open when an enemy is under the crosshair
+  let hot = false;
+  if (game.state === 'playing' && !player.dead) {
+    getAimDir(_aimDir);
+    for (const z of zombies) {
+      if (z.state === 'dying') continue;
+      const gy2 = z.blob.root.position.y;
+      if (raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale) !== Infinity ||
+          raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale) !== Infinity) { hot = true; break; }
+    }
+  }
+  hud.crosshair.classList.toggle('enemy', hot);
+  if (hitmarkT > 0) {
+    hitmarkT -= dt;
+    hud.hitmarker.style.opacity = 1;
+    hud.hitmarker.style.transform = `translate(-50%,-50%) rotate(45deg) scale(${1 + hitmarkT * 3.5})`; // snappy pop
+  } else hud.hitmarker.style.opacity = 0;
   if (toastT > 0) { toastT -= dt; if (toastT <= 0) { hud.toast.style.opacity = 0; hud.toast.style.top = '30%'; } }
   if (bloodSplatT > 0) { bloodSplatT -= dt; if (bloodSplatT <= 0) bloodEl.style.opacity = 0; }
 }
@@ -2773,7 +3052,7 @@ updateChunks(0, 0);
 player.pos.y = groundHeight(0, 0);
 playerBlob.root.position.copy(player.pos);
 window.__dbg = {
-  player, game, zombies, camera, input, companions, settings, WEAPONS,
+  player, game, zombies, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop,
   openNearest: () => { const c = findNearCrate(); if (c) openCrate(c); },
   recruitNearest: () => { const c = findNearRecruit(); if (c) recruitCousin(c); },
   give: id => giveWeapon(id),
