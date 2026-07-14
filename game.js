@@ -1560,61 +1560,94 @@ function parkingLot(x, z, w, d, rows, rng) {
 // dirt-mound positions the dead claw out of — the ambient spawner and the Crimson
 // One's grave waves both draw from this list
 const graveSpots = [];
-const CHURCH = { x: 25, z: 81, doorX: 33 };            // long axis runs x, door faces the graveyard (+x)
+const CHURCH = { x: 25, z: 81 };                       // nave runs N-S; main door faces the road (south), graveyard on the east flank
 const GRAVEYARD = { x0: 40, z0: 70, x1: 58, z1: 92 };  // spike-fenced plot east of the church
 function buildChurchyard(rng) {
   const ironMat = mat(0x23262c);
-  const cx = CHURCH.x, cz = CHURCH.z, w = 16, d = 11, h = 5.2;
+  // nave runs north-south: w is the (narrow) east-west width, d the long axis toward the road
+  const cx = CHURCH.x, cz = CHURCH.z, w = 11, d = 16, h = 5.2;
   const y0 = groundHeight(cx, cz);
+  const southZ = cz - d / 2, eastX = cx + w / 2; // front (road side) + graveyard-flank wall
   // weathered stone body
   const body = box(w, h, d, 0x6b6a62);
   body.position.set(cx, y0 + h / 2, cz);
   townGroup.add(body);
   townColliders.push(aabb(cx, cz, w / 2, d / 2, h, y0));
-  addRoof(townGroup, cx, y0 + h - 0.05, cz, w, d, rng);
-  // steeple straddling the ridge near the front, topped by a spire and a leaning cross
-  const ridgeY = y0 + h - 0.05 + d * 0.32;
+  // pitched shingle roof, ridge running down the nave (N-S); gable ends face the road & the rear
+  const rh = w * 0.34;
+  const roofMat = roofMats[(rng() * roofMats.length) | 0];
+  const slopeLen = Math.hypot(w / 2 + 0.5, rh);
+  const rang = Math.atan2(rh, w / 2 + 0.5);
+  for (const s of [-1, 1]) {
+    const slab = new THREE.Mesh(BOX, roofMat);
+    slab.scale.set(slopeLen, 0.12, d + 0.9);
+    slab.position.set(cx + s * (w / 4 + 0.12), y0 + h - 0.05 + rh / 2, cz);
+    slab.rotation.z = -s * rang;
+    townGroup.add(slab);
+  }
+  const gshape = new THREE.Shape();
+  gshape.moveTo(-w / 2, 0); gshape.lineTo(w / 2, 0); gshape.lineTo(0, rh); gshape.closePath();
+  const ggeo = new THREE.ShapeGeometry(gshape);
+  const gmat = new THREE.MeshLambertMaterial({ color: 0x4a4038, side: THREE.DoubleSide });
+  for (const s of [-1, 1]) {
+    const gable = new THREE.Mesh(ggeo, gmat);
+    gable.position.set(cx, y0 + h - 0.05, cz + s * d / 2);
+    townGroup.add(gable);
+  }
+  // bell tower + spire + leaning cross over the front (road-side) entrance
+  const ridgeY = y0 + h - 0.05 + rh;
+  const steepleZ = southZ + 2.4;
   const tower = box(2.6, 3.4, 2.6, 0x615f58);
-  tower.position.set(cx + 5, ridgeY + 0.9, cz);
+  tower.position.set(cx, ridgeY + 0.9, steepleZ);
   townGroup.add(tower);
-  for (const s of [-1, 1]) { // dark bell slats on the tower's road-facing sides
-    const slat = box(0.06, 1.1, 1.1, 0x14121a);
-    slat.position.set(cx + 5 + s * 1.31, ridgeY + 1.5, cz);
+  for (const s of [-1, 1]) { // dark bell slats on the tower's road-facing (front/back) sides
+    const slat = box(1.1, 1.1, 0.06, 0x14121a);
+    slat.position.set(cx, ridgeY + 1.5, steepleZ + s * 1.31);
     townGroup.add(slat);
   }
   const spire = cyl(0.02, 1.85, 2.8, 0x1f1d24, 4);
-  spire.position.set(cx + 5, ridgeY + 4, cz);
+  spire.position.set(cx, ridgeY + 4, steepleZ);
   townGroup.add(spire);
   const crossV = box(0.08, 0.95, 0.08, 0x14121a);
-  crossV.position.set(cx + 5, ridgeY + 5.75, cz); crossV.rotation.z = 0.09; // slightly askew
+  crossV.position.set(cx, ridgeY + 5.75, steepleZ); crossV.rotation.z = 0.09; // slightly askew
   townGroup.add(crossV);
   const crossH = box(0.5, 0.08, 0.08, 0x14121a);
-  crossH.position.set(cx + 5 - 0.02, ridgeY + 5.92, cz); crossH.rotation.z = 0.09;
+  crossH.position.set(cx - 0.02, ridgeY + 5.92, steepleZ); crossH.rotation.z = 0.09;
   townGroup.add(crossH);
-  // tall dark windows down both flanks + a black rose window over the door
-  for (const wx of [-5, 0, 5]) for (const s of [-1, 1]) {
+  // tall dark windows down both flanks — the east-flank centre is left open for the side door
+  for (const wz of [-5, 0, 5]) for (const s of [-1, 1]) {
+    if (s > 0 && wz === 0) continue;
     const win = windowPane(rng, 1.0, 2.4);
-    win.position.set(cx + wx, y0 + h * 0.5, cz + s * (d / 2 + 0.03));
-    win.rotation.y = s > 0 ? 0 : Math.PI;
+    win.position.set(cx + s * (w / 2 + 0.03), y0 + h * 0.5, cz + wz);
+    win.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2;
     townGroup.add(win);
   }
+  // black rose window over the main door, facing the road
   const rose = new THREE.Mesh(new THREE.CircleGeometry(0.85, 18), darkGlassMat);
-  rose.position.set(cx + w / 2 + 0.06, y0 + h + 0.9, cz);
-  rose.rotation.y = Math.PI / 2;
+  rose.position.set(cx, y0 + h + 0.9, southZ - 0.06);
   townGroup.add(rose);
-  // heavy double door facing the graves, with a couple of worn steps
-  const door = box(0.12, 2.6, 2.2, 0x241a12);
-  door.position.set(cx + w / 2 + 0.06, y0 + 1.3, cz);
+  // heavy main door facing the road, with a couple of worn steps
+  const door = box(2.2, 2.6, 0.12, 0x241a12);
+  door.position.set(cx, y0 + 1.3, southZ - 0.06);
   townGroup.add(door);
   for (const s of [1.35, 0.7]) {
-    const step = box(s, 0.2, 3, 0x55524a);
-    step.position.set(cx + w / 2 + (1.5 - s * 0.5), y0 + (s > 1 ? 0.1 : 0.3), cz);
+    const step = box(3, 0.2, s, 0x55524a);
+    step.position.set(cx, y0 + (s > 1 ? 0.1 : 0.3), southZ - (1.5 - s * 0.5));
     townGroup.add(step);
   }
-  const plate = textPlate('CHAPEL', 3.6, 0.9, '#2a2422', '#9a8f7a'); // faded sign
-  plate.position.set(cx + w / 2 + 0.06, y0 + h - 0.7, cz);
-  plate.rotation.y = Math.PI / 2;
+  const plate = textPlate('CHAPEL', 3.6, 0.9, '#2a2422', '#9a8f7a'); // faded sign over the door
+  plate.position.set(cx, y0 + h - 0.7, southZ - 0.06);
+  plate.rotation.y = Math.PI;
   townGroup.add(plate);
+  // side door on the graveyard flank (east), lined up with the fence gate, its own step down
+  const sideDoor = box(0.12, 2.4, 1.8, 0x241a12);
+  sideDoor.position.set(eastX + 0.06, y0 + 1.2, cz);
+  townGroup.add(sideDoor);
+  for (const s of [1.2, 0.6]) {
+    const step = box(s, 0.2, 2.4, 0x55524a);
+    step.position.set(eastX + (1.3 - s * 0.5), y0 + (s > 1 ? 0.1 : 0.3), cz);
+    townGroup.add(step);
+  }
 
   // --- the graveyard: dirt floor, spiked iron fence, slabs + fresh mounds ---
   const g = GRAVEYARD;
@@ -1720,22 +1753,6 @@ function buildChurchyard(rng) {
     townGroup.add(mound);
     graveSpots.push({ x: gx, z: mz });
   }
-  // two dead trees clawing at the sky inside the fence line
-  for (const [tx, tz] of [[g.x0 + 1.8, g.z1 - 2], [g.x1 - 2, g.z0 + 2.2]]) {
-    const yb = groundHeight(tx, tz);
-    const trunk = cyl(0.09, 0.17, 2.3, 0x2b2118, 6);
-    trunk.position.set(tx, yb + 1.15, tz);
-    trunk.rotation.z = (rng() - 0.5) * 0.2;
-    townGroup.add(trunk);
-    for (let br = 0; br < 3; br++) {
-      const branch = cyl(0.015, 0.055, 1.3, 0x241c14, 5);
-      const ba = rng() * TAU;
-      branch.position.set(tx + Math.cos(ba) * 0.35, yb + 2 + rng() * 0.5, tz + Math.sin(ba) * 0.35);
-      branch.rotation.set((rng() - 0.5) * 1.6, ba, 0.6 + rng() * 0.5);
-      townGroup.add(branch);
-    }
-    townColliders.push(aabb(tx, tz, 0.2, 0.2, 2.3, yb));
-  }
 }
 
 function buildTown() {
@@ -1763,34 +1780,38 @@ function buildTown() {
   // set back to leave room for the fountain pavilion (and the boss arena between them)
   grandBuilding(0, -46, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
 
-  // fountain pavilion in front of the bank — the Two Horned One wakes between the two
+  // fountain pavilion — pulled up to sit right at the main-street road (its paved
+  // apron kisses the tarmac) so the bank keeps a small grassy lawn out front instead
+  // of butting straight onto the street. The bank itself never moved back. The Two
+  // Horned One still wakes on the open lawn between the fountain and the bank steps.
+  const fz = -24;
   {
-    const fy = groundHeight(0, -28.5);
+    const fy = groundHeight(0, fz);
     const pave = new THREE.Mesh(new THREE.CircleGeometry(4.8, 26), lotMat);
     pave.rotation.x = -Math.PI / 2;
-    pave.position.set(0, fy + 0.06, -28.5);
+    pave.position.set(0, fy + 0.06, fz);
     townGroup.add(pave);
     const basin = cyl(2.8, 3.0, 0.85, 0x9a948a, 18);
-    basin.position.set(0, fy + 0.42, -28.5);
+    basin.position.set(0, fy + 0.42, fz);
     townGroup.add(basin);
     const water = new THREE.Mesh(new THREE.CircleGeometry(2.45, 18),
       new THREE.MeshLambertMaterial({ color: 0x3f7fae, emissive: 0x14405e, emissiveIntensity: 0.55 }));
     water.rotation.x = -Math.PI / 2;
-    water.position.set(0, fy + 0.78, -28.5);
+    water.position.set(0, fy + 0.78, fz);
     townGroup.add(water);
     const ped = cyl(0.42, 0.62, 1.5, 0x8b8577, 10);
-    ped.position.set(0, fy + 1.5, -28.5);
+    ped.position.set(0, fy + 1.5, fz);
     townGroup.add(ped);
     const bowl = cyl(1.05, 0.22, 0.45, 0x9a948a, 12);
-    bowl.position.set(0, fy + 2.4, -28.5);
+    bowl.position.set(0, fy + 2.4, fz);
     townGroup.add(bowl);
     const spout = ball(0.26, 0x7fb8d8, { emissive: 0x2a5a78, emissiveIntensity: 0.6 });
-    spout.position.set(0, fy + 2.72, -28.5);
+    spout.position.set(0, fy + 2.72, fz);
     townGroup.add(spout);
-    townColliders.push(aabb(0, -28.5, 2.9, 2.9, 0.95, fy));
+    townColliders.push(aabb(0, fz, 2.9, 2.9, 0.95, fy));
     // lamp ring around the pavilion
     for (const a of [0.79, 2.36, 3.93, 5.5]) {
-      const lx = Math.cos(a) * 4.3, lz = -28.5 + Math.sin(a) * 4.3;
+      const lx = Math.cos(a) * 4.3, lz = fz + Math.sin(a) * 4.3;
       const ly = groundHeight(lx, lz);
       const pole = cyl(0.06, 0.08, 3.4, 0x3a3d42);
       pole.position.set(lx, ly + 1.7, lz);
@@ -2500,7 +2521,7 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
     brainExposed: brain, blind, stepT: Math.random(),
-    bleeding: wounded, dripT: 0, purple, red,
+    bleeding: wounded, dripT: 0, purple, red, biteMult: red ? 1.35 : 1,
     mode, emergeT: 0, hornWave: !!opts.horns,
     despawnR: mode === 'runner' ? 140 : 85,
     wanderT: 0, wanderYaw: Math.random() * TAU, shotIgnoreT: -99,
@@ -4214,7 +4235,7 @@ function spawnBoss() {
 // the church doors (red horned guards + purple fodder) and up out of the graves.
 function spawnBoss2() {
   bossState.spawned2 = true;
-  const bx = 36.5, bz = 81;                   // the strip between the church door and the graveyard gate
+  const bx = 35, bz = 81;                     // the strip between the church side door and the graveyard gate
   const blob = buildBlob({ color: 0xc22626, zombie: true, scale: 2.7 });
   for (const s of [-1, 1]) {                  // the same crown of horns, rust-dark
     const horn = cyl(0.02, 0.15, 0.55, 0x3a1414, 6);
@@ -4280,15 +4301,19 @@ function bossShielded() {
 function fireBossWave(z, n) {
   z.wavesFired = n;
   if (z.isBoss2) {
-    // the Crimson One calls bigger waves: red horned guards (his shield) and purple
-    // fodder pour out of the church doors while plain dead claw up from the graves
+    // the Crimson One calls bigger waves. From the church side door pour purple horned
+    // guards (his shield — exactly the Two Horned One's guards, horns + speed) plus red
+    // brutes that are faster AND bite harder; from the graves claw plain standard dead.
     const count = 6 + n * 4;                   // wave size grows 10 -> 14 -> 18
     for (let k = 0; k < count; k++) {
-      if (k % 2 === 0) {
-        const guard = k < count / 2;           // horned guards lead the church half
-        const [x, zz] = resolveCollision(33.8 + Math.random() * 2.4, 78.5 + Math.random() * 5, 0.5);
-        spawnZombie(x, zz, 1 + game.time / 240, guard ? { red: true, horns: true } : { purple: true });
-      } else {
+      const kind = k % 3;
+      if (kind === 0) {                        // purple horned shield-guard from the church
+        const [x, zz] = resolveCollision(30.5 + Math.random() * 3, 79 + Math.random() * 4, 0.5);
+        spawnZombie(x, zz, 1 + game.time / 240, { purple: true, horns: true });
+      } else if (kind === 1) {                 // red speed+damage brute from the church
+        const [x, zz] = resolveCollision(30.5 + Math.random() * 3, 79 + Math.random() * 4, 0.5);
+        spawnZombie(x, zz, 1 + game.time / 240, { red: true });
+      } else {                                 // standard dead rising from a grave mound
         const gs = graveSpots[(Math.random() * graveSpots.length) | 0];
         spawnZombie(gs.x, gs.z, 1 + game.time / 240, { mode: 'grave' });
       }
@@ -4899,10 +4924,16 @@ function updateFx(dt) {
       selectedCousin = c.id;
       row.querySelectorAll('.card').forEach(el => el.classList.remove('sel'));
       card.classList.add('sel');
+      // the single/multiplayer badge takes the picked cousin's colour immediately,
+      // instead of only flipping once you spawn in
+      document.documentElement.style.setProperty('--hero', hex);
       initAudio(); SFX.pickup(); previewTheme(c.id);
     });
     row.appendChild(card);
   }
+  // seed the badge colour from the default pick so it matches before any click
+  const sel0 = COUSINS.find(c => c.id === selectedCousin);
+  if (sel0) document.documentElement.style.setProperty('--hero', '#' + sel0.color.toString(16).padStart(6, '0'));
 })();
 
 // ---------- multiplayer: PeerJS lobbies + host-authoritative co-op ----------
@@ -5001,9 +5032,16 @@ function wireHostConn(conn) {
       setTimeout(() => { try { conn.close(); } catch (e) {} }, 600);
     } else if (m.t === 'hi') {
       if (lobbyPlayers().length >= NET_SLOTS || game.state === 'menu') { try { conn.send({ t: 'full' }); } catch (e) {} return; }
-      // hand them a cousin: their pick if it's free, else the first free one
-      let c = companions.find(k => k.data.id === m.cousin && !k.netP)
-        || companions.find(k => !k.netP);
+      // their preferred cousin is their pick: take it if it's still free (recruit it if
+      // it was only a beacon). If it's already taken, fall back — but favour a cousin the
+      // squad has ALREADY recruited (picked at random) over waking a fresh beacon spawn.
+      let c = companions.find(k => k.data.id === m.cousin && !k.netP);
+      if (!c) {
+        const free = companions.filter(k => !k.netP);
+        const recruited = free.filter(k => k.recruited);
+        const pool = recruited.length ? recruited : free;
+        c = pool.length ? pool[(Math.random() * pool.length) | 0] : null;
+      }
       if (!c) { try { conn.send({ t: 'full' }); } catch (e) {} return; }
       const num = 1 + lobbyPlayers().length;
       c.netP = num; c.netConn = conn; c.netPose = null;
