@@ -119,19 +119,20 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   .tbtn:active, .tbtn.pressed { background:rgba(255,255,255,.4); }
   .tbtn img { width:55%; height:55%; opacity:.9; pointer-events:none; }
-  #btnJump, #btnInteract { width:var(--tl); height:var(--tl); }
-  #btnShoot, #btnShoot2, #btnSlide { width:var(--tm); height:var(--tm); }
+  /* two large (jump + slide), two-and-a-pop-in medium (both attacks + interact), rest small */
+  #btnJump, #btnSlide { width:var(--tl); height:var(--tl); }
+  #btnShoot, #btnShoot2, #btnInteract { width:var(--tm); height:var(--tm); }
   #btnAim, #btnView, #btnReload, #btnSprint, #btnEmote { width:var(--ts); height:var(--ts); }
-  /* right cluster: jump anchors the corner, slide sits beside it under the attack circle,
-     interact takes the large slot above the attack, aim + view stack to their left */
+  /* right cluster: jump anchors the corner, slide beside it, the attack circle above the
+     slide with interact popping in above the attack, aim + view stacked to their left */
   #btnJump { right:calc(20px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:11px; }
-  #btnSlide { right:calc(120px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnSlide { right:calc(120px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:11px; }
   #btnShoot, #btnShoot2 { background:rgba(255,80,80,.22); border-color:rgba(255,120,120,.6); }
-  #btnShoot { right:calc(120px + env(safe-area-inset-right)); bottom:calc(192px + env(safe-area-inset-bottom)); }
-  #btnInteract { right:calc(111px + env(safe-area-inset-right)); bottom:calc(274px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
-  #btnAim { right:calc(202px + env(safe-area-inset-right)); bottom:calc(199px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
+  #btnShoot { right:calc(129px + env(safe-area-inset-right)); bottom:calc(210px + env(safe-area-inset-bottom)); }
+  #btnInteract { right:calc(129px + env(safe-area-inset-right)); bottom:calc(292px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
+  #btnAim { right:calc(211px + env(safe-area-inset-right)); bottom:calc(217px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
   #btnAim.pressed { background:rgba(120,200,255,.5); }
-  #btnView { right:calc(202px + env(safe-area-inset-right)); bottom:calc(267px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnView { right:calc(211px + env(safe-area-inset-right)); bottom:calc(285px + env(safe-area-inset-bottom)); font-size:10px; }
   #btnView.pressed { background:rgba(120,200,255,.5); }
   #btnReload { right:calc(36px + env(safe-area-inset-right)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:8px; letter-spacing:.3px; }
   /* left cluster: run + emote column, the secondary attack circle centred between them */
@@ -337,15 +338,21 @@
     #ammo { font-size:26px; }
     body.touchmode #bottomright { padding:8px 12px 6px; border-radius:18px; }
     #btnJump { right:calc(16px + env(safe-area-inset-right)); bottom:calc(92px + env(safe-area-inset-bottom)); }
-    #btnSlide { right:calc(90px + env(safe-area-inset-right)); bottom:calc(92px + env(safe-area-inset-bottom)); font-size:9px; }
-    #btnShoot { right:calc(90px + env(safe-area-inset-right)); bottom:calc(156px + env(safe-area-inset-bottom)); }
-    #btnInteract { right:calc(85px + env(safe-area-inset-right)); bottom:calc(220px + env(safe-area-inset-bottom)); }
-    #btnAim { right:calc(154px + env(safe-area-inset-right)); bottom:calc(161px + env(safe-area-inset-bottom)); font-size:10px; }
-    #btnView { right:calc(154px + env(safe-area-inset-right)); bottom:calc(215px + env(safe-area-inset-bottom)); font-size:9px; }
+    #btnSlide { right:calc(90px + env(safe-area-inset-right)); bottom:calc(92px + env(safe-area-inset-bottom)); font-size:10px; }
+    #btnShoot { right:calc(95px + env(safe-area-inset-right)); bottom:calc(166px + env(safe-area-inset-bottom)); }
+    #btnInteract { right:calc(95px + env(safe-area-inset-right)); bottom:calc(230px + env(safe-area-inset-bottom)); }
+    #btnAim { right:calc(159px + env(safe-area-inset-right)); bottom:calc(171px + env(safe-area-inset-bottom)); font-size:10px; }
+    #btnView { right:calc(159px + env(safe-area-inset-right)); bottom:calc(225px + env(safe-area-inset-bottom)); font-size:9px; }
     #btnReload { right:calc(26px + env(safe-area-inset-right)); bottom:calc(166px + env(safe-area-inset-bottom)); font-size:7px; }
     #btnSprint { left:calc(20px + env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom)); font-size:9px; }
     #btnEmote { left:calc(20px + env(safe-area-inset-left)); bottom:calc(222px + env(safe-area-inset-bottom)); font-size:13px; }
     #btnShoot2 { left:calc(74px + env(safe-area-inset-left)); bottom:calc(190px + env(safe-area-inset-bottom)); }
+  }
+  /* portrait: aim + view leave the shoot column and stack above reload on the far right,
+     keeping the middle of a narrow screen clear */
+  @media (orientation: portrait) {
+    #btnAim { right:calc(36px + env(safe-area-inset-right)); bottom:calc(278px + env(safe-area-inset-bottom)); }
+    #btnView { right:calc(36px + env(safe-area-inset-right)); bottom:calc(346px + env(safe-area-inset-bottom)); }
   }
 </style>
 </head>
