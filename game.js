@@ -649,7 +649,20 @@ function buildGunMesh(id) {
   }
   // beefier reads better on the blocky blobs: guns +20%, melee +35%
   g.scale.setScalar(w.melee ? 1.35 : 1.2);
+  if (w.melee && id !== 'fists') {
+    // measure the built blade once: how far it reaches past the fist. The carry frame
+    // uses this to keep the tip riding just above the ground.
+    const bb = new THREE.Box3().setFromObject(g);
+    g.userData.reach = -bb.min.z;
+  }
   return g;
+}
+// carry "frame" for held melee: the arm may hang at `base`, but it lifts exactly enough
+// that the weapon tip rubs just above the ground however we walk, run, slide and hop
+function meleeCarryLift(base, shoulderY, groundY, reach) {
+  const L = 0.56 + (reach || 0.8);                 // shoulder -> fist -> weapon tip
+  const room = clamp((shoulderY - groundY - 0.12) / L, 0, 1);
+  return -Math.max(Math.abs(base), Math.acos(room));
 }
 // melee weapons sit in the same fist socket as guns, blade/head pointing forward (-z)
 function shaftZ(len, r1, r2, color, near = 0.06) {
@@ -2008,7 +2021,7 @@ function renderPrestige() {
   };
   let total = 0;
   for (const k in prestige.blocks) total += prestige.blocks[k] | 0;
-  if (total > 0) mkBadge(`BLOCKS SECURED x${total}`);
+  if (total > 0) mkBadge(`BLOCKS SECURED x${total}`, '#ffffff'); // white, so it never reads as Blondie's
   if (prestige.bestTime > 0) {
     const hero = COUSINS.find(c => c.id === prestige.bestHero);
     mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#' + (hero ? hero.color : 0xffd24a).toString(16).padStart(6, '0'));
@@ -2921,9 +2934,10 @@ function fireWeapon() {
         let diff = Math.abs(((ang - player.lastAimYaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
         if (diff < 1.15) {
           // fists: one hand lands 7, the other 6 (matched to the visible swing);
-          // fists also send them staggering back
+          // fists also send them staggering back. Melee ignores hero damage perks so
+          // the numbers stay true for everyone — the perks live on guns only.
           const base = w.id === 'fists' ? (player.meleeArm ? 6 : 7) : w.dmg;
-          damageZombie(z, base * player.dmgMult * closeBonus(w, d), dx / d, dz / d, w.id === 'fists' ? 11 : 3.5, { weapon: w, dist: d, isHead: false });
+          damageZombie(z, base * closeBonus(w, d), dx / d, dz / d, w.id === 'fists' ? 11 : 3.5, { weapon: w, dist: d, isHead: false });
           rumble(...w.rmb);
           break;
         }
@@ -3509,9 +3523,13 @@ function updatePlayer(dt) {
       if (punching) b.arms[player.meleeArm].rotation.x = -1.9;
       else if (stumbling) { b.arms[0].rotation.x -= stumbleLean * 1.0; b.arms[1].rotation.x -= stumbleLean * 1.0; }
     } else {
-      // armed melee: the weapon hand swings; hold it raised & ready while focusing
-      const ready = -0.55 - aimAmt * 1.0;
-      b.arms[b.gunArm].rotation.x = punching ? -2.3 : ready + Math.sin(player.walkPhase) * (moving ? 0.14 : 0.04);
+      // armed melee: the weapon hand swings; between swings the carry frame keeps the
+      // blade tip skimming just above the ground through walks, runs, slides and hops
+      const bob = Math.sin(player.walkPhase) * (moving ? 0.14 : 0.04);
+      const reach = gunMesh ? gunMesh.userData.reach : 0.8;
+      const ready = meleeCarryLift(-0.55 - aimAmt * 1.0 + bob,
+        player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
+      b.arms[b.gunArm].rotation.x = punching ? -2.3 : ready;
       b.arms[b.offArm].rotation.x = -swing * 0.6 - aimAmt * 0.35;
       if (stumbling) { b.arms[b.gunArm].rotation.x -= stumbleLean * 0.6; b.arms[b.offArm].rotation.x -= stumbleLean * 1.0; }
     }
@@ -3707,9 +3725,13 @@ function updateCompanions(dt) {
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
-    // guns held levelled; melee raised high on the move (no dragging blades through the
-    // dirt), carried easy when standing, whipping forward on a swing
-    b.arms[b.gunArm].rotation.x = cw.melee ? (c.meleeT > 0 ? -2.3 : moving ? -1.7 : -0.75) : -Math.PI / 2;
+    // guns held levelled; melee rides the same carry frame as the hero, tip skimming
+    // just above the ground, whipping forward on a swing
+    if (!cw.melee) b.arms[b.gunArm].rotation.x = -Math.PI / 2;
+    else if (c.meleeT > 0) b.arms[b.gunArm].rotation.x = -2.3;
+    else b.arms[b.gunArm].rotation.x = meleeCarryLift(
+      -0.55 + Math.sin(c.walkPhase) * (moving ? 0.14 : 0.04),
+      (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8);
     if (!c.grounded) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
@@ -4572,7 +4594,10 @@ function netClientTick(dt) {
     const swing = Math.sin(g.walk) * (g.mv ? 0.8 : 0.05);
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
-    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8 : (WEAPONS[g.wp] && WEAPONS[g.wp].melee ? (g.mv ? -1.7 : -0.75) : -Math.PI / 2);
+    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8
+      : (WEAPONS[g.wp] && WEAPONS[g.wp].melee
+        ? meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8)
+        : -Math.PI / 2);
     b.wob.rotation.x = g.dn ? 0.55 : 0;
     placeShadow(b, b.root.position.x, b.root.position.z, b.root.position.y);
     updateFlash(b, dt);
@@ -4689,7 +4714,9 @@ function netPoseCompanion(c, dt) {
   b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
   b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
   b.arms[b.offArm].rotation.x = -swing * 0.7;
-  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee ? -0.9 : -Math.PI / 2;
+  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
+    ? meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8)
+    : -Math.PI / 2;
   placeShadow(b, c.pos.x, c.pos.z, c.y);
   updateFlash(b, dt);
 }
