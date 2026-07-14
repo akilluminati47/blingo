@@ -2188,6 +2188,7 @@ function pollGamepad(dt) {
 // ---------- controls bar / prompts ----------
 const controlsEl = document.getElementById('controls');
 const devnameEl = document.getElementById('devname');
+if (isTouch) controlsEl.classList.add('collapsed'); // phones: start as a chip, tap to expand
 controlsEl.addEventListener('click', toggleControlsBar);
 controlsEl.addEventListener('touchstart', e => { e.stopPropagation(); }, { passive: true });
 function toggleControlsBar() { controlsEl.classList.toggle('collapsed'); }
@@ -2827,14 +2828,15 @@ function ewRender() {
   for (let i = anchor - 1; i >= 0; i--) start -= w(i);
   const stops = [];
   let a = 0;
+  const c = ewringEl.clientWidth / 2 || 145; // ring centre — the CSS shrinks the wheel on phones
   for (let i = 0; i < n; i++) {
     // settings-menu palette: dark panel rows, the picked wedge glows in the hero colour
     const col = i === sel ? heroTint(0.32) : (i % 2 ? 'rgba(10,12,18,.92)' : 'rgba(22,26,36,.92)');
     stops.push(`${col} ${a}deg ${a + w(i)}deg`);
     const mid = (start + a + w(i) / 2) * Math.PI / 180;
-    const r = i === sel ? 105 : 95;
-    ewSegs[i].style.left = (145 + Math.sin(mid) * r) + 'px';
-    ewSegs[i].style.top = (145 - Math.cos(mid) * r) + 'px';
+    const r = i === sel ? c - 40 : c - 50;
+    ewSegs[i].style.left = (c + Math.sin(mid) * r) + 'px';
+    ewSegs[i].style.top = (c - Math.cos(mid) * r) + 'px';
     ewSegs[i].classList.toggle('hot', i === sel);
     a += w(i);
   }
