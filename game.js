@@ -118,6 +118,13 @@ function mat(color, opts = {}) {
   if (!MAT[key]) MAT[key] = new THREE.MeshLambertMaterial({ color, ...opts });
   return MAT[key];
 }
+// A private copy of a cached material, so one mesh can fade without dragging every other
+// user of mat()'s cache with it. Flagged so its chunk disposes it on unload.
+function ownMat(mesh) {
+  mesh.material = mesh.material.clone();
+  mesh.material.userData.owned = true;
+  return mesh.material;
+}
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const SPHERE = new THREE.SphereGeometry(1, 14, 12);
 function box(w, h, d, color, opts) { const m = new THREE.Mesh(BOX, mat(color, opts)); m.scale.set(w, h, d); return m; }
@@ -428,6 +435,10 @@ const SFX = {
   hurt() { tone(160, 0.25, 0.4, 'sawtooth', 60); },
   groan() { tone(70 + Math.random() * 50, 0.5, 0.12, 'sawtooth', 45); },
   reload() { tone(700, 0.05, 0.2, 'square'); setTimeout(() => tone(900, 0.05, 0.2, 'square'), 130); },
+  // the answer to reload()'s call: a higher chk-CHK that closes the wait when the mag seats
+  reloadDone() { tone(900, 0.05, 0.22, 'square'); setTimeout(() => tone(1250, 0.08, 0.24, 'square'), 110); },
+  // hold-to-trade completion: a bright two-note ping
+  tradePing() { tone(920, 0.08, 0.3, 'sine', 1100); setTimeout(() => tone(1380, 0.16, 0.3, 'sine', 1600), 100); },
   // distinct mechanical "chk-chk" per gun when you cycle to it
   swap(w) {
     const id = w && w.id;
@@ -1040,10 +1051,14 @@ function roofTopAt(c, x, z) {
   const d = c.roof.axis === 'x' ? Math.abs(z - c.z) : Math.abs(x - c.x);
   return c.y0 + c.roof.rh * clamp(1 - d / c.roof.slopeHalf, 0, 1);
 }
-// pitched shingle roof + gables
+// pitched shingle roof + gables. Returns the peek entry (materials + the blocker box) so
+// the house can fade its own roof out from over the hero — see updateHousePeek.
 function addRoof(group, bx, by, bz, w, d, rng, colliders) {
   const rh = d * 0.32;
-  const roofMat = roofMats[(rng() * roofMats.length) | 0];
+  // cloned: roofMats is shared by every house on the map, so fading the cached one
+  // would ghost roofs chunks away
+  const roofMat = roofMats[(rng() * roofMats.length) | 0].clone();
+  roofMat.userData.owned = true;
   const slopeLen = Math.hypot(d / 2 + 0.5, rh);
   const ang = Math.atan2(rh, d / 2 + 0.5);
   for (const s of [-1, 1]) {
@@ -1058,13 +1073,18 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders) {
   shape.moveTo(-d / 2, 0); shape.lineTo(d / 2, 0); shape.lineTo(0, rh); shape.closePath();
   const ggeo = new THREE.ShapeGeometry(shape);
   const gmat = new THREE.MeshLambertMaterial({ color: 0x5d5044, side: THREE.DoubleSide });
+  gmat.userData.owned = true; // already per-house, just needs disposing with the chunk
   for (const s of [-1, 1]) {
     const gable = new THREE.Mesh(ggeo, gmat);
     gable.rotation.y = Math.PI / 2;
     gable.position.set(bx + s * w / 2, by, bz);
     group.add(gable);
   }
-  if (colliders) roofSlope(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
+  if (!colliders) return null;
+  roofSlope(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
+  // the slabs are pitched, but their collider's bounding box is a fine blocker to test
+  // against — it errs a touch large, which only means the roof clears a shade early
+  return { mats: [roofMat, gmat], box: colliders[colliders.length - 1], op: 1, want: 1 };
 }
 
 function makeBuilding(rng, bx, bz, group, colliders, crateList) {
@@ -1079,6 +1099,10 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
     { x: bx - w / 2, z: bz, hw: t / 2, hd: d / 2, side: 2 },
     { x: bx + w / 2, z: bz, hw: t / 2, hd: d / 2, side: 3 },
   ];
+  // The house shell fades slab by slab for the see-through peek, so each slab owns a
+  // clone of the cached wall material and pairs with the collider just pushed for it.
+  const shell = [];
+  const peekSlab = (m) => shell.push({ mats: [ownMat(m)], box: colliders[colliders.length - 1], op: 1, want: 1 });
   for (const wall of walls) {
     if (wall.side === doorSide) {
       const horiz = wall.hw > wall.hd;
@@ -1092,12 +1116,14 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
         m.position.set(sx, y0 + h / 2 - 0.3, sz);
         group.add(m);
         colliders.push(aabb(sx, sz, horiz ? segLen / 2 : t / 2, horiz ? t / 2 : segLen / 2, h + 0.6, y0 - 0.6));
+        peekSlab(m);
       }
     } else {
       const m = box(wall.hw * 2, h + 0.6, wall.hd * 2, wallC);
       m.position.set(wall.x, y0 + h / 2 - 0.3, wall.z);
       group.add(m);
       colliders.push(aabb(wall.x, wall.z, wall.hw, wall.hd, h + 0.6, y0 - 0.6));
+      peekSlab(m);
       if (rng() < 0.75) {
         const horiz = wall.hw > wall.hd;
         const win = windowPane(rng, 1.2, 0.9);
@@ -1115,7 +1141,8 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
   const floor = box(w, 0.6, d, 0x4a453e);
   floor.position.set(bx, y0 - 0.24, bz);
   group.add(floor);
-  addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders); // roof sits down onto the walls, standable
+  const roofPeek = addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders); // roof sits down onto the walls, standable
+  if (roofPeek) shell.push(roofPeek); // the roof clears too, or looking down at the hero shows only shingles
   if (rng() < 0.85) makeShelf(rng, bx + (rng() - 0.5) * (w - 3), bz + (rng() - 0.5) * (d - 3), (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList);
   if (rng() < 0.7) makeCrate(rng, bx + (rng() - 0.5) * (w - 2.5), y0 + 0.08, bz + (rng() - 0.5) * (d - 2.5), group, colliders, crateList, false);
   // parked car near the building
@@ -1144,7 +1171,7 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
   const doorZ = doorSide === 0 ? bz - d / 2 : doorSide === 1 ? bz + d / 2 : bz;
   const outX = doorSide === 2 ? -1 : doorSide === 3 ? 1 : 0;
   const outZ = doorSide === 0 ? -1 : doorSide === 1 ? 1 : 0;
-  return { x: bx, z: bz, hw: w / 2 + 0.5, hd: d / 2 + 0.5,
+  return { x: bx, z: bz, hw: w / 2 + 0.5, hd: d / 2 + 0.5, shell,
     doorX, doorZ, doorOutX: doorX + outX * 2.2, doorOutZ: doorZ + outZ * 2.2,
     // roof ridge line (runs along x) — a crow perch
     roofY: y0 + h - 0.05 + d * 0.32, ridgeHW: Math.max(1, w / 2 - 0.6) };
@@ -1422,7 +1449,12 @@ function updateChunks(px, pz) {
   for (const [key, ch] of chunks) {
     if (Math.abs(ch.cx - ccx) > VIEW_R + 1 || Math.abs(ch.cz - ccz) > VIEW_R + 1) {
       scene.remove(ch.group);
-      ch.group.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose(); });
+      ch.group.traverse(o => {
+        if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose();
+        if (o.material && o.material.userData.owned) o.material.dispose(); // per-house shell clones
+      });
+      // drop any half-faded slab of this chunk before its materials go
+      if (ch.buildings) for (const bld of ch.buildings) for (const s of bld.shell) peeking.delete(s);
       for (const cr of ch.crates) {
         const i = allCrates.indexOf(cr);
         if (i >= 0) allCrates.splice(i, 1);
@@ -1507,6 +1539,23 @@ function raySphere(ox, oy, oz, dx, dy, dz, sx, sy, sz, r) {
   const d2 = lx * lx + ly * ly + lz * lz - tca * tca;
   if (d2 > r * r) return Infinity;
   return tca - Math.sqrt(r * r - d2);
+}
+// does the segment a->b pierce this collider? slab test, axis-aligned only (house wall
+// slabs never carry a rot). pad widens the box so a graze counts as a block.
+function segBox(ax, ay, az, bx, by, bz, c, pad = 0) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az;
+  let t0 = 0, t1 = 1;
+  const slab = (o, d, lo, hi) => {
+    if (Math.abs(d) < 1e-6) return o >= lo && o <= hi;
+    let ta = (lo - o) / d, tb = (hi - o) / d;
+    if (ta > tb) { const s = ta; ta = tb; tb = s; }
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    return t0 <= t1;
+  };
+  return slab(ax, dx, c.x - c.hw - pad, c.x + c.hw + pad) &&
+         slab(az, dz, c.z - c.hd - pad, c.z + c.hd + pad) &&
+         slab(ay, dy, c.y0 - pad, c.y1 + pad);
 }
 // coarse ray-vs-terrain
 function rayGround(ox, oy, oz, dx, dy, dz, maxT) {
@@ -1946,7 +1995,8 @@ function buildTown() {
 const input = {
   moveX: 0, moveY: 0, lookDX: 0, lookDY: 0,
   jump: false, sprint: false, shoot: false, shootPressed: false,
-  interact: false, reload: false, aim: false, aimPad: false, aimTouch: false, slide: false,
+  interact: false, interactHeld: false, interactHeldPad: false,
+  reload: false, aim: false, aimPad: false, aimTouch: false, slide: false,
   device: 'kbm', gamepadKind: 'xbox',
   sprintGamepad: false, shootGamepad: false,
 };
@@ -1957,7 +2007,7 @@ let rmbDrag = false, lastMX = 0, lastMY = 0;
 addEventListener('keydown', e => {
   keys[e.code] = true;
   input.device = 'kbm';
-  if (e.code === 'KeyE') input.interact = true;
+  if (e.code === 'KeyE') { input.interact = true; input.interactHeld = true; }
   if (e.code === 'KeyR') input.reload = true;
   if ((e.code === 'KeyQ' || e.code === 'KeyF') && !e.repeat) cycleWeapon(1);
   if (e.code === 'KeyV' && !e.repeat) toggleFPV();
@@ -1968,6 +2018,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('keyup', e => {
   keys[e.code] = false;
+  if (e.code === 'KeyE') input.interactHeld = false;
   if (e.code === 'Tab') ewRelease();
 });
 
@@ -2063,7 +2114,7 @@ if (isTouch) {
   wpanel.addEventListener('touchend', e => { e.preventDefault(); wpanel.classList.remove('pressed'); }, { passive: false });
   wpanel.addEventListener('touchcancel', () => wpanel.classList.remove('pressed'), { passive: true });
 }
-bindBtn('btnInteract', () => { input.interact = true; });
+bindBtn('btnInteract', () => { input.interact = true; input.interactHeld = true; }, () => { input.interactHeld = false; });
 bindBtn('btnEmote', () => { ewheel.open ? ewClose() : ewOpen('touch'); }); // toggle for touch
 const shootXhEls = [...document.querySelectorAll('.tbtn .xh')]; // mini crosshairs on both attack buttons
 bindBtn('btnSprint', () => {
@@ -2180,6 +2231,7 @@ function pollGamepad(dt) {
   if (justPressed(0)) input.jump = true;
   if (justPressed(1)) input.reload = true;
   if (justPressed(2)) input.interact = true;
+  input.interactHeldPad = pressed(2);   // held X/Square feeds the hold-to-trade ring
   if (justPressed(3)) cycleWeapon(1);              // Y / Triangle: cycle weapon
   if (justPressed(10)) input.sprintGamepad = !input.sprintGamepad;
   if (justPressed(11)) input.slide = true;         // R3: slide
@@ -2477,7 +2529,7 @@ const player = {
   pos: new THREE.Vector3(0, 0, 0),
   vy: 0, grounded: true,
   hp: 100, maxHp: 100,
-  camYaw: 0, camPitch: -0.24,
+  camYaw: 0, camPitch: -0.24, groundCamT: 0,
   weapon: WEAPONS.fists,
   clip: Infinity,
   reloading: 0, shootCd: 0, lastShotT: -9, lastHurtT: -9, lastAimYaw: 0,
@@ -2869,7 +2921,35 @@ function spawnBubble(getPos, text, owner) {
 function fireEmote(i) {
   spawnBubble(() => ({ x: player.pos.x, y: player.pos.y + 2.2, z: player.pos.z }), EMOTES[i], player);
   SFX.pickup();
+  // some emotes double as squad orders for the AI cousins
+  const name = EMOTES[i] || '';
+  if (name.startsWith('Trade')) issueSquadCmd('lineup');
+  else if (name.startsWith('Wait')) issueSquadCmd('wait');
+  else if (name.startsWith('Fight')) issueSquadCmd('guard');
   if (typeof netSendEmote === 'function') netSendEmote(i);
+}
+// ---------- emote squad orders ----------
+// Trade: the AI cousins line up shoulder-to-shoulder in front of you and hold for 10s
+// (or until you fire) so you can walk the line swapping weapons. Wait: they cluster on
+// their spot back-to-back for 45s. Fight: they ring your sides and back for 45s and
+// move with you — calling it during a Wait ends the wait early.
+const squadCmd = { mode: null, t: 0, ax: 0, az: 0, ayaw: 0, n: 0 };
+function issueSquadCmd(mode) {
+  if (net.role === 'client') return; // the host owns the squad AI
+  const squad = companions.filter(c => c.recruited && !c.downed && !c.netP)
+    .sort((a, b) => (a.order || 0) - (b.order || 0));
+  if (!squad.length) return;
+  squadCmd.mode = mode;
+  squadCmd.t = mode === 'lineup' ? 10 : 45;
+  squadCmd.ax = player.pos.x; squadCmd.az = player.pos.z; squadCmd.ayaw = player.camYaw;
+  if (mode === 'wait') {
+    // "that spot": the squad's own centroid, not the player's feet
+    let cx = 0, cz = 0;
+    for (const c of squad) { cx += c.pos.x; cz += c.pos.z; }
+    squadCmd.ax = cx / squad.length; squadCmd.az = cz / squad.length;
+  }
+  squad.forEach((c, i) => { c.cmdSlot = i; });
+  squadCmd.n = squad.length;
 }
 function updateEmoteFx(dt) {
   for (let i = bubbles.length - 1; i >= 0; i--) {
@@ -3045,7 +3125,7 @@ function resetGame() {
   applyCousin(selectedCousin);
   player.pos.set(0, groundHeight(0, 0), 0);
   player.vy = 0; player.hp = player.maxHp; player.dead = false;
-  player.camYaw = 0; player.camPitch = -0.24;
+  player.camYaw = 0; player.camPitch = -0.24; player.groundCamT = 0;
   player.reloading = 0;
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
@@ -3081,6 +3161,8 @@ function resetGame() {
   pickups.length = 0;
   clearDamageNumbers();
   clearBubbles();
+  squadCmd.mode = null; // no emote orders carry across runs
+  tradeRing(0);
   for (const k in reserves) delete reserves[k];
   equipWeapon('fists');
   scatterCousins();
@@ -3295,6 +3377,7 @@ function getAimDir(out) {
 // ---------- shooting ----------
 const _from = new THREE.Vector3(), _to = new THREE.Vector3(), _gp = new THREE.Vector3();
 function fireWeapon() {
+  if (squadCmd.mode === 'lineup') squadCmd.mode = null; // gunfire breaks up the trade line
   const w = player.weapon;
   getAimDir(_aimDir);
   player.lastAimYaw = Math.atan2(_aimDir.x, _aimDir.z);
@@ -3572,6 +3655,70 @@ function tradeWeapons(c) {
   rumble(60, 0.3, 0.4);
   toast(`TRADED: YOUR ${WEAPONS[myId].name.toUpperCase()} FOR ${(c.netP ? 'P' + c.netP + ' ' : '') + c.data.name.toUpperCase()}'S ${WEAPONS[theirId].name.toUpperCase()}`);
 }
+// ---------- hold-to-trade (multiplayer, any weapons) ----------
+// two players hold interact within reach of each other: a hero-coloured ring fills,
+// pings, and their held weapons swap — true swap, nothing duplicated
+const tradeHold = { key: null, prog: 0, cd: 0, txT: 0, a: null, b: null };
+const tradeRingEl = document.getElementById('tradering');
+function tradeRing(v) {
+  if (v > 0.02) {
+    tradeRingEl.style.display = 'block';
+    tradeRingEl.style.setProperty('--fill', (v * 360) + 'deg');
+  } else tradeRingEl.style.display = 'none';
+}
+function updateHoldTrades(dt) {
+  tradeHold.cd -= dt;
+  tradeHold.txT -= dt;
+  const holders = [];
+  if ((input.interactHeld || input.interactHeldPad) && !player.dead) holders.push({ p: 1, x: player.pos.x, z: player.pos.z, self: true });
+  for (const c of companions) {
+    if (c.netP && c.netConn && c.netPose && c.netPose.th && !c.downed) holders.push({ p: c.netP, x: c.pos.x, z: c.pos.z, c });
+  }
+  let a = null, b = null;
+  for (let i = 0; i < holders.length && !a; i++)
+    for (let j = i + 1; j < holders.length && !a; j++)
+      if (Math.hypot(holders[i].x - holders[j].x, holders[i].z - holders[j].z) < 3.2) { a = holders[i]; b = holders[j]; }
+  if (!a || tradeHold.cd > 0) {
+    if (tradeHold.prog > 0) tradeSendProg(0, tradeHold.a, tradeHold.b);
+    tradeHold.prog = 0; tradeHold.key = null;
+    tradeRing(0);
+    return;
+  }
+  const key = a.p + '-' + b.p;
+  if (key !== tradeHold.key) { tradeHold.key = key; tradeHold.prog = 0; }
+  tradeHold.a = a; tradeHold.b = b;
+  tradeHold.prog = Math.min(1, tradeHold.prog + dt / 1.3);
+  tradeRing(a.self || b.self ? tradeHold.prog : 0);
+  if (tradeHold.txT <= 0) { tradeHold.txT = 0.1; tradeSendProg(tradeHold.prog, a, b); }
+  if (tradeHold.prog >= 1) {
+    executeHoldTrade(a, b);
+    tradeSendProg(0, a, b);
+    tradeHold.prog = 0; tradeHold.cd = 1.5; tradeHold.key = null;
+    tradeRing(0);
+  }
+}
+function tradeSendProg(v, a, b) {
+  for (const e of [a, b]) {
+    if (e && e.c && e.c.netConn) { try { e.c.netConn.send({ t: 'tradeP', v }); } catch (err) {} }
+  }
+}
+function executeHoldTrade(a, b) {
+  const idOf = e => e.self ? player.weapon.id : (e.c.weapon || WEAPONS.pistol).id;
+  const idA = idOf(a), idB = idOf(b);
+  if (idA === idB) { toast('YOU BOTH HOLD THE SAME WEAPON'); return; }
+  for (const [e, give, take] of [[a, idA, idB], [b, idB, idA]]) {
+    if (e.self) {
+      if (give !== 'fists') { const i = player.owned.indexOf(give); if (i >= 0) player.owned.splice(i, 1); }
+      equipWeapon(take);
+      toast(`TRADED: YOUR ${WEAPONS[give].name.toUpperCase()} FOR A ${WEAPONS[take].name.toUpperCase()}`);
+    } else {
+      setCompanionWeapon(e.c, take);
+      try { e.c.netConn.send({ t: 'tradeW', w: take, took: give }); } catch (err) {}
+    }
+  }
+  SFX.tradePing();
+  if (!a.self && !b.self) toast(`P${a.p} AND P${b.p} TRADED WEAPONS`);
+}
 // a client asked to swap melees with player p (1 = the host); host validates and settles
 function netHandleTradeReq(conn, p) {
   const c = cousinByConn(conn);
@@ -3707,6 +3854,9 @@ function companionLoot(c, cr) {
 // ---------- main loop ----------
 const clock = new THREE.Clock();
 let camDist = 4.9;
+// lens state for the ground-cam flare (see updateCamera). lookFov is the FOV *before*
+// the flare widens it, so craning at the sky never speeds the look up.
+let lensStretched = false, lookFov = 70;
 let nearCrate = null, nearRecruit = null;
 
 function animate() {
@@ -3724,7 +3874,7 @@ function animate() {
       updateCompanions(dt);
       updateZombies(dt);
       updateSpawner(dt);
-      if (net.role === 'host') netHostTick(dt);
+      if (net.role === 'host') { netHostTick(dt); updateHoldTrades(dt); }
     }
     updateCrates(dt);
     updatePickups(dt);
@@ -3735,6 +3885,7 @@ function animate() {
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
   }
   updateCamera(dt);
+  updateHousePeek(dt); // after the camera: the sightline test needs its settled position
   updateFx(dt);
   updateDamageNumbers(dt);
   updateEmoteFx(dt);
@@ -3746,7 +3897,7 @@ function updatePlayer(dt) {
   if (player.dead) return;
   // look speed scales with the current FOV so zoomed aim (especially the sniper
   // scope, 22° vs 70°) turns proportionally slower and stays steady on target
-  const lookDamp = camera.fov / 70;
+  const lookDamp = lookFov / 70;
   player.camYaw -= input.lookDX * lookDamp;
   player.camPitch = clamp(player.camPitch - input.lookDY * lookDamp, -1.25, 0.6);
   input.lookDX = 0; input.lookDY = 0;
@@ -3849,6 +4000,7 @@ function updatePlayer(dt) {
       reserves[w.id] -= take;
       hud.reloadmsg.style.opacity = 0;
       updateAmmoHUD();
+      SFX.reloadDone(); // the response to the reload's opening call — mag's seated
     }
   }
 
@@ -3991,6 +4143,11 @@ function updatePlayer(dt) {
 // ---------- companions ----------
 const _cv = new THREE.Vector3();
 function updateCompanions(dt) {
+  // emote squad orders run on a timer (lineup also breaks when the player fires)
+  if (squadCmd.mode) {
+    squadCmd.t -= dt;
+    if (squadCmd.t <= 0) squadCmd.mode = null;
+  }
   // formation slots in recruit order: single-file line behind you while moving,
   // spread shoulder-to-shoulder like a firing squad once you stop
   const squad = companions.filter(c => c.recruited).sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -4058,6 +4215,30 @@ function updateCompanions(dt) {
       tx2 = player.pos.x + bkX * (1.8 + i * 1.5);
       tz2 = player.pos.z + bkZ * (1.8 + i * 1.5);
     }
+    // an emote squad order overrides the slot: trade line, back-to-back huddle, or guard ring
+    const cmd = squadCmd.mode;
+    if (cmd) {
+      const ci = c.cmdSlot || 0, cn = squadCmd.n || 1;
+      if (cmd === 'lineup') {
+        // shoulder-to-shoulder row a couple metres in front of where you called it
+        const fx = -Math.sin(squadCmd.ayaw), fz = -Math.cos(squadCmd.ayaw);
+        const k = ci - (cn - 1) / 2;
+        tx2 = squadCmd.ax + fx * 2.6 + (-fz) * k * 1.7;
+        tz2 = squadCmd.az + fz * 2.6 + fx * k * 1.7;
+      } else if (cmd === 'wait') {
+        // tight ring on the huddle spot, everyone covering someone's back
+        const a = ci * TAU / cn;
+        const r = cn > 1 ? 0.95 : 0;
+        tx2 = squadCmd.ax + Math.sin(a) * r;
+        tz2 = squadCmd.az + Math.cos(a) * r;
+      } else {
+        // guard: spread across your sides and back (90..270 deg off your facing) and move with you
+        const th = cn > 1 ? Math.PI / 2 + (ci * Math.PI) / (cn - 1) : Math.PI;
+        const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
+        tx2 = player.pos.x + (fx * Math.cos(th) + (-fz) * Math.sin(th)) * 2.3;
+        tz2 = player.pos.z + (fz * Math.cos(th) + fx * Math.sin(th)) * 2.3;
+      }
+    }
     const dx = tx2 - c.pos.x, dz = tz2 - c.pos.z;
     const dist = Math.hypot(dx, dz);
     const pd = Math.hypot(player.pos.x - c.pos.x, player.pos.z - c.pos.z);
@@ -4101,17 +4282,21 @@ function updateCompanions(dt) {
         break;
       }
     }
-    // fight: swing or shoot at the nearest zombie with whatever we're carrying
+    // fight: swing or shoot at the nearest zombie with whatever we're carrying.
+    // a trade lineup is at-ease — no targeting, eyes on the player until it breaks
     const cw = c.weapon || WEAPONS.pistol;
     c.shootCd -= dt;
     if (c.meleeT > 0) c.meleeT -= dt;
     let tgt = null, tD = 15;
-    for (const z of zombies) {
+    if (cmd !== 'lineup') for (const z of zombies) {
       if (z.state !== 'chase' && z.state !== 'wake') continue; // ignore sleepers, emergers & the dormant boss
       const d = Math.hypot(z.pos.x - c.pos.x, z.pos.z - c.pos.z);
       if (d < tD) { tD = d; tgt = z; }
     }
     if (tgt) c.yaw = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
+    else if (cmd === 'lineup' && !moving) c.yaw = Math.atan2(player.pos.x - c.pos.x, player.pos.z - c.pos.z);
+    else if (cmd === 'wait' && !moving) c.yaw = Math.atan2(c.pos.x - squadCmd.ax, c.pos.z - squadCmd.az); // backs together, eyes out
+    else if (cmd === 'guard' && !moving) c.yaw = Math.atan2(c.pos.x - player.pos.x, c.pos.z - player.pos.z); // watch your flanks
     else if (still && !moving) c.yaw = fYaw; // stand at attention facing where you face
     if (tgt && c.shootCd <= 0) {
       const kx = (tgt.pos.x - c.pos.x) / tD, kz = (tgt.pos.z - c.pos.z) / tD;
@@ -5038,7 +5223,13 @@ function updateCamera(dt) {
   const pivotX = player.pos.x + rightX * shoulder;
   const pivotY = player.pos.y + 1.5;
   const pivotZ = player.pos.z + rightZ * shoulder;
-  const tpDist = camDist * (1 - aimT * 0.5);     // zoom closer over the shoulder while aiming
+  // ground-cam flare, settled last frame: as the rig gets shoved into the dirt it also
+  // pulls in tight, so the widening lens below reads as a dolly zoom rather than a plain
+  // FOV bump (see the flare block after the ground clamp). Pulling in shortens the rig,
+  // which eases the very shove that drives the flare — keep this gentle or that loop
+  // gains enough to breathe.
+  const gcPrev = player.groundCamT;
+  const tpDist = camDist * (1 - aimT * 0.5) * (1 - gcPrev * 0.25); // zoom closer over the shoulder while aiming
   const tpX = pivotX + Math.sin(cy) * Math.cos(cp) * tpDist;
   const tpY = pivotY - Math.sin(cp) * tpDist;
   const tpZ = pivotZ + Math.cos(cy) * Math.cos(cp) * tpDist;
@@ -5057,6 +5248,12 @@ function updateCamera(dt) {
   );
   const minY = groundHeight(camera.position.x, camera.position.z) + 0.35;
   if (camera.position.y < minY) camera.position.y = minY;
+  // how far below the dirt the rig *wanted* to sit — that shove, and only while we're
+  // actually craning up at the sky, is what drives the flare. Aiming and first-person
+  // both cancel it: a scope that fisheyes is a scope you can't shoot with.
+  const bury = clamp((minY - tY) / 1.2, 0, 1) * clamp(cp / 0.3, 0, 1) * (1 - fpv) * (1 - aimT);
+  player.groundCamT = lerp(player.groundCamT, bury, 1 - Math.exp(-8 * dt));
+  const gc = player.groundCamT;
   // look target eases from the blob itself (TP) to far ahead along the aim (FP)
   const lx = lerp(pivotX, eyeX + fwdX * 8, fpv);
   const ly = lerp(pivotY + 0.15, eyeY + fwdY * 8, fpv);
@@ -5067,8 +5264,24 @@ function updateCamera(dt) {
   if (wz.id === 'sniper') zoomedFov = 22;
   else if (wz.melee) zoomedFov = 62;
   else zoomedFov = fpv > 0.5 ? 45 : 52;
-  const fov = lerp(70, zoomedFov, aimT);
-  if (Math.abs(fov - camera.fov) > 0.04) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  const baseFov = lerp(70, zoomedFov, aimT);
+  lookFov = baseFov;
+  const fov = baseFov + gc * 24;
+  // The flare goes wide *and* squeezes the frame anamorphically, so a hero shot from
+  // the dirt stretches up against the sky. The matrix is rebuilt from scratch every
+  // frame the flare is live — scaling it in place would compound the squeeze — and the
+  // inverse is re-derived because updateProjectionMatrix's copy is stale after we poke
+  // the elements (raycasts and unproject read it).
+  if (gc > 0.002 || lensStretched || Math.abs(fov - camera.fov) > 0.04) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+    if (gc > 0.002) {
+      camera.projectionMatrix.elements[0] *= 1 - gc * 0.12; // pinch x
+      camera.projectionMatrix.elements[5] *= 1 + gc * 0.15; // stretch y
+      camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    }
+    lensStretched = gc > 0.002;
+  }
   // sniper scope overlay only when actually aiming a sniper (hide the normal crosshair behind it)
   const scoped = wz.id === 'sniper' && aimT > 0.55;
   if (scopeEl) scopeEl.style.opacity = scoped ? (aimT - 0.55) / 0.45 : 0;
@@ -5082,6 +5295,40 @@ function updateCamera(dt) {
   moon.position.set(player.pos.x + moonOff.x, moonOff.y, player.pos.z + moonOff.z);
   moon.target.position.copy(player.pos);
   moon.target.updateMatrixWorld();
+}
+
+// ---- see-through house ----
+// Standing in a house, any part of its shell that comes between the camera and the hero
+// clears away — walls and roof both, since pitching down puts the camera over the ridge
+// looking in. Only the house you're actually standing in ever fades.
+const PEEK_OP = 0.18;
+const peeking = new Set(); // mid-fade shell slabs, kept so they ease back after you leave
+function updateHousePeek(dt) {
+  const bld = game.state === 'playing' ? buildingAt(player.pos.x, player.pos.z) : null;
+  if (bld) {
+    const p = player.pos, c = camera.position;
+    for (const s of bld.shell) {
+      // pad a little so a slab that merely grazes the sightline still clears
+      s.want = segBox(c.x, c.y, c.z, p.x, p.y + 1.15, p.z, s.box, 0.12) ? PEEK_OP : 1;
+      peeking.add(s);
+    }
+  }
+  const k = 1 - Math.exp(-11 * dt);
+  for (const s of peeking) {
+    if (!bld || !bld.shell.includes(s)) s.want = 1; // stepped out — ease it back in
+    s.op = lerp(s.op, s.want, k);
+    // the ease only approaches 1, so snap it once it's close enough to read as solid —
+    // otherwise the slab is left parked at ~0.997 and never truly opaque again
+    const solid = s.want === 1 && s.op > 0.995;
+    if (solid) s.op = 1;
+    const clear = s.op < 1;
+    for (const m of s.mats) {
+      // transparent flips the material's shader program, so only poke it on the change
+      if (m.transparent !== clear) { m.transparent = clear; m.depthWrite = !clear; m.needsUpdate = true; }
+      m.opacity = s.op;
+    }
+    if (solid) peeking.delete(s); // settled solid, stop tracking it
+  }
 }
 
 function updateFx(dt) {
@@ -5407,18 +5654,20 @@ function netClientData(m, conn, peer, n) {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
   } else if (m.t === 'tradeW') {
-    // the host settled a melee trade: our blade leaves the kit, theirs takes its slot —
-    // never overwritten back to this cousin's signature melee
+    // the host settled a trade: what we gave leaves the kit, theirs takes its slot —
+    // never overwritten back to this cousin's signature gear
     if (WEAPONS[m.w]) {
-      if (m.took && meleeTradable(m.took) && player.weapon.id === m.took) {
+      if (m.took && m.took !== 'fists' && player.weapon.id === m.took) {
         const i = player.owned.indexOf(m.took);
         if (i >= 0) player.owned.splice(i, 1);
       }
       equipWeapon(m.w);
-      SFX.swap(WEAPONS[m.w]);
+      SFX.tradePing();
       rumble(60, 0.3, 0.4);
       toast(`TRADED: YOUR ${WEAPONS[m.took] ? WEAPONS[m.took].name.toUpperCase() : 'WEAPON'} FOR A ${WEAPONS[m.w].name.toUpperCase()}`);
     }
+  } else if (m.t === 'tradeP') {
+    net.tradeP = m.v; net.tradePT = performance.now();
   } else if (m.t === 'secured') {
     game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
     recordPrestige();                 // multiplayer clears count toward your badges too
@@ -5547,11 +5796,21 @@ function netClientTick(dt) {
     net.txT = 1 / 15;
     const mv = Math.hypot(player.pos.x - (net._px || 0), player.pos.z - (net._pz || 0)) > 0.02 ? 1 : 0;
     net._px = player.pos.x; net._pz = player.pos.z;
+    // holding interact near another player streams the trade-hold handshake flag
+    let th = 0;
+    if ((input.interactHeld || input.interactHeldPad) && !player.dead) {
+      for (const [, g] of net.actors) {
+        if (!g.p || g.dn) continue;
+        if (Math.hypot(g.blob.root.position.x - player.pos.x, g.blob.root.position.z - player.pos.z) < 3.2) { th = 1; break; }
+      }
+    }
     try {
       net.conns[0].send({ t: 'p', x: player.pos.x, z: player.pos.z, y: player.pos.y,
-        yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp) });
+        yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp), th });
     } catch (e) {}
   }
+  // the host's fill level drives our ring; it hides when updates stop coming
+  tradeRing(net.tradePT && performance.now() - net.tradePT < 500 ? net.tradeP || 0 : 0);
 }
 // client-side squad bars: every other player big + tagged, AI cousins small
 function netRefreshClientBars() {
@@ -5665,6 +5924,7 @@ window.__dbg = {
   hurtZombie: (z, dmg, opts) => damageZombie(z, dmg, 0, 1, 2, opts),
   blowLimb: z => blowLimb(z, 0, 1),
   popHead: z => popHead(z, 0, 1),
+  squadCmd, issueSquadCmd, executeHoldTrade, tradeRing, updateHoldTrades, fireWeapon, updateCompanions,
   exposeBrain, killZombie, pauseGame, resumeGame, scene, allCrates, cycleWeapon,
   get playerBlob() { return playerBlob; },
   fire: () => fireWeapon(),

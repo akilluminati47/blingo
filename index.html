@@ -35,6 +35,12 @@
   #hitmarker::before { left:50%; top:0; width:3px; height:100%; transform:translateX(-50%); }
   #hitmarker::after { top:50%; left:0; height:3px; width:100%; transform:translateY(-50%); }
 
+  /* hold-to-trade: a hero-coloured ring that fills while both players hold interact */
+  #tradering { position:absolute; left:50%; top:62%; transform:translate(-50%,-50%); width:58px; height:58px; border-radius:50%;
+    display:none; background:conic-gradient(var(--hero) var(--fill,0deg), rgba(255,255,255,.13) 0);
+    border:2px solid rgba(255,255,255,.35); box-shadow:0 0 16px rgba(0,0,0,.55); }
+  #tradering::after { content:''; position:absolute; inset:8px; border-radius:50%; background:rgba(8,10,14,.85); }
+
   #vignette { position:absolute; inset:0; background:radial-gradient(ellipse at center, transparent 55%, rgba(160,0,0,.55) 100%); opacity:0; transition:opacity .25s; }
 
   #topbar { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); display:flex; gap:16px; align-items:center;
@@ -119,10 +125,10 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   .tbtn:active, .tbtn.pressed { background:rgba(255,255,255,.4); }
   .tbtn img { width:55%; height:55%; opacity:.9; pointer-events:none; }
-  /* two large (jump + slide), two-and-a-pop-in medium (both attacks + interact), rest small */
+  /* two large (jump + slide), the main attack + interact medium, rest small */
   #btnJump, #btnSlide { width:var(--tl); height:var(--tl); }
-  #btnShoot, #btnShoot2, #btnInteract { width:var(--tm); height:var(--tm); }
-  #btnAim, #btnView, #btnReload, #btnSprint, #btnEmote { width:var(--ts); height:var(--ts); }
+  #btnShoot, #btnInteract { width:var(--tm); height:var(--tm); }
+  #btnAim, #btnView, #btnReload, #btnSprint, #btnEmote, #btnShoot2 { width:var(--ts); height:var(--ts); }
   /* right cluster: jump anchors the corner, slide beside it, the attack circle above the
      slide with interact popping in above the attack, aim + view stacked to their left */
   #btnJump { right:calc(20px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:11px; }
@@ -135,11 +141,12 @@
   #btnView { right:calc(211px + env(safe-area-inset-right)); bottom:calc(285px + env(safe-area-inset-bottom)); font-size:10px; }
   #btnView.pressed { background:rgba(120,200,255,.5); }
   #btnReload { right:calc(36px + env(safe-area-inset-right)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:8px; letter-spacing:.3px; }
-  /* left cluster: run + emote column, the secondary attack circle centred between them */
+  /* left cluster: one small column — run, emote, then the secondary attack on top */
   #btnSprint { left:calc(24px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
-  #btnShoot2 { left:calc(92px + env(safe-area-inset-left)); bottom:calc(237px + env(safe-area-inset-bottom)); }
+  #btnShoot2 { left:calc(24px + env(safe-area-inset-left)); bottom:calc(346px + env(safe-area-inset-bottom)); }
   /* attack buttons wear the live crosshair: same X, same enemy flare + twist */
   .tbtn .xh { position:relative; width:26px; height:26px; pointer-events:none; transition:transform .13s ease; }
+  #btnShoot2 .xh { width:19px; height:19px; } /* small circle: keep the 1.4x enemy flare inside the ring */
   .tbtn .xh::before, .tbtn .xh::after { content:''; position:absolute; left:50%; top:50%; width:2.5px; height:100%;
     background:#fff; box-shadow:0 0 3px #000; transition:background .1s, box-shadow .1s; }
   .tbtn .xh::before { transform:translate(-50%,-50%) rotate(45deg); }
@@ -346,7 +353,7 @@
     #btnReload { right:calc(26px + env(safe-area-inset-right)); bottom:calc(166px + env(safe-area-inset-bottom)); font-size:7px; }
     #btnSprint { left:calc(20px + env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom)); font-size:9px; }
     #btnEmote { left:calc(20px + env(safe-area-inset-left)); bottom:calc(222px + env(safe-area-inset-bottom)); font-size:13px; }
-    #btnShoot2 { left:calc(74px + env(safe-area-inset-left)); bottom:calc(190px + env(safe-area-inset-bottom)); }
+    #btnShoot2 { left:calc(20px + env(safe-area-inset-left)); bottom:calc(276px + env(safe-area-inset-bottom)); }
   }
   /* portrait: aim + view leave the shoot column and stack above reload on the far right,
      keeping the middle of a narrow screen clear */
@@ -365,6 +372,7 @@
   <div id="scope"><div id="scopehair"></div></div>
   <div id="crosshair"></div>
   <div id="hitmarker"></div>
+  <div id="tradering"></div>
   <div id="btnPauseHud" title="Pause">❚❚</div>
 
   <div id="bossbar">
