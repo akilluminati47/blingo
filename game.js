@@ -1371,11 +1371,53 @@ function buildingAt(x, z) {
 function insideBuilding(x, z) { return !!buildingAt(x, z); }
 
 function chunkKey(cx, cz) { return cx + ',' + cz; }
+
+// ---------- ground silhouettes ----------
+// covered ground never falls into the void: every chunk we've walked leaves its key in
+// visitedChunks, and once it streams out a cheap dark low-res terrain quad stands in,
+// so looking back from far afield there is never a floor gap between us and town.
+// Scope stays intelligent: silhouettes only live inside the padded corridor rectangle
+// spanning the player and the town footprint — circle wide around the bank and the
+// ones swinging out of that corridor melt away (and re-form if it sweeps back over
+// ground we'd covered, since visited keys are kept forever — keys are nearly free).
+const visitedChunks = new Set();
+const silhouettes = new Map(); // chunk key -> mesh
+const silMat = new THREE.MeshLambertMaterial({ color: 0x171a20 });
+// the persistent town apron in chunk coords (apron is 208 wide centred on 47,2)
+const TOWN_RECT = { x0: -1, x1: 3, z0: -2, z1: 2 };
+function updateSilhouettes(ccx, ccz) {
+  const x0 = Math.min(ccx, TOWN_RECT.x0) - 1, x1 = Math.max(ccx, TOWN_RECT.x1) + 1;
+  const z0 = Math.min(ccz, TOWN_RECT.z0) - 1, z1 = Math.max(ccz, TOWN_RECT.z1) + 1;
+  for (const key of visitedChunks) {
+    if (chunks.has(key) || silhouettes.has(key)) continue;
+    const [cx, cz] = key.split(',').map(Number);
+    if (cx < x0 || cx > x1 || cz < z0 || cz > z1) continue;
+    // sunk a touch lower than live terrain so a returning chunk always draws over it
+    const m = terrainPlane(CHUNK, CHUNK, 6, 6, cx * CHUNK, cz * CHUNK, silMat, -0.3);
+    scene.add(m);
+    silhouettes.set(key, m);
+  }
+  for (const [key, m] of silhouettes) {
+    const [cx, cz] = key.split(',').map(Number);
+    if (chunks.has(key) || cx < x0 || cx > x1 || cz < z0 || cz > z1) {
+      scene.remove(m);
+      m.geometry.dispose();
+      silhouettes.delete(key);
+    }
+  }
+}
+function resetSilhouettes() {
+  for (const m of silhouettes.values()) { scene.remove(m); m.geometry.dispose(); }
+  silhouettes.clear();
+  visitedChunks.clear();
+}
+
 function updateChunks(px, pz) {
   const ccx = Math.round(px / CHUNK), ccz = Math.round(pz / CHUNK);
   for (let dx = -VIEW_R; dx <= VIEW_R; dx++) for (let dz = -VIEW_R; dz <= VIEW_R; dz++) {
     const key = chunkKey(ccx + dx, ccz + dz);
     if (!chunks.has(key)) chunks.set(key, buildChunk(ccx + dx, ccz + dz));
+    visitedChunks.add(key);
   }
   for (const [key, ch] of chunks) {
     if (Math.abs(ch.cx - ccx) > VIEW_R + 1 || Math.abs(ch.cz - ccz) > VIEW_R + 1) {
@@ -1388,6 +1430,7 @@ function updateChunks(px, pz) {
       chunks.delete(key);
     }
   }
+  updateSilhouettes(ccx, ccz);
 }
 function nearbyColliders(x, z) {
   const out = [];
@@ -2957,6 +3000,7 @@ function resetGame() {
   bossState.spawned2 = false; bossState.defeated2 = false;
   bossBarEl.classList.remove('show');
   resetCrows();
+  resetSilhouettes(); // fresh run, fresh covered-ground record
   for (const p of pickups) scene.remove(p.mesh);
   pickups.length = 0;
   clearDamageNumbers();
