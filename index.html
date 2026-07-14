@@ -206,6 +206,9 @@
   .screen::before, .screen::after { content:''; flex:0 0 auto; }
   .screen::before { margin-top:auto; }
   .screen::after { margin-bottom:auto; }
+  /* children must never squish to fit — overflow:hidden items (the mode/lobby pills) would
+     collapse to 0 height on small screens; force real overflow so the screen scrolls instead */
+  .screen > * { flex-shrink:0; }
   .screen h1 { font-size:min(11vw,58px); letter-spacing:8px; margin-bottom:4px; text-shadow:0 0 26px rgba(255,160,60,.45); }
   /* main BLINGO title in the blobby OpenDyslexic face */
   #startscreen h1 { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
