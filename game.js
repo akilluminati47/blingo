@@ -2048,17 +2048,34 @@ function bindBtn(id, down, up) {
   el.addEventListener('touchcancel', e => { el.classList.remove('pressed'); if (up) up(); }, { passive: false });
 }
 bindBtn('btnJump', () => { input.jump = true; });
+bindBtn('btnSlide', () => { input.slide = true; });
 bindBtn('btnShoot', () => { input.shoot = true; input.shootPressed = true; }, () => { input.shoot = false; });
-bindBtn('btnAim', () => { input.aimTouch = true; }, () => { input.aimTouch = false; });
+// aim is a toggle: tap on, tap off (the lit state survives bindBtn's touchend un-press)
+bindBtn('btnAim', () => { input.aimTouch = !input.aimTouch; },
+  () => { document.getElementById('btnAim').classList.toggle('pressed', input.aimTouch); });
 bindBtn('btnView', () => { toggleFPV(); });
 bindBtn('btnCycle', () => { cycleWeapon(1); });
 bindBtn('btnReload', () => { input.reload = true; });
 bindBtn('btnInteract', () => { input.interact = true; });
 bindBtn('btnEmote', () => { ewheel.open ? ewClose() : ewOpen('touch'); }); // toggle for touch
+const shootXhEl = document.querySelector('#btnShoot .xh'); // mini crosshair on the shoot button
 bindBtn('btnSprint', () => {
   sprintToggle = !sprintToggle;
   document.getElementById('btnSprint').style.background = sprintToggle ? 'rgba(120,255,140,.35)' : 'rgba(255,255,255,.14)';
 });
+
+// the stick's translucent home zone: it waits here faded, and glides back when let go
+function joyHomePos() { return { x: 128, y: innerHeight - 158 }; }
+function joyGoHome() {
+  const h = joyHomePos();
+  joyBase.classList.remove('live');
+  joyBase.classList.add('home');
+  joyBase.style.left = h.x + 'px';
+  joyBase.style.top = h.y + 'px';
+  joyKnob.style.left = '50%'; joyKnob.style.top = '50%';
+}
+if (isTouch) joyGoHome();
+addEventListener('resize', () => { if (isTouch && joyTouchId === null) joyGoHome(); });
 
 let camLast = { x: 0, y: 0 };
 touchLayer.addEventListener('touchstart', e => {
@@ -2069,7 +2086,8 @@ touchLayer.addEventListener('touchstart', e => {
     if (t.clientX < innerWidth * 0.45 && joyTouchId === null) {
       joyTouchId = t.identifier;
       joyOrigin = { x: t.clientX, y: t.clientY };
-      joyBase.style.display = 'block';
+      joyBase.classList.remove('home');
+      joyBase.classList.add('live');
       joyBase.style.left = t.clientX + 'px';
       joyBase.style.top = t.clientY + 'px';
       joyKnob.style.left = '50%'; joyKnob.style.top = '50%';
@@ -2101,7 +2119,7 @@ function touchEnd(e) {
   for (const t of e.changedTouches) {
     if (t.identifier === joyTouchId) {
       joyTouchId = null;
-      joyBase.style.display = 'none';
+      joyGoHome();   // drift back to the faded home zone
       input.moveX = 0; input.moveY = 0;
     } else if (t.identifier === camTouchId) camTouchId = null;
   }
@@ -2752,7 +2770,7 @@ function clearDamageNumbers() {
 // ---------- emote wheel + talk bubbles ----------
 // hold Tab / D-pad down (or toggle the touch button), steer with mouse / right stick;
 // the highlighted wedge grows, and releasing fires it as a bubble above your head
-const EMOTES = ['Hello .ᐟ', 'Good Luck .ᐟ', 'Nice .ᐟ', 'Trade .ᐟ', 'Wait .ᐟ'];
+const EMOTES = ['Hello .ᐟ', 'Good Luck .ᐟ', 'Nice .ᐟ', 'Trade .ᐟ', 'Wait .ᐟ', 'Fight .ᐟ'];
 const ewheelEl = document.getElementById('ewheel');
 const ewringEl = document.getElementById('ewring');
 const ewSegs = [];
@@ -2793,6 +2811,12 @@ function ewSteer(dx, dy, absolute) {
     if (ewheel.sel >= 0) tone(500 + ewheel.sel * 60, 0.04, 0.15, 'square');
   }
 }
+// the hero accent (the settings-menu trim colour) as an rgba() string for inline tints
+function heroTint(a) {
+  const h = getComputedStyle(document.documentElement).getPropertyValue('--hero').trim();
+  const n = parseInt(h.replace('#', ''), 16) || 0xff8c42;
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
 // redraw the ring: the highlighted wedge takes a bigger slice of the pie
 function ewRender() {
   const n = EMOTES.length, sel = ewheel.sel;
@@ -2804,7 +2828,8 @@ function ewRender() {
   const stops = [];
   let a = 0;
   for (let i = 0; i < n; i++) {
-    const col = i === sel ? 'rgba(255,210,74,.30)' : (i % 2 ? 'rgba(10,12,18,.72)' : 'rgba(24,28,40,.78)');
+    // settings-menu palette: dark panel rows, the picked wedge glows in the hero colour
+    const col = i === sel ? heroTint(0.32) : (i % 2 ? 'rgba(10,12,18,.92)' : 'rgba(22,26,36,.92)');
     stops.push(`${col} ${a}deg ${a + w(i)}deg`);
     const mid = (start + a + w(i) / 2) * Math.PI / 180;
     const r = i === sel ? 105 : 95;
@@ -2818,15 +2843,21 @@ function ewRender() {
 const ebubsEl = document.getElementById('ebubs');
 const bubbles = [];
 const _bv = new THREE.Vector3();
-function spawnBubble(getPos, text) {
+function spawnBubble(getPos, text, owner) {
+  // a fresh emote from the same speaker vanishes their previous bubble so they never stack
+  if (owner != null) {
+    for (let i = bubbles.length - 1; i >= 0; i--) {
+      if (bubbles[i].owner === owner) { bubbles[i].el.remove(); bubbles.splice(i, 1); }
+    }
+  }
   const el = document.createElement('div');
   el.className = 'ebub';
   el.textContent = text;
   ebubsEl.appendChild(el);
-  bubbles.push({ el, getPos, t: 0, life: 2.6 });
+  bubbles.push({ el, getPos, owner, t: 0, life: 2.6 });
 }
 function fireEmote(i) {
-  spawnBubble(() => ({ x: player.pos.x, y: player.pos.y + 2.2, z: player.pos.z }), EMOTES[i]);
+  spawnBubble(() => ({ x: player.pos.x, y: player.pos.y + 2.2, z: player.pos.z }), EMOTES[i], player);
   SFX.pickup();
   if (typeof netSendEmote === 'function') netSendEmote(i);
 }
@@ -2901,6 +2932,40 @@ function popHead(z, kx, kz) {
   b.wob.add(stump);
   for (let i = 0; i < 3; i++) spawnGib(wp.x, wp.y, wp.z, i ? BLOOD : 0xdb8b9b, kx, kz);
   spawnBlood(wp.x, wp.y, wp.z, kx, kz, 2.4);
+  play3d(z.pos.x, z.pos.z, () => SFX.headpop());
+}
+// sniper centre mass: the chest blob bursts like a head pop, and with no core left the
+// rest of the body — head, arms, legs — just drops off as tumbling pieces
+function popChest(z, kx, kz) {
+  const b = z.blob;
+  if (b.bodyGone) return;
+  b.bodyGone = true;
+  const wp = new THREE.Vector3();
+  b.body.getWorldPosition(wp);
+  const skin = b.skinList.find(s => s.mesh === b.body);
+  const bodyCol = skin ? skin.mat.color.getHex() : 0x8aa85a;
+  for (let i = 0; i < 4; i++) spawnGib(wp.x, wp.y, wp.z, i % 2 ? BLOOD : bodyCol, kx, kz);
+  spawnBlood(wp.x, wp.y, wp.z, kx, kz, 2.6);
+  // still-attached parts fall from where they hung, barely kicked — they drop, not fly
+  for (const [kind, grps, gone] of [['arm', b.arms, b.armGone], ['leg', b.legs, b.legGone]]) {
+    for (let i = 0; i < 2; i++) {
+      if (gone[i]) continue;
+      gone[i] = true;
+      grps[i].getWorldPosition(wp);
+      grps[i].visible = false;
+      spawnGib(wp.x, wp.y, wp.z, kind === 'arm' ? 0x8aa85a : 0x39432a, kx * 0.25, kz * 0.25);
+      spawnGib(wp.x, wp.y, wp.z, BLOOD, kx * 0.25, kz * 0.25);
+    }
+  }
+  if (!b.headGone) {
+    b.headGone = true;
+    b.head.getWorldPosition(wp);
+    b.head.visible = false;
+    spawnGib(wp.x, wp.y, wp.z, 0xdb8b9b, kx * 0.25, kz * 0.25);
+    spawnGib(wp.x, wp.y, wp.z, bodyCol, kx * 0.25, kz * 0.25);
+  }
+  b.wob.visible = false;                        // nothing left standing — stumps, stains and all go
+  if (b.shadow) b.shadow.visible = false;       // no body, no shadow
   play3d(z.pos.x, z.pos.z, () => SFX.headpop());
 }
 
@@ -2982,6 +3047,7 @@ function resetGame() {
   player.fpv = false; player.fpvT = 0;
   input.aim = false; input.aimPad = false; input.aimTouch = false;
   const vb = document.getElementById('btnView'); if (vb) vb.classList.remove('pressed');
+  const ab = document.getElementById('btnAim'); if (ab) ab.classList.remove('pressed'); // aim toggle resets off
   game.time = 0; game.kills = 0; game.cratesOpened = 0; game.spawnT = 2; game.lastShotT = -99;
   // every run starts on a fresh morning; the sky rolls forward as blocks are cleared
   game.phase = 0; game.cycle = 0; game.weather = rollWeather(); game.cleanup = false; game.clearTarget = 0;
@@ -3346,11 +3412,12 @@ function killZombie(z, kx, kz, headPop) {
   if (Math.random() < 0.22 * settings.lootSpawn) spawnPickup(Math.random() < 0.7 ? 'ammo' : 'medkit', z.pos.x, z.pos.z);
 }
 // sniper-class execute: the target detonates wherever it was struck — instant kill
-function executeZombie(z, kx, kz, limb) {
+function executeZombie(z, kx, kz, limb, isHead) {
   if (z.state === 'dying') return;
   const b = z.blob;
-  if (limb) blowLimb(z, kx, kz, limb);   // the struck limb comes off first
-  blowLimb(z, kx, kz);                    // then it comes apart
+  if (limb) { blowLimb(z, kx, kz, limb); blowLimb(z, kx, kz); } // the struck limb comes off first, then it comes apart
+  else if (isHead) blowLimb(z, kx, kz);                         // head hit: killZombie's head pop leads
+  else popChest(z, kx, kz);              // centre mass: the chest blob pops, the rest drops off
   spawnBlood(z.pos.x, b.root.position.y + 0.9 * z.scale, z.pos.z, kx, kz, 3);
   for (let i = 0; i < 4; i++) spawnGib(z.pos.x, b.root.position.y + (0.4 + Math.random()) * z.scale, z.pos.z, i % 2 ? BLOOD : 0x8aa85a, kx, kz);
   killZombie(z, kx, kz, true);           // pops the head too
@@ -3380,7 +3447,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   // sniper execute: any hit — limb, chest or head — is an instant, explosive kill (bosses are immune)
   if (w && w.execute && !z.isBoss) {
     spawnDamageNumber(z.pos.x, b.root.position.y + 1.1 * z.scale, z.pos.z, dmg);
-    executeZombie(z, kx, kz, limb);
+    executeZombie(z, kx, kz, limb, isHead);
     return;
   }
 
@@ -5031,6 +5098,7 @@ function updateFx(dt) {
     }
   }
   hud.crosshair.classList.toggle('enemy', hot);
+  if (shootXhEl) shootXhEl.classList.toggle('enemy', hot); // the touch shoot button flares with it
   if (hitmarkT > 0) {
     hitmarkT -= dt;
     hud.hitmarker.style.opacity = 1;
@@ -5193,7 +5261,7 @@ function wireHostConn(conn) {
     } else if (m.t === 'emote') {
       const c = cousinByConn(conn);
       if (c) {
-        spawnBubble(() => ({ x: c.pos.x, y: (c.y || 0) + 2.2, z: c.pos.z }), EMOTES[m.e] || '');
+        spawnBubble(() => ({ x: c.pos.x, y: (c.y || 0) + 2.2, z: c.pos.z }), EMOTES[m.e] || '', c);
         for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'emote', e: m.e, p: c.netP }); } catch (e) {} }
       }
     } else if (m.t === 'dead') {
@@ -5288,7 +5356,7 @@ function netClientData(m, conn, peer, n) {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
-    if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '');
+    if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
   } else if (m.t === 'secured') {
     game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
     recordPrestige();                 // multiplayer clears count toward your badges too

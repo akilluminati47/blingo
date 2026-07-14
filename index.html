@@ -104,22 +104,36 @@
   /* ---------- touch controls (Roblox style) ---------- */
   #touchlayer { position:fixed; inset:0; z-index:9; display:none; }
   body.touchmode #touchlayer { display:block; }
+  /* the stick idles at a faded home zone; when released it glides back there and dims */
   #joyBase { position:absolute; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.10); border:2px solid rgba(255,255,255,.35);
-    transform:translate(-50%,-50%); display:none; }
+    transform:translate(-50%,-50%); transition:left .55s ease, top .55s ease, opacity .55s ease; }
+  #joyBase.home { opacity:.38; }
+  #joyBase.live { transition:none; opacity:1; }
   #joyKnob { position:absolute; width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,.55); border:2px solid rgba(255,255,255,.8);
-    transform:translate(-50%,-50%); left:50%; top:50%; }
+    transform:translate(-50%,-50%); left:50%; top:50%; transition:left .55s ease, top .55s ease; }
+  #joyBase.live #joyKnob { transition:none; }
   .tbtn { position:absolute; border-radius:50%; background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.4);
-    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; pointer-events:auto; }
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; pointer-events:auto;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   .tbtn:active, .tbtn.pressed { background:rgba(255,255,255,.4); }
   .tbtn img { width:55%; height:55%; opacity:.9; pointer-events:none; }
   #btnJump { width:86px; height:86px; right:calc(26px + env(safe-area-inset-right)); bottom:calc(96px + env(safe-area-inset-bottom)); font-size:11px; }
+  #btnSlide { width:56px; height:56px; right:calc(41px + env(safe-area-inset-right)); bottom:calc(26px + env(safe-area-inset-bottom)); font-size:9px; }
   #btnShoot { width:74px; height:74px; right:calc(126px + env(safe-area-inset-right)); bottom:calc(180px + env(safe-area-inset-bottom)); background:rgba(255,80,80,.22); border-color:rgba(255,120,120,.6); }
+  /* shoot button wears the live crosshair: same X, same enemy flare + twist */
+  #btnShoot .xh { position:relative; width:26px; height:26px; pointer-events:none; transition:transform .13s ease; }
+  #btnShoot .xh::before, #btnShoot .xh::after { content:''; position:absolute; left:50%; top:50%; width:2.5px; height:100%;
+    background:#fff; box-shadow:0 0 3px #000; transition:background .1s, box-shadow .1s; }
+  #btnShoot .xh::before { transform:translate(-50%,-50%) rotate(45deg); }
+  #btnShoot .xh::after { transform:translate(-50%,-50%) rotate(-45deg); }
+  #btnShoot .xh.enemy { transform:rotate(90deg) scale(1.4); }
+  #btnShoot .xh.enemy::before, #btnShoot .xh.enemy::after { background:#ff4d4d; box-shadow:0 0 7px rgba(255,60,60,.9); }
   #btnAim { width:60px; height:60px; right:calc(206px + env(safe-area-inset-right)); bottom:calc(150px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
   #btnAim.pressed { background:rgba(120,200,255,.5); }
   #btnCycle { width:58px; height:58px; right:calc(126px + env(safe-area-inset-right)); bottom:calc(268px + env(safe-area-inset-bottom)); font-size:10px; letter-spacing:.5px; text-align:center; line-height:1.05; }
   #btnView { width:52px; height:52px; right:calc(212px + env(safe-area-inset-right)); bottom:calc(214px + env(safe-area-inset-bottom)); font-size:10px; }
   #btnView.pressed { background:rgba(120,200,255,.5); }
-  #btnReload { width:52px; height:52px; right:calc(34px + env(safe-area-inset-right)); bottom:calc(200px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnReload { width:52px; height:52px; right:calc(34px + env(safe-area-inset-right)); bottom:calc(200px + env(safe-area-inset-bottom)); font-size:8px; letter-spacing:.3px; }
   #btnInteract { width:60px; height:60px; right:calc(120px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
   #btnSprint { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
 
@@ -153,22 +167,23 @@
   .sqrow.pc .sqname { font-size:12px; font-weight:700; }
 
   /* ---------- emote wheel + talk bubbles ---------- */
+  /* the wheel wears the settings-menu badge look: dark panel, hero-coloured trim */
   #ewheel { position:fixed; inset:0; z-index:24; display:flex; align-items:center; justify-content:center;
     pointer-events:none; opacity:0; transition:opacity .16s; }
   #ewheel.show { opacity:1; }
-  #ewring { position:relative; width:290px; height:290px; border-radius:50%;
-    border:2px solid rgba(255,255,255,.28); box-shadow:0 0 34px rgba(0,0,0,.65), inset 0 0 60px rgba(0,0,0,.5); }
+  #ewring { position:relative; width:290px; height:290px; border-radius:50%; backdrop-filter:blur(6px);
+    border:2px solid var(--hero); box-shadow:0 0 46px rgba(0,0,0,.65), 0 0 18px -6px var(--hero), inset 0 0 60px rgba(0,0,0,.5); }
   #ewring::after { content:'EMOTE'; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-    color:#98a; font-size:9px; letter-spacing:3px; }
+    color:var(--hero); font-size:10px; font-weight:700; letter-spacing:4px; }
   .ewseg { position:absolute; transform:translate(-50%,-50%); pointer-events:auto; cursor:pointer; color:#ddd; white-space:nowrap;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:13px; font-weight:700;
     text-shadow:0 1px 3px #000; transition:font-size .12s, color .12s; }
-  .ewseg.hot { color:#ffd24a; font-size:17px; text-shadow:0 0 10px rgba(255,210,74,.8), 0 1px 3px #000; }
+  .ewseg.hot { color:var(--hero); font-size:17px; text-shadow:0 0 10px var(--hero), 0 1px 3px #000; }
   #ebubs { position:fixed; inset:0; pointer-events:none; z-index:12; overflow:hidden; }
-  .ebub { position:absolute; transform:translate(-50%,-115%); background:#fff; color:#181a20; padding:6px 12px; border-radius:13px;
-    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:14px; font-weight:700; white-space:nowrap; }
-  .ebub::after { content:''; position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
-    border:8px solid transparent; border-top-color:#fff; border-bottom:none; }
+  .ebub { position:absolute; transform:translate(-50%,-115%); background:#fff; color:#181a20; padding:12px 24px; border-radius:26px;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:28px; font-weight:700; white-space:nowrap; }
+  .ebub::after { content:''; position:absolute; left:50%; bottom:-14px; transform:translateX(-50%);
+    border:16px solid transparent; border-top-color:#fff; border-bottom:none; }
   #btnEmote { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(282px + env(safe-area-inset-bottom)); font-size:15px; }
 
   /* full-screen fade used when a secured block hands the run back to the menu */
@@ -310,13 +325,14 @@
 <div id="fade"></div>
 
 <div id="touchlayer">
-  <div id="joyBase"><div id="joyKnob"></div></div>
+  <div id="joyBase" class="home"><div id="joyKnob"></div></div>
   <div class="tbtn" id="btnJump">JUMP</div>
-  <div class="tbtn" id="btnShoot"><img src="icons/touch/touch_tap.png" alt="shoot"></div>
+  <div class="tbtn" id="btnSlide">SLIDE</div>
+  <div class="tbtn" id="btnShoot"><div class="xh"></div></div>
   <div class="tbtn" id="btnAim">AIM</div>
   <div class="tbtn" id="btnView">VIEW</div>
   <div class="tbtn" id="btnCycle">GUN</div>
-  <div class="tbtn" id="btnReload">R</div>
+  <div class="tbtn" id="btnReload">RELOAD</div>
   <div class="tbtn" id="btnInteract"><img src="icons/touch/touch_tap_hold.png" alt="interact"></div>
   <div class="tbtn" id="btnSprint">RUN</div>
   <div class="tbtn" id="btnEmote">:)</div>
