@@ -581,12 +581,12 @@ let shakeAmp = 0;
 // in an instant kill. slot: which inventory group the weapon sorts into (melee first, then guns).
 const WEAPONS = {
   fists:   { id: 'fists',   name: 'Fists',        melee: true, slot: 'melee', dmg: 6, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
-  pipe:    { id: 'pipe',    name: 'Lead Pipe',    melee: true, slot: 'melee', dmg: 12, range: 3.1, rpm: 150, mag: Infinity, kick: 0.03, rmb: [80, 0.5, 0.3], cqc: 0, dismember: 0.28, color: 0x8b9099 },
-  bat:     { id: 'bat',     name: 'Slugger Bat',  melee: true, slot: 'melee', dmg: 14, range: 3.4, rpm: 130, mag: Infinity, kick: 0.04, rmb: [90, 0.55, 0.35], cqc: 0, dismember: 0.34, color: 0x8a5a2a },
-  machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 17, range: 3.2, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
-  katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 20, range: 3.7, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
-  sledge:  { id: 'sledge',  name: 'Sledgehammer', melee: true, slot: 'melee', dmg: 29, range: 3.1, rpm: 72, mag: Infinity, kick: 0.09, rmb: [150, 0.95, 0.5], cqc: 0, dismember: 0.6, gib: true, color: 0x5c6068 },
-  axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 23, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
+  pipe:    { id: 'pipe',    name: 'Lead Pipe',    melee: true, slot: 'melee', dmg: 16, range: 3.1, rpm: 150, mag: Infinity, kick: 0.03, rmb: [80, 0.5, 0.3], cqc: 0, dismember: 0.28, color: 0x8b9099 },
+  bat:     { id: 'bat',     name: 'Slugger Bat',  melee: true, slot: 'melee', dmg: 19, range: 3.4, rpm: 130, mag: Infinity, kick: 0.04, rmb: [90, 0.55, 0.35], cqc: 0, dismember: 0.34, color: 0x8a5a2a },
+  machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 23, range: 3.2, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
+  katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 27, range: 3.7, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
+  sledge:  { id: 'sledge',  name: 'Sledgehammer', melee: true, slot: 'melee', dmg: 39, range: 3.1, rpm: 72, mag: Infinity, kick: 0.09, rmb: [150, 0.95, 0.5], cqc: 0, dismember: 0.6, gib: true, color: 0x5c6068 },
+  axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 31, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
   pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 5, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14, fRange: 14 },
   smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 2, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1, fRange: 9 },
   rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 5, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, skullcrack: true, fRange: 30 },
@@ -821,7 +821,7 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
     legs.push(hip);
   }
 
-  // weapon socket: right hand by default (Blondie is the clan lefty). rotated so the
+  // weapon socket: right hand by default (Blondie is the family lefty). rotated so the
   // barrel points straight out of the fist when the arm is raised, not down at the dirt.
   const gunArm = gunHand === 'left' ? 1 : 0; // arms[0] is the character's right hand
   const gunSocket = new THREE.Group();
@@ -1951,12 +1951,11 @@ function refreshControlsBar() {
 const COUSINS = [
   { id: 'blingo',  name: 'Blingo',  color: 0xff8c42, perk: 'Balanced hero', melee: 'bat',     lore: 'The First Immune. Bitten at the Blob Falls picnic on day one, never turned. He swore on his grandma’s jelly recipe to take the town back.' },
   { id: 'blazo',   name: 'Blazo',   color: 0xff4f42, perk: '+15% damage',   melee: 'axe',     lore: 'Blingo’s hot-headed cousin. The horde ate his championship chili stand. Now every trigger pull is seasoned with revenge.' },
-  { id: 'blizzy',  name: 'Blizzy',  color: 0x6fd8ff, perk: '+12% sprint speed', melee: 'katana', lore: 'The coolest head in Clan Blob. Scouted the frozen north alone for two winters. Zombies can’t catch what they can’t chill.' },
+  { id: 'blizzy',  name: 'Blizzy',  color: 0x6fd8ff, perk: '+12% sprint speed', melee: 'katana', lore: 'The coolest head of the six. Scouted the frozen north alone for two winters. Zombies can’t catch what they can’t chill.' },
   { id: 'blomba',  name: 'Blomba',  color: 0xb06fff, perk: '+25 max HP',    melee: 'sledge',  lore: 'Big-hearted bouncer of the old Blob Lounge. Soft on the inside, softer on the outside, absolutely will not fall over.' },
-  { id: 'bloopy',  name: 'Bloopy',  color: 0x3fd8b0, perk: '35% faster reload', melee: 'pipe', lore: 'Fidgety tinkerer who rebuilt the clan radio from soup cans. Hands so twitchy the reloads finish themselves.' },
-  { id: 'blondie', name: 'Blondie', color: 0xffd84a, perk: '+50% ammo from loot', melee: 'machete', lore: 'The clan hoarder. Her pockets don’t make sense geometrically. If there’s a bullet in a crate, she’ll find three.' },
+  { id: 'bloopy',  name: 'Bloopy',  color: 0x3fd8b0, perk: '35% faster reload', melee: 'pipe', lore: 'Fidgety tinkerer who rebuilt the family radio from soup cans. Hands so twitchy the reloads finish themselves.' },
+  { id: 'blondie', name: 'Blondie', color: 0xffd84a, perk: '+50% ammo from loot', melee: 'machete', lore: 'The family hoarder. Her pockets don’t make sense geometrically. If there’s a bullet in a crate, she’ll find three.' },
 ];
-const CLAN_LORE = 'The immune cousins of Clan Blob are clearing the wasteland so the rest of blob-kind can move back home.';
 let selectedCousin = 'blingo';
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
@@ -1977,8 +1976,8 @@ function recordPrestige() {
   renderPrestige();
 }
 function fmtTime(t) { return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); }
-// badge strip: total blocks, per-hero counts in that hero's colour, and the record
-// time in the colour of the hero who set it
+// badge strip: the total blocks secured, plus the record time in the colour of the
+// hero who set it (single + multiplayer runs both feed these)
 function renderPrestige() {
   const el = document.getElementById('prestige');
   el.innerHTML = '';
@@ -1990,12 +1989,8 @@ function renderPrestige() {
     el.appendChild(b);
   };
   let total = 0;
-  for (const c of COUSINS) total += prestige.blocks[c.id] | 0;
+  for (const k in prestige.blocks) total += prestige.blocks[k] | 0;
   if (total > 0) mkBadge(`BLOCKS SECURED x${total}`);
-  for (const c of COUSINS) {
-    const n = prestige.blocks[c.id] | 0;
-    if (n) mkBadge(`${c.name.toUpperCase()} x${n}`, '#' + c.color.toString(16).padStart(6, '0'));
-  }
   if (prestige.bestTime > 0) {
     const hero = COUSINS.find(c => c.id === prestige.bestHero);
     mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#' + (hero ? hero.color : 0xffd24a).toString(16).padStart(6, '0'));
@@ -2004,6 +1999,16 @@ function renderPrestige() {
 }
 const companions = []; // {data, blob, beacon, pos, recruited, shootCd, walkPhase, yaw}
 
+// true when nothing solid overlaps a character-sized circle at (x,z): keeps spawns out
+// of cars, rocks, shelf-filled corners and the sealed town facades (which sit in town)
+function spawnSpotClear(x, z) {
+  if (inTown(x, z, 2)) return false;
+  const gy = groundHeight(x, z);
+  for (const c of nearbyColliders(x, z)) {
+    if (Math.abs(x - c.x) < c.hw + 0.55 && Math.abs(z - c.z) < c.hd + 0.55 && gy < c.y1 - 0.2) return false;
+  }
+  return true;
+}
 function scatterCousins() {
   for (const c of companions) {
     scene.remove(c.blob.root);
@@ -2015,10 +2020,16 @@ function scatterCousins() {
   let i = 0;
   for (const data of COUSINS) {
     if (data.id === selectedCousin) continue;
-    const ang = i * (TAU / 5) + Math.random() * 0.8;
-    const dist = 65 + i * 18 + Math.random() * 25;
-    let x = Math.sin(ang) * dist, z = Math.cos(ang) * dist;
-    [x, z] = resolveCollision(x, z, 0.6);
+    // cousins wait on open land, roads or inside the enterable hollow houses — never
+    // wedged into cars, rocks, shelves or the sealed town buildings
+    let x = 0, z = 0;
+    for (let tries = 0; tries < 24; tries++) {
+      const ang = i * (TAU / 5) + Math.random() * 0.8;
+      const dist = 65 + i * 18 + Math.random() * 25;
+      x = Math.sin(ang) * dist; z = Math.cos(ang) * dist;
+      [x, z] = resolveCollision(x, z, 0.6);
+      if (spawnSpotClear(x, z)) break;
+    }
     const blob = buildBlob({ color: data.color, gunHand: data.id === 'blondie' ? 'left' : 'right' });
     blob.root.position.set(x, groundHeight(x, z), z);
     scene.add(blob.root);
@@ -2378,6 +2389,7 @@ function spawnDamageNumber(x, y, z, val, color) {
   const el = document.createElement('div');
   el.className = 'dmgnum';
   el.textContent = Math.max(1, Math.round(val));
+  el.style.fontSize = Math.round(13 + Math.min(11, val * 0.35)) + 'px'; // heavier hits pop bigger
   if (color) el.style.color = color;
   dmgLayer.appendChild(el);
   dmgNums.push({ el, x: x + (Math.random() - 0.5) * 0.4, y, z: z + (Math.random() - 0.5) * 0.4, t: 0, life: 0.85 });
@@ -2775,8 +2787,9 @@ function fireWeapon() {
         const ang = Math.atan2(dx, dz);
         let diff = Math.abs(((ang - player.lastAimYaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
         if (diff < 1.15) {
-          // fists land 6 with the left, 7 with the right; fists also send them staggering back
-          const base = w.id === 'fists' ? (player.meleeArm ? 7 : 6) : w.dmg;
+          // fists: one hand lands 7, the other 6 (matched to the visible swing);
+          // fists also send them staggering back
+          const base = w.id === 'fists' ? (player.meleeArm ? 6 : 7) : w.dmg;
           damageZombie(z, base * player.dmgMult * closeBonus(w, d), dx / d, dz / d, w.id === 'fists' ? 11 : 3.5, { weapon: w, dist: d, isHead: false });
           rumble(...w.rmb);
           break;
@@ -3053,6 +3066,7 @@ function recruitCousin(c) {
   SFX.recruit();
   rumble(160, 0.5, 0.7);
   toast(`${c.data.name.toUpperCase()} JOINED .ᐟ`);
+  settleGunTrades();
   updateCousinHUD();
   rebuildSquadBars();
   maybeSpawnBoss();
@@ -3070,6 +3084,37 @@ function setCompanionWeapon(c, id) {
   if (c.gunMesh) c.blob.gunSocket.add(c.gunMesh);
 }
 // a companion opens a crate it walked up to and equips whatever gun it finds
+// every cousin dreams of one specific gun; spare finds flow to whoever still swings melee
+const PREF_GUN = { blingo: 'rifle', blazo: 'shotgun', blizzy: 'smg', blomba: 'magnum', bloopy: 'pistol', blondie: 'sniper' };
+function armedWithGun(c) { return c.weapon && !c.weapon.melee; }
+// route a freshly looted gun: the looter keeps it only while still on melee, otherwise
+// it arms a melee-only squadmate (preference first), then upgrades whoever dreams of it
+function distributeGun(looter, id) {
+  let take = looter;
+  if (armedWithGun(looter)) {
+    const unarmed = companions.filter(c => c.recruited && !c.downed && !armedWithGun(c));
+    take = unarmed.find(c => PREF_GUN[c.data.id] === id) || unarmed[0]
+      || companions.find(c => c.recruited && PREF_GUN[c.data.id] === id && c.weapon.id !== id)
+      || null;
+  }
+  if (take) setCompanionWeapon(take, id);
+  return take;
+}
+// armed cousins pass guns between themselves until everyone holds their preferred iron
+function settleGunTrades() {
+  for (const a of companions) {
+    if (!a.recruited || !armedWithGun(a) || a.weapon.id === PREF_GUN[a.data.id]) continue;
+    for (const b of companions) {
+      if (b === a || !b.recruited || !armedWithGun(b)) continue;
+      if (a.weapon.id === PREF_GUN[b.data.id] && b.weapon.id !== PREF_GUN[b.data.id]) {
+        const aw = a.weapon.id, bw = b.weapon.id;
+        setCompanionWeapon(a, bw); setCompanionWeapon(b, aw);
+        toast(`${a.data.name.toUpperCase()} AND ${b.data.name.toUpperCase()} TRADED GUNS`);
+        return; // one trade per pass keeps the toasts calm
+      }
+    }
+  }
+}
 function companionLoot(c, cr) {
   cr.opened = true;
   game.cratesOpened++;
@@ -3078,9 +3123,11 @@ function companionLoot(c, cr) {
   cr.trim.visible = false;
   play3d(cr.pos.x, cr.pos.z, () => SFX.crate());
   const id = rollLootWeapon(Math.random);
-  setCompanionWeapon(c, id);
-  toast(`${c.data.name.toUpperCase()} FOUND A ${WEAPONS[id].name.toUpperCase()}`);
-  play3d(cr.pos.x, cr.pos.z, () => SFX.swap(WEAPONS[id]));
+  const who = distributeGun(c, id);
+  if (who === c) toast(`${c.data.name.toUpperCase()} FOUND A ${WEAPONS[id].name.toUpperCase()}`);
+  else if (who) toast(`${c.data.name.toUpperCase()} ARMED ${who.data.name.toUpperCase()} WITH A ${WEAPONS[id].name.toUpperCase()}`);
+  if (who) play3d(cr.pos.x, cr.pos.z, () => SFX.swap(WEAPONS[id]));
+  settleGunTrades();
 }
 
 // ---------- main loop ----------
@@ -3366,7 +3413,16 @@ function updateCompanions(dt) {
     placeShadow(b, c.pos.x, c.pos.z, c.y);
     if (!c.recruited) {
       c.y = gy;
-      // idle at their spot, bob & look around — but keep the gun levelled, not pointing at the dirt
+      // if the world generated something solid on top of this waiting cousin, step clear
+      c.clearT = (c.clearT || 0) - dt;
+      if (c.clearT <= 0) {
+        c.clearT = 1.2;
+        const [nx, nz] = resolveCollision(c.pos.x, c.pos.z, 0.6, c.y);
+        if (nx !== c.pos.x || nz !== c.pos.z) {
+          c.pos.x = nx; c.pos.z = nz;
+          if (c.beacon) c.beacon.position.set(nx, groundHeight(nx, nz) + 17, nz);
+        }
+      }
       b.root.position.set(c.pos.x, gy, c.pos.z);
       b.wob.scale.y = 1 + Math.sin(performance.now() * 0.002 + c.walkPhase) * 0.03;
       b.root.rotation.y = c.yaw + Math.sin(performance.now() * 0.0006 + c.walkPhase) * 0.6;
@@ -3507,8 +3563,9 @@ function updateCompanions(dt) {
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
-    // guns held levelled; melee carried ready, whipping forward on a swing
-    b.arms[b.gunArm].rotation.x = cw.melee ? (c.meleeT > 0 ? -2.3 : -0.75) : -Math.PI / 2;
+    // guns held levelled; melee raised high on the move (no dragging blades through the
+    // dirt), carried easy when standing, whipping forward on a swing
+    b.arms[b.gunArm].rotation.x = cw.melee ? (c.meleeT > 0 ? -2.3 : moving ? -1.7 : -0.75) : -Math.PI / 2;
     if (!c.grounded) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
@@ -3726,7 +3783,7 @@ function updateSpawner(dt) {
 const bossState = { boss: null, beam: null, spawned: false, defeated: false };
 const bossBarEl = document.getElementById('bossbar');
 const bossHpEl = document.getElementById('bosshp');
-// unlocked once the whole clan has been recruited
+// unlocked once every cousin has been recruited
 function maybeSpawnBoss() {
   if (bossState.spawned || bossState.defeated || game.state !== 'playing') return;
   if (companions.length === 0 || companions.some(c => !c.recruited)) return;
@@ -3761,7 +3818,7 @@ function spawnBoss() {
   scene.add(beam);
   bossState.beam = beam;
   bossBarEl.classList.remove('show');         // the bar appears once it aggros
-  toast('CLAN COMPLETE . . SOMETHING STIRS BY THE BANK .ᐟ', true);
+  toast('ALL COUSINS FOUND . . SOMETHING STIRS BY THE BANK .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
 }
 function wakeBoss(z) {
