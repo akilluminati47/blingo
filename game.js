@@ -1656,13 +1656,22 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyV' && !e.repeat) toggleFPV();
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyC') && !e.repeat) input.slide = true;
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
-  if (e.code === 'Tab') { e.preventDefault(); toggleControlsBar(); }
+  if (e.code === 'Tab') { e.preventDefault(); if (!e.repeat) ewOpen('kbm'); }
   refreshControlsBar();
 });
-addEventListener('keyup', e => { keys[e.code] = false; });
+addEventListener('keyup', e => {
+  keys[e.code] = false;
+  if (e.code === 'Tab') ewRelease();
+});
 
 addEventListener('mousemove', e => {
   const sens = settings.mouseSens || 1;
+  // an open emote wheel captures the mouse to steer the highlight instead of the camera
+  if (ewheel.open && ewheel.src === 'kbm') {
+    ewSteer(e.movementX, e.movementY, false);
+    lastMX = e.clientX; lastMY = e.clientY;
+    return;
+  }
   if (document.pointerLockElement === canvas) {
     // locked: the mouse aims the camera directly (proper third-person look), crosshair centred
     input.lookDX += e.movementX * 0.0052 * sens;
@@ -1738,6 +1747,7 @@ bindBtn('btnView', () => { toggleFPV(); });
 bindBtn('btnCycle', () => { cycleWeapon(1); });
 bindBtn('btnReload', () => { input.reload = true; });
 bindBtn('btnInteract', () => { input.interact = true; });
+bindBtn('btnEmote', () => { ewheel.open ? ewClose() : ewOpen('touch'); }); // toggle for touch
 bindBtn('btnSprint', () => {
   sprintToggle = !sprintToggle;
   document.getElementById('btnSprint').style.background = sprintToggle ? 'rgba(120,255,140,.35)' : 'rgba(255,255,255,.14)';
@@ -1824,8 +1834,16 @@ function pollGamepad(dt) {
     return;
   }
   const padSens = settings.padSens || 1;
-  input.lookDX += lx * 2.6 * dt * padSens;
-  input.lookDY += ly * 2.0 * dt * padSens;
+  // D-pad down holds the emote wheel open; the right stick steers it (camera pauses)
+  const dpadDown = gp.buttons[13] && gp.buttons[13].pressed;
+  if (dpadDown && !ewheel.open) ewOpen('pad');
+  else if (!dpadDown && ewheel.open && ewheel.src === 'pad') ewRelease();
+  if (ewheel.open && ewheel.src === 'pad') {
+    ewSteer(lx, ly, true);
+  } else {
+    input.lookDX += lx * 2.6 * dt * padSens;
+    input.lookDY += ly * 2.0 * dt * padSens;
+  }
   if (justPressed(0)) input.jump = true;
   if (justPressed(1)) input.reload = true;
   if (justPressed(2)) input.interact = true;
@@ -1871,7 +1889,7 @@ const CONTROL_SCHEMES = {
       [['kbm', 'keyboard_space'], 'Jump'],
       [['kbm', 'keyboard_shift'], 'Sprint'],
       [['kbm', 'keyboard_ctrl'], 'Slide'],
-      ['Tab', 'Hide this help'],
+      ['Tab', 'Emote wheel (hold)'],
     ],
     prompt: ['kbm', 'keyboard_e'],
   },
@@ -2414,6 +2432,107 @@ function clearDamageNumbers() {
   for (const n of dmgNums) n.el.remove();
   dmgNums.length = 0;
 }
+
+// ---------- emote wheel + talk bubbles ----------
+// hold Tab / D-pad down (or toggle the touch button), steer with mouse / right stick;
+// the highlighted wedge grows, and releasing fires it as a bubble above your head
+const EMOTES = ['Hello .ᐟ', 'Good Luck .ᐟ', 'Nice .ᐟ', 'Trade .ᐟ', 'Wait .ᐟ'];
+const ewheelEl = document.getElementById('ewheel');
+const ewringEl = document.getElementById('ewring');
+const ewSegs = [];
+for (let i = 0; i < EMOTES.length; i++) {
+  const s = document.createElement('div');
+  s.className = 'ewseg';
+  s.textContent = EMOTES[i];
+  s.addEventListener('click', () => { if (ewheel.open) { fireEmote(i); ewClose(); } }); // touch taps a wedge directly
+  ewringEl.appendChild(s);
+  ewSegs.push(s);
+}
+const ewheel = { open: false, src: null, sel: -1, vx: 0, vy: 0 };
+function ewOpen(src) {
+  if (game.state !== 'playing' || ewheel.open) return;
+  ewheel.open = true; ewheel.src = src; ewheel.sel = -1; ewheel.vx = 0; ewheel.vy = 0;
+  ewheelEl.classList.add('show');
+  ewRender();
+}
+function ewClose() { ewheel.open = false; ewheelEl.classList.remove('show'); }
+function ewRelease() {
+  if (!ewheel.open) return;
+  if (ewheel.sel >= 0) fireEmote(ewheel.sel);
+  ewClose();
+}
+// steer the highlight; wedge centres are fixed so the pick never wobbles as slices grow
+function ewSteer(dx, dy, absolute) {
+  if (absolute) { ewheel.vx = dx; ewheel.vy = dy; }
+  else { ewheel.vx = clamp(ewheel.vx + dx, -90, 90); ewheel.vy = clamp(ewheel.vy + dy, -90, 90); }
+  const m = Math.hypot(ewheel.vx, ewheel.vy);
+  const was = ewheel.sel;
+  if (m < (absolute ? 0.35 : 18)) ewheel.sel = -1;
+  else {
+    const ang = (Math.atan2(ewheel.vx, -ewheel.vy) * 180 / Math.PI + 360) % 360;
+    ewheel.sel = Math.round(ang / (360 / EMOTES.length)) % EMOTES.length;
+  }
+  if (ewheel.sel !== was) {
+    ewRender();
+    if (ewheel.sel >= 0) tone(500 + ewheel.sel * 60, 0.04, 0.15, 'square');
+  }
+}
+// redraw the ring: the highlighted wedge takes a bigger slice of the pie
+function ewRender() {
+  const n = EMOTES.length, sel = ewheel.sel;
+  const evenW = 360 / n, hotW = 100, restW = (360 - hotW) / (n - 1);
+  const w = i => sel < 0 ? evenW : (i === sel ? hotW : restW);
+  const anchor = sel < 0 ? 0 : sel;
+  let start = anchor * evenW - w(anchor) / 2;
+  for (let i = anchor - 1; i >= 0; i--) start -= w(i);
+  const stops = [];
+  let a = 0;
+  for (let i = 0; i < n; i++) {
+    const col = i === sel ? 'rgba(255,210,74,.30)' : (i % 2 ? 'rgba(10,12,18,.72)' : 'rgba(24,28,40,.78)');
+    stops.push(`${col} ${a}deg ${a + w(i)}deg`);
+    const mid = (start + a + w(i) / 2) * Math.PI / 180;
+    const r = i === sel ? 105 : 95;
+    ewSegs[i].style.left = (145 + Math.sin(mid) * r) + 'px';
+    ewSegs[i].style.top = (145 - Math.cos(mid) * r) + 'px';
+    ewSegs[i].classList.toggle('hot', i === sel);
+    a += w(i);
+  }
+  ewringEl.style.background = `conic-gradient(from ${start}deg, ${stops.join(',')})`;
+}
+const ebubsEl = document.getElementById('ebubs');
+const bubbles = [];
+const _bv = new THREE.Vector3();
+function spawnBubble(getPos, text) {
+  const el = document.createElement('div');
+  el.className = 'ebub';
+  el.textContent = text;
+  ebubsEl.appendChild(el);
+  bubbles.push({ el, getPos, t: 0, life: 2.6 });
+}
+function fireEmote(i) {
+  spawnBubble(() => ({ x: player.pos.x, y: player.pos.y + 2.2, z: player.pos.z }), EMOTES[i]);
+  SFX.pickup();
+  if (typeof netSendEmote === 'function') netSendEmote(i);
+}
+function updateEmoteFx(dt) {
+  for (let i = bubbles.length - 1; i >= 0; i--) {
+    const bu = bubbles[i];
+    bu.t += dt;
+    if (bu.t >= bu.life) { bu.el.remove(); bubbles.splice(i, 1); continue; }
+    const p = bu.getPos();
+    _bv.set(p.x, p.y, p.z).project(camera);
+    if (_bv.z > 1) { bu.el.style.display = 'none'; continue; }
+    bu.el.style.display = '';
+    bu.el.style.left = ((_bv.x * 0.5 + 0.5) * innerWidth) + 'px';
+    bu.el.style.top = ((-_bv.y * 0.5 + 0.5) * innerHeight) + 'px';
+    bu.el.style.opacity = Math.min(1, (bu.life - bu.t) / 0.45).toFixed(3);
+  }
+}
+function clearBubbles() {
+  for (const bu of bubbles) bu.el.remove();
+  bubbles.length = 0;
+  ewClose();
+}
 // limb hitboxes in the zombie's facing frame: [kind, idx, localX, localY, localZ, radius].
 // a bullet that strikes one of these severs that exact limb (dismemberment local to the shot).
 const LIMB_SPEC = [
@@ -2566,6 +2685,7 @@ function resetGame() {
   for (const p of pickups) scene.remove(p.mesh);
   pickups.length = 0;
   clearDamageNumbers();
+  clearBubbles();
   for (const k in reserves) delete reserves[k];
   equipWeapon('fists');
   scatterCousins();
@@ -3156,6 +3276,7 @@ function animate() {
   updateCamera(dt);
   updateFx(dt);
   updateDamageNumbers(dt);
+  updateEmoteFx(dt);
   updateRain(dt);
   renderer.render(scene, camera);
 }

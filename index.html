@@ -128,6 +128,25 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     font-size:15px; font-weight:700; color:#fff; text-shadow:0 1px 3px #000, 0 0 7px rgba(0,0,0,.65); }
 
+  /* ---------- emote wheel + talk bubbles ---------- */
+  #ewheel { position:fixed; inset:0; z-index:24; display:flex; align-items:center; justify-content:center;
+    pointer-events:none; opacity:0; transition:opacity .16s; }
+  #ewheel.show { opacity:1; }
+  #ewring { position:relative; width:290px; height:290px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.28); box-shadow:0 0 34px rgba(0,0,0,.65), inset 0 0 60px rgba(0,0,0,.5); }
+  #ewring::after { content:'EMOTE'; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    color:#98a; font-size:9px; letter-spacing:3px; }
+  .ewseg { position:absolute; transform:translate(-50%,-50%); pointer-events:auto; cursor:pointer; color:#ddd; white-space:nowrap;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:13px; font-weight:700;
+    text-shadow:0 1px 3px #000; transition:font-size .12s, color .12s; }
+  .ewseg.hot { color:#ffd24a; font-size:17px; text-shadow:0 0 10px rgba(255,210,74,.8), 0 1px 3px #000; }
+  #ebubs { position:fixed; inset:0; pointer-events:none; z-index:12; overflow:hidden; }
+  .ebub { position:absolute; transform:translate(-50%,-115%); background:#fff; color:#181a20; padding:6px 12px; border-radius:13px;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:14px; font-weight:700; white-space:nowrap; }
+  .ebub::after { content:''; position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
+    border:8px solid transparent; border-top-color:#fff; border-bottom:none; }
+  #btnEmote { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(282px + env(safe-area-inset-bottom)); font-size:15px; }
+
   /* full-screen fade used when a secured block hands the run back to the menu */
   #fade { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity .9s; z-index:40; }
   #fade.show { opacity:1; }
@@ -254,6 +273,8 @@
   <div id="toast"></div>
 </div>
 <div id="dmgnums"></div>
+<div id="ebubs"></div>
+<div id="ewheel"><div id="ewring"></div></div>
 <div id="fade"></div>
 
 <div id="touchlayer">
@@ -266,6 +287,7 @@
   <div class="tbtn" id="btnReload">R</div>
   <div class="tbtn" id="btnInteract"><img src="icons/touch/touch_tap_hold.png" alt="interact"></div>
   <div class="tbtn" id="btnSprint">RUN</div>
+  <div class="tbtn" id="btnEmote">:)</div>
 </div>
 
 <div class="screen" id="startscreen">
