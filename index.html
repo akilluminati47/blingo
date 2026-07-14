@@ -112,30 +112,44 @@
   #joyKnob { position:absolute; width:52px; height:52px; border-radius:50%; background:rgba(255,255,255,.55); border:2px solid rgba(255,255,255,.8);
     transform:translate(-50%,-50%); left:50%; top:50%; transition:left .55s ease, top .55s ease; }
   #joyBase.live #joyKnob { transition:none; }
+  /* the circles come in exactly 3 sizes, evenly padded (16px gaps) on safe-zone anchors */
+  #touchlayer { --tl:84px; --tm:66px; --ts:52px; }
   .tbtn { position:absolute; border-radius:50%; background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.4);
     display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; pointer-events:auto;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   .tbtn:active, .tbtn.pressed { background:rgba(255,255,255,.4); }
   .tbtn img { width:55%; height:55%; opacity:.9; pointer-events:none; }
-  #btnJump { width:86px; height:86px; right:calc(26px + env(safe-area-inset-right)); bottom:calc(96px + env(safe-area-inset-bottom)); font-size:11px; }
-  #btnSlide { width:86px; height:86px; right:calc(126px + env(safe-area-inset-right)); bottom:calc(268px + env(safe-area-inset-bottom)); font-size:11px; }
-  #btnShoot { width:74px; height:74px; right:calc(126px + env(safe-area-inset-right)); bottom:calc(180px + env(safe-area-inset-bottom)); background:rgba(255,80,80,.22); border-color:rgba(255,120,120,.6); }
-  /* shoot button wears the live crosshair: same X, same enemy flare + twist */
-  #btnShoot .xh { position:relative; width:26px; height:26px; pointer-events:none; transition:transform .13s ease; }
-  #btnShoot .xh::before, #btnShoot .xh::after { content:''; position:absolute; left:50%; top:50%; width:2.5px; height:100%;
-    background:#fff; box-shadow:0 0 3px #000; transition:background .1s, box-shadow .1s; }
-  #btnShoot .xh::before { transform:translate(-50%,-50%) rotate(45deg); }
-  #btnShoot .xh::after { transform:translate(-50%,-50%) rotate(-45deg); }
-  #btnShoot .xh.enemy { transform:rotate(90deg) scale(1.4); }
-  #btnShoot .xh.enemy::before, #btnShoot .xh.enemy::after { background:#ff4d4d; box-shadow:0 0 7px rgba(255,60,60,.9); }
-  #btnAim { width:60px; height:60px; right:calc(206px + env(safe-area-inset-right)); bottom:calc(150px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
+  #btnJump, #btnInteract { width:var(--tl); height:var(--tl); }
+  #btnShoot, #btnShoot2, #btnSlide { width:var(--tm); height:var(--tm); }
+  #btnAim, #btnView, #btnReload, #btnSprint, #btnEmote { width:var(--ts); height:var(--ts); }
+  /* right cluster: jump anchors the corner, slide sits beside it under the attack circle,
+     interact takes the large slot above the attack, aim + view stack to their left */
+  #btnJump { right:calc(20px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:11px; }
+  #btnSlide { right:calc(120px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnShoot, #btnShoot2 { background:rgba(255,80,80,.22); border-color:rgba(255,120,120,.6); }
+  #btnShoot { right:calc(120px + env(safe-area-inset-right)); bottom:calc(192px + env(safe-area-inset-bottom)); }
+  #btnInteract { right:calc(111px + env(safe-area-inset-right)); bottom:calc(274px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
+  #btnAim { right:calc(202px + env(safe-area-inset-right)); bottom:calc(199px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
   #btnAim.pressed { background:rgba(120,200,255,.5); }
-  #btnCycle { width:58px; height:58px; right:calc(41px + env(safe-area-inset-right)); bottom:calc(26px + env(safe-area-inset-bottom)); font-size:10px; letter-spacing:.5px; text-align:center; line-height:1.05; }
-  #btnView { width:52px; height:52px; right:calc(212px + env(safe-area-inset-right)); bottom:calc(214px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnView { right:calc(202px + env(safe-area-inset-right)); bottom:calc(267px + env(safe-area-inset-bottom)); font-size:10px; }
   #btnView.pressed { background:rgba(120,200,255,.5); }
-  #btnReload { width:52px; height:52px; right:calc(34px + env(safe-area-inset-right)); bottom:calc(200px + env(safe-area-inset-bottom)); font-size:8px; letter-spacing:.3px; }
-  #btnInteract { width:52px; height:52px; right:calc(34px + env(safe-area-inset-right)); bottom:calc(272px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
-  #btnSprint { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnReload { right:calc(36px + env(safe-area-inset-right)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:8px; letter-spacing:.3px; }
+  /* left cluster: run + emote column, the secondary attack circle centred between them */
+  #btnSprint { left:calc(24px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
+  #btnShoot2 { left:calc(92px + env(safe-area-inset-left)); bottom:calc(237px + env(safe-area-inset-bottom)); }
+  /* attack buttons wear the live crosshair: same X, same enemy flare + twist */
+  .tbtn .xh { position:relative; width:26px; height:26px; pointer-events:none; transition:transform .13s ease; }
+  .tbtn .xh::before, .tbtn .xh::after { content:''; position:absolute; left:50%; top:50%; width:2.5px; height:100%;
+    background:#fff; box-shadow:0 0 3px #000; transition:background .1s, box-shadow .1s; }
+  .tbtn .xh::before { transform:translate(-50%,-50%) rotate(45deg); }
+  .tbtn .xh::after { transform:translate(-50%,-50%) rotate(-45deg); }
+  .tbtn .xh.enemy { transform:rotate(90deg) scale(1.4); }
+  .tbtn .xh.enemy::before, .tbtn .xh.enemy::after { background:#ff4d4d; box-shadow:0 0 7px rgba(255,60,60,.9); }
+  /* the weapon + ammo readout IS the swap button on touch: a squircle around both */
+  #btnCycle { display:none; }
+  body.touchmode #bottomright { pointer-events:auto; background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.4);
+    border-radius:22px; padding:10px 16px 8px; }
+  body.touchmode #bottomright.pressed { background:rgba(255,255,255,.4); }
 
   /* floating damage numbers: OpenDyslexic, pop then rise + fade (JS drives motion) */
   #dmgnums { position:fixed; inset:0; pointer-events:none; z-index:9; overflow:hidden; }
@@ -184,7 +198,7 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:28px; font-weight:700; white-space:nowrap; }
   .ebub::after { content:''; position:absolute; left:50%; bottom:-14px; transform:translateX(-50%);
     border:16px solid transparent; border-top-color:#fff; border-bottom:none; }
-  #btnEmote { width:52px; height:52px; left:calc(28px + env(safe-area-inset-left)); bottom:calc(282px + env(safe-area-inset-bottom)); font-size:15px; }
+  #btnEmote { left:calc(24px + env(safe-area-inset-left)); bottom:calc(278px + env(safe-area-inset-bottom)); font-size:15px; }
 
   /* full-screen fade used when a secured block hands the run back to the menu */
   #fade { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity .9s; z-index:40; }
@@ -318,16 +332,20 @@
     #ewring { width:230px; height:230px; }
     #pausepanel h1 { font-size:24px; letter-spacing:4px; margin-bottom:6px; }
     .srow { padding:5px 8px; font-size:12px; }
-    #btnJump { width:72px; height:72px; right:calc(20px + env(safe-area-inset-right)); bottom:calc(78px + env(safe-area-inset-bottom)); }
-    #btnSlide { width:72px; height:72px; right:calc(104px + env(safe-area-inset-right)); bottom:calc(216px + env(safe-area-inset-bottom)); font-size:10px; }
-    #btnShoot { width:64px; height:64px; right:calc(104px + env(safe-area-inset-right)); bottom:calc(144px + env(safe-area-inset-bottom)); }
-    #btnAim { width:52px; height:52px; right:calc(170px + env(safe-area-inset-right)); bottom:calc(118px + env(safe-area-inset-bottom)); font-size:10px; }
-    #btnView { width:46px; height:46px; right:calc(178px + env(safe-area-inset-right)); bottom:calc(180px + env(safe-area-inset-bottom)); font-size:9px; }
-    #btnCycle { width:50px; height:50px; right:calc(30px + env(safe-area-inset-right)); bottom:calc(18px + env(safe-area-inset-bottom)); font-size:9px; }
-    #btnReload { width:46px; height:46px; right:calc(28px + env(safe-area-inset-right)); bottom:calc(164px + env(safe-area-inset-bottom)); font-size:7px; }
-    #btnInteract { width:46px; height:46px; right:calc(28px + env(safe-area-inset-right)); bottom:calc(220px + env(safe-area-inset-bottom)); }
-    #btnSprint { width:46px; height:46px; left:calc(22px + env(safe-area-inset-left)); bottom:calc(166px + env(safe-area-inset-bottom)); font-size:9px; }
-    #btnEmote { width:46px; height:46px; left:calc(22px + env(safe-area-inset-left)); bottom:calc(224px + env(safe-area-inset-bottom)); font-size:13px; }
+    /* same 3-tier format, scaled down (10px gaps) so the stacks fit low viewports */
+    #touchlayer { --tl:64px; --tm:54px; --ts:44px; }
+    #ammo { font-size:26px; }
+    body.touchmode #bottomright { padding:8px 12px 6px; border-radius:18px; }
+    #btnJump { right:calc(16px + env(safe-area-inset-right)); bottom:calc(92px + env(safe-area-inset-bottom)); }
+    #btnSlide { right:calc(90px + env(safe-area-inset-right)); bottom:calc(92px + env(safe-area-inset-bottom)); font-size:9px; }
+    #btnShoot { right:calc(90px + env(safe-area-inset-right)); bottom:calc(156px + env(safe-area-inset-bottom)); }
+    #btnInteract { right:calc(85px + env(safe-area-inset-right)); bottom:calc(220px + env(safe-area-inset-bottom)); }
+    #btnAim { right:calc(154px + env(safe-area-inset-right)); bottom:calc(161px + env(safe-area-inset-bottom)); font-size:10px; }
+    #btnView { right:calc(154px + env(safe-area-inset-right)); bottom:calc(215px + env(safe-area-inset-bottom)); font-size:9px; }
+    #btnReload { right:calc(26px + env(safe-area-inset-right)); bottom:calc(166px + env(safe-area-inset-bottom)); font-size:7px; }
+    #btnSprint { left:calc(20px + env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom)); font-size:9px; }
+    #btnEmote { left:calc(20px + env(safe-area-inset-left)); bottom:calc(222px + env(safe-area-inset-bottom)); font-size:13px; }
+    #btnShoot2 { left:calc(74px + env(safe-area-inset-left)); bottom:calc(190px + env(safe-area-inset-bottom)); }
   }
 </style>
 </head>
@@ -383,6 +401,7 @@
   <div class="tbtn" id="btnJump">JUMP</div>
   <div class="tbtn" id="btnSlide">SLIDE</div>
   <div class="tbtn" id="btnShoot"><div class="xh"></div></div>
+  <div class="tbtn" id="btnShoot2"><div class="xh"></div></div>
   <div class="tbtn" id="btnAim">AIM</div>
   <div class="tbtn" id="btnView">VIEW</div>
   <div class="tbtn" id="btnCycle">GUN</div>

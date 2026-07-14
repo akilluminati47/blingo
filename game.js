@@ -516,7 +516,7 @@ function startAmbience() {
 // fade the rain bed with the current weather (wind is driven live by updateWind)
 function syncWeatherAmbience() {
   if (!actx || !ambStarted) return;
-  rainGainNode.gain.setTargetAtTime(game.weather === 'rain' ? 0.55 : 0, actx.currentTime, 1.2);
+  rainGainNode.gain.setTargetAtTime(game.weather === 'rain' ? 0.275 : 0, actx.currentTime, 1.2);
 }
 const NF = s => 220 * Math.pow(2, s / 12);
 // each cousin has a persona motif (chiptune-ish MIDI feel)
@@ -2050,22 +2050,29 @@ function bindBtn(id, down, up) {
 bindBtn('btnJump', () => { input.jump = true; });
 bindBtn('btnSlide', () => { input.slide = true; });
 bindBtn('btnShoot', () => { input.shoot = true; input.shootPressed = true; }, () => { input.shoot = false; });
+bindBtn('btnShoot2', () => { input.shoot = true; input.shootPressed = true; }, () => { input.shoot = false; }); // left-hand attack twin
 // aim is a toggle: tap on, tap off (the lit state survives bindBtn's touchend un-press)
 bindBtn('btnAim', () => { input.aimTouch = !input.aimTouch; },
   () => { document.getElementById('btnAim').classList.toggle('pressed', input.aimTouch); });
 bindBtn('btnView', () => { toggleFPV(); });
-bindBtn('btnCycle', () => { cycleWeapon(1); });
 bindBtn('btnReload', () => { input.reload = true; });
+// the weapon + ammo squircle at bottom-right IS the swap button on touch
+if (isTouch) {
+  const wpanel = document.getElementById('bottomright');
+  wpanel.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); initAudio(); wpanel.classList.add('pressed'); cycleWeapon(1); }, { passive: false });
+  wpanel.addEventListener('touchend', e => { e.preventDefault(); wpanel.classList.remove('pressed'); }, { passive: false });
+  wpanel.addEventListener('touchcancel', () => wpanel.classList.remove('pressed'), { passive: true });
+}
 bindBtn('btnInteract', () => { input.interact = true; });
 bindBtn('btnEmote', () => { ewheel.open ? ewClose() : ewOpen('touch'); }); // toggle for touch
-const shootXhEl = document.querySelector('#btnShoot .xh'); // mini crosshair on the shoot button
+const shootXhEls = [...document.querySelectorAll('.tbtn .xh')]; // mini crosshairs on both attack buttons
 bindBtn('btnSprint', () => {
   sprintToggle = !sprintToggle;
   document.getElementById('btnSprint').style.background = sprintToggle ? 'rgba(120,255,140,.35)' : 'rgba(255,255,255,.14)';
 });
 
 // the stick's translucent home zone: it waits here faded, and glides back when let go
-function joyHomePos() { return { x: 128, y: innerHeight - 158 }; }
+function joyHomePos() { return { x: 128, y: innerHeight - (innerHeight <= 430 ? 118 : 158) }; }
 function joyGoHome() {
   const h = joyHomePos();
   joyBase.classList.remove('live');
@@ -2083,7 +2090,8 @@ touchLayer.addEventListener('touchstart', e => {
   input.device = 'touch'; refreshControlsBar();
   for (const t of e.changedTouches) {
     if (t.target.closest('.tbtn')) continue;
-    if (t.clientX < innerWidth * 0.45 && joyTouchId === null) {
+    // the stick only claims the bottom-left quadrant — the upper-left corner aims the camera
+    if (t.clientX < innerWidth * 0.45 && t.clientY > innerHeight * 0.5 && joyTouchId === null) {
       joyTouchId = t.identifier;
       joyOrigin = { x: t.clientX, y: t.clientY };
       joyBase.classList.remove('home');
@@ -2256,9 +2264,9 @@ const CONTROL_SCHEMES = {
   touch: {
     name: 'Touch',
     rows: [
-      [['touch', 'touch_swipe_move'], 'Left side: joystick'],
-      [['touch', 'touch_swipe_horizontal'], 'Right side: look'],
-      [['touch', 'touch_tap'], 'Shoot / Aim / GUN / VIEW'],
+      [['touch', 'touch_swipe_move'], 'Bottom left: joystick'],
+      [['touch', 'touch_swipe_horizontal'], 'Elsewhere: look'],
+      [['touch', 'touch_tap'], 'Tap ammo panel: swap weapon'],
     ],
     prompt: ['touch', 'touch_tap'],
   },
@@ -3527,13 +3535,18 @@ function findNearDowned() {
   }
   return best;
 }
+// a melee you can hand over in a player-to-player trade (fists stay attached to you)
+function meleeTradable(id) { const w = WEAPONS[id]; return !!(w && w.melee && id !== 'fists'); }
 // a recruited cousin you're close to AND looking at — so the squad trailing behind
 // doesn't spam the trade prompt while you walk
 function findNearTrade() {
   let best = null, bestD = 2.4;
   const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
   for (const c of companions) {
-    if (!c.recruited || c.downed || c.netP) continue; // player-run cousins keep their own kit
+    if (!c.recruited || c.downed) continue;
+    // player-run cousins keep their own kit — except melee-for-melee, when both players
+    // have their blades out (that's the handshake)
+    if (c.netP && !(meleeTradable(player.weapon.id) && c.weapon && meleeTradable(c.weapon.id))) continue;
     const dx = c.pos.x - player.pos.x, dz = c.pos.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = c; }
@@ -3545,11 +3558,38 @@ function tradeWeapons(c) {
   const myId = player.weapon.id;
   const theirId = (c.weapon || WEAPONS.pistol).id;
   if (myId === theirId) { toast('YOU BOTH HOLD THE SAME WEAPON'); return; }
+  // melee-for-melee is a true swap: the blade you hand over leaves your kit instead of
+  // duplicating, so nothing snaps back to your cousin's signature melee on the next cycle
+  if (meleeTradable(myId) && meleeTradable(theirId)) {
+    const i = player.owned.indexOf(myId);
+    if (i >= 0) player.owned.splice(i, 1);
+  }
   setCompanionWeapon(c, myId);
   equipWeapon(theirId);
+  // a player-run cousin is a real person elsewhere: tell their client to settle its side
+  if (c.netP && c.netConn) { try { c.netConn.send({ t: 'tradeW', w: myId, took: theirId }); } catch (e) {} }
   SFX.swap(WEAPONS[theirId]);
   rumble(60, 0.3, 0.4);
-  toast(`TRADED: YOUR ${WEAPONS[myId].name.toUpperCase()} FOR ${c.data.name.toUpperCase()}'S ${WEAPONS[theirId].name.toUpperCase()}`);
+  toast(`TRADED: YOUR ${WEAPONS[myId].name.toUpperCase()} FOR ${(c.netP ? 'P' + c.netP + ' ' : '') + c.data.name.toUpperCase()}'S ${WEAPONS[theirId].name.toUpperCase()}`);
+}
+// a client asked to swap melees with player p (1 = the host); host validates and settles
+function netHandleTradeReq(conn, p) {
+  const c = cousinByConn(conn);
+  if (!c || !c.weapon || !meleeTradable(c.weapon.id)) return;
+  if (p === 1) {
+    if (!meleeTradable(player.weapon.id)) return;
+    if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) > 3.4) return;
+    tradeWeapons(c);
+  } else {
+    const c2 = companions.find(k => k.netP === p);
+    if (!c2 || !c2.weapon || !meleeTradable(c2.weapon.id) || c2.weapon.id === c.weapon.id) return;
+    if (Math.hypot(c.pos.x - c2.pos.x, c.pos.z - c2.pos.z) > 3.4) return;
+    const idA = c.weapon.id, idB = c2.weapon.id;
+    setCompanionWeapon(c, idB); setCompanionWeapon(c2, idA);
+    try { c.netConn.send({ t: 'tradeW', w: idB, took: idA }); } catch (e) {}
+    try { c2.netConn.send({ t: 'tradeW', w: idA, took: idB }); } catch (e) {}
+    toast(`P${c.netP} AND P${p} TRADED MELEES`);
+  }
 }
 function openCrate(cr) {
   cr.opened = true;
@@ -3821,13 +3861,17 @@ function updatePlayer(dt) {
     const dr = Math.hypot(nearRecruit.pos.x - player.pos.x, nearRecruit.pos.z - player.pos.z);
     if (dc <= dr) nearRecruit = null; else nearCrate = null;
   }
-  let nearTrade = null;
-  if (!nearDowned && !nearCrate && !nearRecruit) nearTrade = findNearTrade();
-  const showPrompt = !!(nearDowned || nearCrate || nearRecruit || nearTrade);
+  let nearTrade = null, nearNetTrade = null;
+  if (!nearDowned && !nearCrate && !nearRecruit) {
+    nearTrade = findNearTrade();
+    if (!nearTrade && net.role === 'client') nearNetTrade = netFindNearTrade();
+  }
+  const showPrompt = !!(nearDowned || nearCrate || nearRecruit || nearTrade || nearNetTrade);
   hud.prompttxt.textContent = nearDowned ? 'Pick up ' + nearDowned.data.name
     : nearCrate ? 'Open Crate'
     : nearRecruit ? 'Recruit ' + nearRecruit.data.name
-    : nearTrade ? `Trade for ${nearTrade.data.name}'s ${(nearTrade.weapon || WEAPONS.pistol).name}` : '';
+    : nearTrade ? `Trade for ${nearTrade.data.name}'s ${(nearTrade.weapon || WEAPONS.pistol).name}`
+    : nearNetTrade ? `Trade for P${nearNetTrade.p} ${nearNetTrade.data.name}'s ${WEAPONS[nearNetTrade.wp].name}` : '';
   hud.prompt.classList.toggle('hidden', !showPrompt || input.device === 'touch');
   if (isTouch) hud.btnInteract.style.display = showPrompt ? 'flex' : 'none';
   if (input.interact) {
@@ -3835,6 +3879,7 @@ function updatePlayer(dt) {
     else if (nearCrate) openCrate(nearCrate);
     else if (nearRecruit) recruitCousin(nearRecruit);
     else if (nearTrade) tradeWeapons(nearTrade);
+    else if (nearNetTrade) { try { net.conns[0].send({ t: 'tradeReq', p: nearNetTrade.p }); } catch (e) {} }
     input.interact = false;
   }
 
@@ -5100,7 +5145,7 @@ function updateFx(dt) {
     }
   }
   hud.crosshair.classList.toggle('enemy', hot);
-  if (shootXhEl) shootXhEl.classList.toggle('enemy', hot); // the touch shoot button flares with it
+  for (const xh of shootXhEls) xh.classList.toggle('enemy', hot); // both touch attack buttons flare with it
   if (hitmarkT > 0) {
     hitmarkT -= dt;
     hud.hitmarker.style.opacity = 1;
@@ -5266,6 +5311,8 @@ function wireHostConn(conn) {
         spawnBubble(() => ({ x: c.pos.x, y: (c.y || 0) + 2.2, z: c.pos.z }), EMOTES[m.e] || '', c);
         for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'emote', e: m.e, p: c.netP }); } catch (e) {} }
       }
+    } else if (m.t === 'tradeReq') {
+      netHandleTradeReq(conn, m.p | 0);
     } else if (m.t === 'dead') {
       netFreeCousin(conn, false);
     }
@@ -5359,6 +5406,19 @@ function netClientData(m, conn, peer, n) {
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
+  } else if (m.t === 'tradeW') {
+    // the host settled a melee trade: our blade leaves the kit, theirs takes its slot —
+    // never overwritten back to this cousin's signature melee
+    if (WEAPONS[m.w]) {
+      if (m.took && meleeTradable(m.took) && player.weapon.id === m.took) {
+        const i = player.owned.indexOf(m.took);
+        if (i >= 0) player.owned.splice(i, 1);
+      }
+      equipWeapon(m.w);
+      SFX.swap(WEAPONS[m.w]);
+      rumble(60, 0.3, 0.4);
+      toast(`TRADED: YOUR ${WEAPONS[m.took] ? WEAPONS[m.took].name.toUpperCase() : 'WEAPON'} FOR A ${WEAPONS[m.w].name.toUpperCase()}`);
+    }
   } else if (m.t === 'secured') {
     game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
     recordPrestige();                 // multiplayer clears count toward your badges too
@@ -5514,6 +5574,19 @@ function netRefreshClientBars() {
       squadBarEls.push({ row, bar: row.querySelector('.sqbar'), c: { get hp() { return g.hp || 0; }, maxHp: g.data.id === 'blomba' ? 125 : 100, get downed() { return !!g.dn; } } });
     }
   }
+}
+// on a client, another player's ghost we're close to and facing while BOTH melees are out
+function netFindNearTrade() {
+  if (!meleeTradable(player.weapon.id)) return null;
+  let best = null, bestD = 2.4;
+  const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
+  for (const [, g] of net.actors) {
+    if (!g.p || g.dn || !meleeTradable(g.wp)) continue;
+    const dx = g.blob.root.position.x - player.pos.x, dz = g.blob.root.position.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = g; }
+  }
+  return best;
 }
 // a client's own shots don't damage ghosts directly: local feedback + wire to the host
 function netClientShot(z, dmg, kx, kz, opts) {
