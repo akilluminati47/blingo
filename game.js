@@ -2380,7 +2380,7 @@ const player = {
   walkPhase: 0, squash: 0, dead: false, idlePhase: 0,
   stumbleT: 0, stumbleX: 0, stumbleZ: 0, meleeArm: 0,
   slideT: 0, slideDX: 0, slideDZ: 0, hopT: 0,
-  dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1,
+  dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1, jumpMult: 1,
   owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=hip .. 1=aiming down / zoomed
   fpv: false, fpvT: 0,                         // fpv toggle (V / Select); fpvT eased 0=third-person .. 1=first-person
 };
@@ -2422,6 +2422,7 @@ function applyCousin(id) {
   player.maxHp = id === 'blomba' ? 125 : 100;
   player.reloadMult = id === 'bloopy' ? 0.65 : 1;
   player.ammoMult = id === 'blondie' ? 1.5 : 1;
+  player.jumpMult = id === 'blingo' ? 1.1 : 1; // unlisted perk: the "balanced hero" quietly jumps higher
   if (gunMesh) { gunMesh.removeFromParent(); gunMesh = null; }
   equipWeapon(player.weapon.id === 'fists' ? 'fists' : player.weapon.id);
 }
@@ -3614,7 +3615,7 @@ function updatePlayer(dt) {
   const groundY = supportTop(player.pos.x, player.pos.z, player.pos.y);
   if (input.jump && player.grounded) {
     const hop = player.slideT > 0;   // slide-hop: bigger jump, momentum kept
-    player.vy = (hop ? 8.6 : 7.4) * (fists ? 1.1 : 1);
+    player.vy = (hop ? 8.6 : 7.4) * (fists ? 1.1 : 1) * player.jumpMult;
     if (hop) { player.hopT = 0.5; player.slideT = 0; }
     player.grounded = false;
     player.squash = -0.25;
@@ -4406,6 +4407,7 @@ function updateBossFx() {
 // house roof ridges, and roost on the civic rooftops — a chattering row along the
 // bank's portico edge, solos or pairs on the town hall and courthouse. Gunfire close
 // to them flushes them, a direct hit pops them like a headshot, 10% bleed purple,
+// half the peckers wear a bloodied beak (and half of those drip blood on takeoff),
 // and once the Two Horned One falls every crow leaves the block for good.
 const crows = [];
 const CROW_FEATHER = 0x1b1b20;
@@ -4419,16 +4421,32 @@ function buildCrow(x, y, z, roost) {
   const purple = Math.random() < 0.1; // the odd one bleeds (and glares) purple
   const blk = 0x15151a;
   const body = ball(1, blk); body.scale.set(0.21, 0.18, 0.33); body.position.y = 0.32; g.add(body);
+  // charcoal breast puff: swells when the bird settles, tucks flat in flight
+  const breast = ball(0.13, 0x2b2b33); breast.scale.set(0.13, 0.11, 0.1);
+  breast.position.set(0, 0.3, 0.22); g.add(breast);
   const head = ball(0.16, blk); head.position.set(0, 0.52, 0.28); g.add(head);
   const beak = cyl(0.01, 0.06, 0.22, 0xe0a02a, 5);
   beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.5, 0.48); g.add(beak);
   const tail = box(0.18, 0.04, 0.34, blk); tail.position.set(0, 0.32, -0.42); g.add(tail);
+  // two-segment wings: shoulder panel + tip panel with splayed primary feathers,
+  // so they can fold back along the flanks at rest instead of sticking out flat
   const mkWing = sgn => {
     const piv = new THREE.Group(); piv.position.set(0.1 * sgn, 0.4, 0.02);
-    const w = box(0.5, 0.04, 0.34, blk); w.position.x = 0.26 * sgn;
-    piv.add(w); g.add(piv); return piv;
+    const inner = box(0.3, 0.045, 0.36, blk); inner.position.x = 0.15 * sgn;
+    piv.add(inner);
+    const tip = new THREE.Group(); tip.position.set(0.3 * sgn, 0, 0);
+    const outer = box(0.28, 0.035, 0.3, blk); outer.position.set(0.13 * sgn, 0, -0.02);
+    tip.add(outer);
+    for (let f = 0; f < 3; f++) { // primary feather fingers on the trailing edge
+      const fe = box(0.06, 0.028, 0.14, blk);
+      fe.position.set((0.06 + f * 0.075) * sgn, 0, -0.2 + f * 0.025);
+      tip.add(fe);
+    }
+    piv.add(tip); g.add(piv);
+    return { piv, tip };
   };
-  const wingL = mkWing(1), wingR = mkWing(-1);
+  const wl = mkWing(1), wr = mkWing(-1);
+  const wingL = wl.piv, wingR = wr.piv;
   const eyeC = purple ? 0xb04aff : 0xffd24a;
   for (const sx of [-0.07, 0.07]) {
     const e = ball(0.03, eyeC, { emissive: eyeC, emissiveIntensity: 0.6 });
@@ -4438,13 +4456,23 @@ function buildCrow(x, y, z, roost) {
   g.position.set(x, y, z);
   g.rotation.y = Math.random() * TAU;
   scene.add(g);
-  const c = { g, wingL, wingR, purple, roost: roost || null, target: null,
+  const c = { g, wingL, wingR, tipL: wl.tip, tipR: wr.tip, breast, beak, purple,
+    fold: 1, redBeak: false, dropsBlood: false, roost: roost || null, target: null,
     state: 'perch', t: Math.random() * 5, headBob: Math.random() * TAU, flap: Math.random() * TAU,
     hopT: 0.6 + Math.random() * 2, hopFrom: null, hopTo: null, hopP: 1, flutterT: 0,
     ang: Math.random() * TAU, angSpd: 0.6, cx: x, cz: z, ra: 12, rb: 10,
     cruiseY: y + 12, flyT: 0, lx: x, ly: y, lz: z, leaveDir: 0 };
   crows.push(c);
   return c;
+}
+// one call poses both wings: `a` is the flap beat, `fold` 0..1 tucks them back
+// along the flanks (tips swept over the tail) and puffs the breast out at rest
+function crowWings(c, a, fold) {
+  c.wingL.rotation.z = a - fold * 0.3; c.wingR.rotation.z = -a + fold * 0.3;
+  c.tipL.rotation.z = a * 0.55 + fold * 0.25; c.tipR.rotation.z = -a * 0.55 - fold * 0.25;
+  c.tipL.rotation.y = fold * 1.05; c.tipR.rotation.y = -fold * 1.05;
+  const puff = 1 + fold * 0.45 + Math.sin(c.t * 2.2) * fold * 0.06; // slow breathing at rest
+  c.breast.scale.set(0.13 * puff, 0.11 * puff, 0.1 * (0.7 + fold * 0.55));
 }
 function removeCrow(c) {
   const i = crows.indexOf(c);
@@ -4513,6 +4541,11 @@ function spawnPeckers() {
     const c = buildCrow(x, groundHeight(x, z2), z2, null);
     c.state = 'peck'; c.target = zz; c.ly = c.g.position.y;
     c.g.rotation.y = Math.atan2(zz.pos.x - x, zz.pos.z - z2); // face the meal
+    if (Math.random() < 0.5) { // half the peckers have been at it a while: bloodied beak
+      c.redBeak = true;
+      c.beak.material = mat(0x9c1414);
+      c.dropsBlood = Math.random() < 0.5; // and half of those carry a drip off with them
+    }
   }
 }
 function crowCaw(x, z) {
@@ -4522,6 +4555,9 @@ function crowCaw(x, z) {
 function crowTakeoff(c) {
   if (c.state === 'fly' || c.state === 'leave') return;
   const p = c.g.position;
+  // a bloodied pecker sheds a droplet as it lifts off its meal
+  if (c.state === 'peck' && c.dropsBlood && goreAmt() > 0.02)
+    spawnParticles(p.x, p.y + 0.45, p.z, BLOOD, 1, 1.2, 0.55);
   c.state = 'fly'; c.target = null; c.hopP = 1;
   c.cx = p.x + (Math.random() - 0.5) * 12; c.cz = p.z + (Math.random() - 0.5) * 12;
   c.ra = 13 + Math.random() * 8; c.rb = 10 + Math.random() * 7;
@@ -4613,8 +4649,8 @@ function updateCrows(dt) {
       const vx = g.position.x - px, vz = g.position.z - pz;
       if (Math.hypot(vx, vz) > 1e-3) g.rotation.y = Math.atan2(vx, vz);
       g.rotation.z = clamp(-c.angSpd * 0.5, -0.5, 0.5); g.rotation.x = -0.12; // bank into the turn
-      const a = Math.sin(c.t * 16) * 0.9;
-      c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+      c.fold = Math.max(0, c.fold - dt * 4);
+      crowWings(c, Math.sin(c.t * 16) * 0.9, c.fold);
       if (c.flyT <= 0) {
         if (c.roost) {
           const s = roostSlot(c.roost);
@@ -4636,8 +4672,8 @@ function updateCrows(dt) {
       const dx = c.lx - g.position.x, dz = c.lz - g.position.z;
       if (Math.hypot(dx, dz) > 1e-3) g.rotation.y = Math.atan2(dx, dz);
       g.rotation.z = lerp(g.rotation.z, 0, k); g.rotation.x = lerp(g.rotation.x, 0.2, k); // flare
-      const a = Math.sin(c.t * 10) * 0.7;
-      c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+      c.fold = Math.max(0, c.fold - dt * 4);
+      crowWings(c, Math.sin(c.t * 10) * 0.7, c.fold);
       if (Math.hypot(dx, dz) < 0.35 && Math.abs(g.position.y - c.ly) < 0.14) {
         c.state = c.roost ? 'perch' : 'peck';
         c.hopT = 1 + Math.random() * 3; c.hopP = 1;
@@ -4649,14 +4685,14 @@ function updateCrows(dt) {
       g.position.z += Math.cos(c.leaveDir) * 13 * dt;
       g.position.y += 5.5 * dt;
       g.rotation.y = c.leaveDir; g.rotation.x = -0.25; g.rotation.z = 0;
-      const a = Math.sin(c.t * 15) * 0.9;
-      c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+      c.fold = Math.max(0, c.fold - dt * 4);
+      crowWings(c, Math.sin(c.t * 15) * 0.9, c.fold);
       if (Math.hypot(g.position.x - player.pos.x, g.position.z - player.pos.z) > 150) removeCrow(c);
     } else if (c.state === 'peck') {
       // meal stood up / got dragged into the fight / despawned → flush
       if (!c.target || c.target.state !== 'sleep' || !zombies.includes(c.target)) { crowTakeoff(c); continue; }
-      c.wingL.rotation.z = lerp(c.wingL.rotation.z, 0, 1 - Math.pow(0.02, dt));
-      c.wingR.rotation.z = lerp(c.wingR.rotation.z, 0, 1 - Math.pow(0.02, dt));
+      c.fold = Math.min(1, c.fold + dt * 2.5);
+      crowWings(c, 0, c.fold);
       if (c.hopP < 1) {
         c.hopP = Math.min(1, c.hopP + dt * 3);
         g.position.x = lerp(c.hopFrom.x, c.hopTo.x, c.hopP);
@@ -4687,11 +4723,11 @@ function updateCrows(dt) {
     } else { // perch: folded wings, idle nods, edge shuffles, the odd wing flutter
       if (c.flutterT > 0) {
         c.flutterT -= dt;
-        const a = Math.sin(c.t * 18) * 0.7;
-        c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+        c.fold = Math.max(0.2, c.fold - dt * 5); // wings half-unfurl for the flutter
+        crowWings(c, Math.sin(c.t * 18) * 0.7, c.fold);
       } else {
-        c.wingL.rotation.z = lerp(c.wingL.rotation.z, 0, 1 - Math.pow(0.02, dt));
-        c.wingR.rotation.z = lerp(c.wingR.rotation.z, 0, 1 - Math.pow(0.02, dt));
+        c.fold = Math.min(1, c.fold + dt * 2.5);
+        crowWings(c, 0, c.fold);
         if (Math.random() < dt * 0.12) c.flutterT = 0.4 + Math.random() * 0.4;
       }
       c.headBob += dt * (1.6 + Math.sin(c.flap) * 0.4);
