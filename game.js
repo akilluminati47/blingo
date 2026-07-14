@@ -2085,9 +2085,11 @@ function rebuildSquadBars() {
   for (const c of squad) {
     const hex = '#' + c.data.color.toString(16).padStart(6, '0');
     const row = document.createElement('div');
-    row.className = 'sqrow';
+    // cousins driven by a real player get a hero-sized bar with their player tag
+    row.className = 'sqrow' + (c.netP ? ' pc' : '');
+    const label = (c.netP ? 'P' + c.netP + ' ' : '') + c.data.name;
     row.innerHTML = `<div class="sqwrap"><div class="sqbar" style="background:${hex}"></div></div>` +
-                    `<span class="sqname" style="color:${hex}">${c.data.name}</span>`;
+                    `<span class="sqname" style="color:${hex}">${label}</span>`;
     squadBarsEl.appendChild(row);
     squadBarEls.push({ row, bar: row.querySelector('.sqbar'), c });
   }
@@ -2099,6 +2101,8 @@ function updateSquadBars() {
   }
 }
 function hurtCompanion(c, dmg) {
+  // player-controlled cousins take their damage on their own screen
+  if (c.netP) { if (c.netConn) { try { c.netConn.send({ t: 'hurt', d: dmg }); } catch (e) {} } return; }
   if (c.downed || !c.recruited) return;
   c.hp -= dmg;
   c.lastHurtT = game.time;
@@ -2699,21 +2703,29 @@ function resetGame() {
   }
 }
 
-document.getElementById('playbtn').addEventListener('click', () => {
+// hide every menu screen and drop into a fresh run
+function startRun() {
   initAudio();
-  document.getElementById('startscreen').classList.add('hidden');
+  for (const id of ['startscreen', 'deathscreen', 'lobbyscreen', 'hostclosed'])
+    document.getElementById(id).classList.add('hidden');
   document.body.classList.add('playing');
   resetGame();
   game.state = 'playing';
   if (input.device === 'kbm') grabPointer();
+}
+document.getElementById('playbtn').addEventListener('click', () => { netLeave(); startRun(); });
+document.getElementById('respawnbtn').addEventListener('click', () => { netLeave(); startRun(); });
+document.getElementById('mpbtn').addEventListener('click', () => { initAudio(); showLobbies(); });
+document.getElementById('hostbtn').addEventListener('click', () => hostLobby());
+document.getElementById('lobbybackbtn').addEventListener('click', () => {
+  netScanStop();
+  document.getElementById('lobbyscreen').classList.add('hidden');
+  document.getElementById('startscreen').classList.remove('hidden');
 });
-document.getElementById('respawnbtn').addEventListener('click', () => {
-  initAudio();
-  document.getElementById('deathscreen').classList.add('hidden');
-  document.body.classList.add('playing');
-  resetGame();
-  game.state = 'playing';
-  if (input.device === 'kbm') grabPointer();
+document.getElementById('hcmenu').addEventListener('click', () => {
+  document.getElementById('hostclosed').classList.add('hidden');
+  document.getElementById('startscreen').classList.remove('hidden');
+  renderPrestige();
 });
 
 function die() {
@@ -2761,6 +2773,7 @@ function quitToMenu() {
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   stopTheme();
+  netLeave();
   renderPrestige();
 }
 function togglePause() {
@@ -3013,6 +3026,8 @@ function executeZombie(z, kx, kz, limb) {
   killZombie(z, kx, kz, true);           // pops the head too
 }
 function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
+  // in a joined game the host owns every zombie: show feedback, send the hit upstream
+  if (net.role === 'client') { if (z.state !== 'dying') netClientShot(z, dmg, kx, kz, opts); return; }
   if (z.state === 'dying') return;
   // horn-guard: while boss-wave zombies still stand, the Two Horned One shrugs everything
   // off — he flashes green instead of red because nothing got through
@@ -3119,7 +3134,7 @@ function findNearTrade() {
   let best = null, bestD = 2.4;
   const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
   for (const c of companions) {
-    if (!c.recruited || c.downed) continue;
+    if (!c.recruited || c.downed || c.netP) continue; // player-run cousins keep their own kit
     const dx = c.pos.x - player.pos.x, dz = c.pos.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = c; }
@@ -3212,9 +3227,9 @@ function armedWithGun(c) { return c.weapon && !c.weapon.melee; }
 function distributeGun(looter, id) {
   let take = looter;
   if (armedWithGun(looter)) {
-    const unarmed = companions.filter(c => c.recruited && !c.downed && !armedWithGun(c));
+    const unarmed = companions.filter(c => c.recruited && !c.downed && !c.netP && !armedWithGun(c));
     take = unarmed.find(c => PREF_GUN[c.data.id] === id) || unarmed[0]
-      || companions.find(c => c.recruited && PREF_GUN[c.data.id] === id && c.weapon.id !== id)
+      || companions.find(c => c.recruited && !c.netP && PREF_GUN[c.data.id] === id && c.weapon.id !== id)
       || null;
   }
   if (take) setCompanionWeapon(take, id);
@@ -3223,9 +3238,9 @@ function distributeGun(looter, id) {
 // armed cousins pass guns between themselves until everyone holds their preferred iron
 function settleGunTrades() {
   for (const a of companions) {
-    if (!a.recruited || !armedWithGun(a) || a.weapon.id === PREF_GUN[a.data.id]) continue;
+    if (!a.recruited || a.netP || !armedWithGun(a) || a.weapon.id === PREF_GUN[a.data.id]) continue;
     for (const b of companions) {
-      if (b === a || !b.recruited || !armedWithGun(b)) continue;
+      if (b === a || !b.recruited || b.netP || !armedWithGun(b)) continue;
       if (a.weapon.id === PREF_GUN[b.data.id] && b.weapon.id !== PREF_GUN[b.data.id]) {
         const aw = a.weapon.id, bw = b.weapon.id;
         setCompanionWeapon(a, bw); setCompanionWeapon(b, aw);
@@ -3263,11 +3278,17 @@ function animate() {
   if (game.state === 'playing') {
     game.time += dt;
     updatePlayer(dt);
-    updateCompanions(dt);
-    updateZombies(dt);
+    if (net.role === 'client') {
+      // the host owns the squad, zombies and spawner; we animate their ghosts
+      netClientTick(dt);
+    } else {
+      updateCompanions(dt);
+      updateZombies(dt);
+      updateSpawner(dt);
+      if (net.role === 'host') netHostTick(dt);
+    }
     updateCrates(dt);
     updatePickups(dt);
-    updateSpawner(dt);
     updateBossFx();
     updateCelebration(dt);
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
@@ -3555,6 +3576,8 @@ function updateCompanions(dt) {
       }
       continue;
     }
+    // a cousin claimed by another player moves by their streamed pose, not squad AI
+    if (c.netP) { netPoseCompanion(c, dt); continue; }
     // downed: kneel where they fell, flashing red under a rescue beacon, until
     // someone comes and picks them up by hand
     if (c.downed) {
@@ -4008,6 +4031,7 @@ function completeCleanup() {
   game.cleanup = false;
   game.celebrateT = 5.5;
   recordPrestige();
+  if (net.role === 'host') netBroadcast({ t: 'secured', tm: game.time }); // everyone banks the clear
   toast('BLOCK SECURED .ᐟ', true);
   rumble(600, 1, 1);
 }
@@ -4248,6 +4272,429 @@ function updateFx(dt) {
   }
 })();
 
+// ---------- multiplayer: PeerJS lobbies + host-authoritative co-op ----------
+// lobbies live at fixed ids (blingo-lobby-1..4) on the public PeerJS broker. The host
+// runs the world; joiners assume a cousin in it. Terrain is deterministic, so clients
+// generate their own map and only zombies, actors and events travel the wire.
+const NET_LOBBIES = 4, NET_SLOTS = 6;
+const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyNum: 0,
+  ghosts: new Map(), actors: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '' };
+const lobbyHintEl = document.getElementById('lobbyhint');
+const lobbyListEl = document.getElementById('lobbylist');
+function netAvailable() { return typeof Peer !== 'undefined'; }
+function netBroadcast(m) { for (const c of net.conns) { try { c.send(m); } catch (e) {} } }
+function cousinByConn(conn) { return companions.find(c => c.netConn === conn); }
+
+// --- lobby browser ---
+function showLobbies() {
+  document.getElementById('startscreen').classList.add('hidden');
+  document.getElementById('lobbyscreen').classList.remove('hidden');
+  lobbyListEl.innerHTML = '';
+  if (!netAvailable()) { lobbyHintEl.textContent = 'Multiplayer needs an internet connection . .'; return; }
+  lobbyHintEl.textContent = 'Scanning for lobbies . .';
+  netScanStop();
+  const scan = net.scan = new Peer(undefined, { debug: 0 });
+  let found = 0;
+  scan.on('open', () => {
+    for (let n = 1; n <= NET_LOBBIES; n++) {
+      const conn = scan.connect('blingo-lobby-' + n, { reliable: true });
+      conn.on('open', () => conn.send({ t: 'query' }));
+      conn.on('data', m => {
+        if (m.t !== 'info') return;
+        found++;
+        lobbyHintEl.textContent = 'Pick a lobby, or host your own . .';
+        renderLobbyRow(m);
+        conn.close();
+      });
+    }
+  });
+  scan.on('error', () => { lobbyHintEl.textContent = 'Lobby service unreachable . . host one instead'; });
+  setTimeout(() => { if (net.scan === scan && !found) lobbyHintEl.textContent = 'No open lobbies . . host one .ᐟ'; }, 3500);
+}
+function netScanStop() { if (net.scan) { try { net.scan.destroy(); } catch (e) {} net.scan = null; } }
+// one row per live lobby: badge in the host's hero colour, slots taken, and the
+// cousin faces of everyone inside in the order they joined
+function renderLobbyRow(m) {
+  const old = lobbyListEl.querySelector(`[data-ln="${m.ln}"]`);
+  if (old) old.remove();
+  const host = m.players.find(p => p.n === 1);
+  const hostData = COUSINS.find(c => c.id === (host && host.c)) || COUSINS[0];
+  const row = document.createElement('div');
+  row.className = 'lobbyrow';
+  row.dataset.ln = m.ln;
+  row.style.setProperty('--bc', '#' + hostData.color.toString(16).padStart(6, '0'));
+  row.innerHTML = `<span>LOBBY ${m.ln}</span><span class="slots">${m.players.length}/${NET_SLOTS}</span>`;
+  for (const p of [...m.players].sort((a, b) => a.n - b.n)) {
+    const cd = COUSINS.find(c => c.id === p.c);
+    if (!cd) continue;
+    const img = document.createElement('img');
+    img.src = faceIcon(cd.color);
+    img.title = 'Player ' + p.n;
+    row.appendChild(img);
+  }
+  row.addEventListener('click', () => joinLobby(m.ln));
+  lobbyListEl.appendChild(row);
+}
+
+// --- hosting ---
+function hostLobby(n = 1) {
+  if (!netAvailable()) { lobbyHintEl.textContent = 'Multiplayer needs an internet connection . .'; return; }
+  netScanStop();
+  lobbyHintEl.textContent = 'Opening a lobby . .';
+  const peer = new Peer('blingo-lobby-' + n, { debug: 0 });
+  peer.on('open', () => {
+    net.peer = peer; net.role = 'host'; net.playerNum = 1; net.lobbyNum = n; net.leaving = false;
+    peer.on('connection', conn => wireHostConn(conn));
+    startRun();
+    toast(`HOSTING LOBBY ${n} .ᐟ YOU ARE PLAYER 1`, true);
+  });
+  peer.on('error', e => {
+    if (e.type === 'unavailable-id') {
+      try { peer.destroy(); } catch (er) {}
+      if (n < NET_LOBBIES) hostLobby(n + 1);
+      else lobbyHintEl.textContent = 'All lobbies are taken . .';
+    } else if (!net.role) lobbyHintEl.textContent = 'Lobby service unreachable . .';
+  });
+}
+function lobbyPlayers() {
+  const out = [{ n: 1, c: selectedCousin }];
+  for (const c of companions) if (c.netP) out.push({ n: c.netP, c: c.data.id });
+  return out.sort((a, b) => a.n - b.n);
+}
+function wireHostConn(conn) {
+  conn.on('data', m => {
+    if (m.t === 'query') {
+      try { conn.send({ t: 'info', ln: net.lobbyNum, players: lobbyPlayers() }); } catch (e) {}
+      setTimeout(() => { try { conn.close(); } catch (e) {} }, 600);
+    } else if (m.t === 'hi') {
+      if (lobbyPlayers().length >= NET_SLOTS || game.state === 'menu') { try { conn.send({ t: 'full' }); } catch (e) {} return; }
+      // hand them a cousin: their pick if it's free, else the first free one
+      let c = companions.find(k => k.data.id === m.cousin && !k.netP)
+        || companions.find(k => !k.netP);
+      if (!c) { try { conn.send({ t: 'full' }); } catch (e) {} return; }
+      const num = 1 + lobbyPlayers().length;
+      c.netP = num; c.netConn = conn; c.netPose = null;
+      if (c.downed) reviveCousin(c);
+      if (!c.recruited) recruitCousin(c);   // the JOINED .ᐟ toast, beacon off — found like any cousin
+      else toast(`PLAYER ${num} TOOK OVER ${c.data.name.toUpperCase()} .ᐟ`);
+      net.conns.push(conn);
+      conn.send({ t: 'welcome', n: num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
+        w: game.weather, ph: game.phase, tm: game.time, k: game.kills });
+      rebuildSquadBars();
+    } else if (m.t === 'p') {
+      const c = cousinByConn(conn);
+      if (c) { c.netPose = m; c.hp = m.hp; }
+    } else if (m.t === 'shot') {
+      const z = zombies.find(zz => zz.nid === m.id);
+      if (z) damageZombie(z, m.d, m.kx, m.kz, 2, { weapon: WEAPONS[m.wid], dist: m.ds, isHead: m.hd });
+    } else if (m.t === 'emote') {
+      const c = cousinByConn(conn);
+      if (c) {
+        spawnBubble(() => ({ x: c.pos.x, y: (c.y || 0) + 2.2, z: c.pos.z }), EMOTES[m.e] || '');
+        for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'emote', e: m.e, p: c.netP }); } catch (e) {} }
+      }
+    } else if (m.t === 'dead') {
+      netFreeCousin(conn, false);
+    }
+  });
+  conn.on('close', () => netFreeCousin(conn, true));
+  conn.on('error', () => netFreeCousin(conn, true));
+}
+// a player left or died: their cousin snaps back to squad AI
+function netFreeCousin(conn, gone) {
+  const c = cousinByConn(conn);
+  net.conns = net.conns.filter(k => k !== conn);
+  if (!c) return;
+  const num = c.netP;
+  c.netP = null; c.netConn = null; c.netPose = null;
+  c.hp = Math.max(c.hp, c.maxHp * 0.5);
+  if (gone) toast(`PLAYER ${num} LEFT — ${c.data.name.toUpperCase()} REJOINS THE SQUAD`);
+  rebuildSquadBars();
+}
+// 10Hz world snapshot to every client
+function netHostTick(dt) {
+  net.txT -= dt;
+  if (net.txT > 0 || !net.conns.length) return;
+  net.txT = 0.1;
+  const R = v => Math.round(v * 20) / 20;
+  const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
+    playerBlob.root.rotation.y, player.weapon.id, player.hp, false)];
+  for (const c of companions) {
+    if (!c.recruited) continue;
+    ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed));
+  }
+  const zb = [];
+  for (const z of zombies) {
+    if (!z.nid) z.nid = ++net.zid;
+    zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
+      st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' ? 2 : 0),
+      sc: R(z.scale), pu: z.purple ? 1 : 0, ho: z.hornWave ? 1 : 0, bo: z.isBoss ? 1 : 0 });
+  }
+  const boss = bossState.boss;
+  netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ac, zb,
+    bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1 });
+}
+function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
+  const R = v => Math.round(v * 20) / 20;
+  const key = p ? 'p' + p : 'ai' + cid;
+  const mv = Math.hypot(x - (net['_lx' + key] || x), z - (net['_lz' + key] || z)) > 0.03 ? 1 : 0;
+  net['_lx' + key] = x; net['_lz' + key] = z;
+  return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv };
+}
+
+// --- joining ---
+function joinLobby(n) {
+  lobbyHintEl.textContent = `Joining Lobby ${n} . .`;
+  netScanStop();
+  const peer = new Peer(undefined, { debug: 0 });
+  peer.on('open', () => {
+    const conn = peer.connect('blingo-lobby-' + n, { reliable: true });
+    conn.on('open', () => conn.send({ t: 'hi', cousin: selectedCousin }));
+    conn.on('data', m => netClientData(m, conn, peer, n));
+    conn.on('close', () => { if (net.role === 'client' && !net.leaving) showHostClosed(); });
+    conn.on('error', () => { if (net.role === 'client' && !net.leaving) showHostClosed(); });
+  });
+  peer.on('error', e => {
+    if (net.role !== 'client') lobbyHintEl.textContent = 'Could not reach that lobby . .';
+    else if (!net.leaving) showHostClosed();
+  });
+}
+function netClientData(m, conn, peer, n) {
+  if (m.t === 'full') { lobbyHintEl.textContent = 'That lobby is full . .'; try { peer.destroy(); } catch (e) {} return; }
+  if (m.t === 'welcome') {
+    net.peer = peer; net.role = 'client'; net.conns = [conn];
+    net.playerNum = m.n; net.lobbyNum = n; net.leaving = false;
+    applyCousin(m.cousin);
+    startRun();
+    // this world belongs to the host: no local squad, no local spawner
+    for (const c of companions) {
+      scene.remove(c.blob.root);
+      if (c.blob.shadow) scene.remove(c.blob.shadow);
+      if (c.beacon) scene.remove(c.beacon);
+    }
+    companions.length = 0;
+    for (const z of zombies) { scene.remove(z.blob.root); if (z.blob.shadow) scene.remove(z.blob.shadow); }
+    zombies.length = 0;
+    game.weather = m.w; game.phase = m.ph; applyEnvironment();
+    game.time = m.tm; game.kills = m.k; hud.kills.textContent = m.k;
+    player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
+    toast(`JOINED LOBBY ${n} .ᐟ YOU ARE PLAYER ${m.n}`, true);
+  } else if (m.t === 's') {
+    netApplySnapshot(m);
+  } else if (m.t === 'hurt') {
+    hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
+  } else if (m.t === 'emote') {
+    const a = net.actors.get(m.p ? 'p' + m.p : null);
+    if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '');
+  } else if (m.t === 'secured') {
+    game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
+    recordPrestige();                 // multiplayer clears count toward your badges too
+    toast('BLOCK SECURED .ᐟ', true);
+  }
+}
+function netSendEmote(i) {
+  if (net.role === 'client') { try { net.conns[0].send({ t: 'emote', e: i }); } catch (e) {} }
+  else if (net.role === 'host') netBroadcast({ t: 'emote', e: i, p: 1 });
+}
+// apply a host snapshot: lerp targets for actors + zombie ghosts, HUD sync
+function netApplySnapshot(m) {
+  if (Math.abs(m.tm - game.time) > 1) game.time = m.tm;
+  if (m.k !== game.kills) { game.kills = m.k; hud.kills.textContent = m.k; }
+  if (m.w !== game.weather || m.ph !== game.phase) { game.weather = m.w; game.phase = m.ph; applyEnvironment(); }
+  bossBarEl.classList.toggle('show', m.bb >= 0);
+  if (m.bb >= 0) bossHpEl.style.width = m.bb * 100 + '%';
+  const seenA = new Set();
+  for (const a of m.ac) {
+    if (a.p === net.playerNum) continue;          // that's me
+    const key = a.p ? 'p' + a.p : 'ai' + a.c;
+    seenA.add(key);
+    let g = net.actors.get(key);
+    if (!g) {
+      const cd = COUSINS.find(c => c.id === a.c) || COUSINS[0];
+      g = { blob: buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right' }), wp: '', data: cd, p: a.p, walk: 0 };
+      scene.add(g.blob.root);
+      net.actors.set(key, g);
+    }
+    if (a.wp !== g.wp) {
+      g.wp = a.wp;
+      if (g.gunMesh) g.gunMesh.removeFromParent();
+      g.gunMesh = a.wp === 'fists' ? null : buildGunMesh(a.wp);
+      if (g.gunMesh) g.blob.gunSocket.add(g.gunMesh);
+    }
+    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn;
+  }
+  for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
+  const seenZ = new Set();
+  for (const zs of m.zb) {
+    seenZ.add(zs.i);
+    let g = net.ghosts.get(zs.i);
+    if (!g) {
+      const color = zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
+      const blob = buildBlob({ color, zombie: true, scale: zs.sc });
+      if (zs.ho || zs.bo) for (const s of [-1, 1]) {
+        const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
+        horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
+        horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
+        blob.head.add(horn);
+      }
+      scene.add(blob.root);
+      g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo,
+        state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false, purple: !!zs.pu };
+      net.ghosts.set(zs.i, g);
+      zombies.push(g);              // lives in the same list so shots + crosshair see it
+    }
+    g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st;
+    if (zs.st === 1 && g.state !== 'dying') { g.state = 'dying'; g.deadT = 0; }
+  }
+  for (const [nid, g] of net.ghosts) {
+    if (!seenZ.has(nid) && g.state !== 'dying') netRemoveGhost(nid);
+  }
+}
+function netRemoveGhost(nid) {
+  const g = net.ghosts.get(nid);
+  if (!g) return;
+  scene.remove(g.blob.root);
+  if (g.blob.shadow) scene.remove(g.blob.shadow);
+  net.ghosts.delete(nid);
+  const i = zombies.indexOf(g);
+  if (i >= 0) zombies.splice(i, 1);
+}
+// client frame: animate ghosts toward their targets and stream our own pose at 15Hz
+function netClientTick(dt) {
+  const k = 1 - Math.exp(-10 * dt);
+  for (const [, g] of net.actors) {
+    const b = g.blob;
+    b.root.position.x = lerp(b.root.position.x, g.tx ?? b.root.position.x, k);
+    b.root.position.z = lerp(b.root.position.z, g.tz ?? b.root.position.z, k);
+    b.root.position.y = g.ty ?? b.root.position.y;
+    b.root.rotation.y = angLerp(b.root.rotation.y, g.tyw || 0, k);
+    g.walk += dt * (g.mv ? 10 : 0);
+    const swing = Math.sin(g.walk) * (g.mv ? 0.8 : 0.05);
+    b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
+    b.arms[b.offArm].rotation.x = -swing * 0.7;
+    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8 : (WEAPONS[g.wp] && WEAPONS[g.wp].melee ? (g.mv ? -1.7 : -0.75) : -Math.PI / 2);
+    b.wob.rotation.x = g.dn ? 0.55 : 0;
+    placeShadow(b, b.root.position.x, b.root.position.z, b.root.position.y);
+    updateFlash(b, dt);
+  }
+  for (const [nid, g] of net.ghosts) {
+    const b = g.blob;
+    if (g.state === 'dying') {
+      g.deadT += dt;
+      b.root.rotation.x = Math.min(g.deadT * 4, Math.PI / 2);
+      if (g.deadT > 1.2) b.root.position.y -= dt * 0.8;
+      placeShadow(b, g.pos.x, g.pos.z);
+      if (g.deadT > 2.4) netRemoveGhost(nid);
+      continue;
+    }
+    g.pos.x = lerp(g.pos.x, g.tx ?? g.pos.x, k);
+    g.pos.z = lerp(g.pos.z, g.tz ?? g.pos.z, k);
+    g.yaw = angLerp(g.yaw, g.tyw || 0, k);
+    const gy = groundHeight(g.pos.x, g.pos.z);
+    b.root.position.set(g.pos.x, gy, g.pos.z);
+    b.root.rotation.y = g.yaw;
+    if (g.netSt === 2) b.root.rotation.x = -1.45;   // still sprawled / clawing out
+    else {
+      b.root.rotation.x = 0;
+      g.walkPhase += dt * 3;
+      const sw = Math.sin(g.walkPhase);
+      b.legs[0].rotation.x = sw * 0.7; b.legs[1].rotation.x = -sw * 0.7;
+      b.arms[0].rotation.x = -1.4 + sw * 0.25; b.arms[1].rotation.x = -1.4 - sw * 0.25;
+    }
+    placeShadow(b, g.pos.x, g.pos.z);
+    updateFlash(b, dt);
+  }
+  netRefreshClientBars();
+  if (player.dead && !net.sentDead) { net.sentDead = true; try { net.conns[0].send({ t: 'dead' }); } catch (e) {} }
+  net.txT -= dt;
+  if (net.txT <= 0 && net.conns[0]) {
+    net.txT = 1 / 15;
+    const mv = Math.hypot(player.pos.x - (net._px || 0), player.pos.z - (net._pz || 0)) > 0.02 ? 1 : 0;
+    net._px = player.pos.x; net._pz = player.pos.z;
+    try {
+      net.conns[0].send({ t: 'p', x: player.pos.x, z: player.pos.z, y: player.pos.y,
+        yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp) });
+    } catch (e) {}
+  }
+}
+// client-side squad bars: every other player big + tagged, AI cousins small
+function netRefreshClientBars() {
+  const rows = [];
+  for (const [key, g] of net.actors) rows.push({ key, g });
+  rows.sort((a, b) => (a.g.p || 99) - (b.g.p || 99));
+  const sig = rows.map(r => r.key + (r.g.wp || '')).join('|');
+  if (sig !== net.barSig) {
+    net.barSig = sig;
+    squadBarsEl.innerHTML = '';
+    squadBarEls.length = 0;
+    for (const { g } of rows) {
+      const hex = '#' + g.data.color.toString(16).padStart(6, '0');
+      const row = document.createElement('div');
+      row.className = 'sqrow' + (g.p ? ' pc' : '');
+      const label = (g.p ? 'P' + g.p + ' ' : '') + g.data.name;
+      row.innerHTML = `<div class="sqwrap"><div class="sqbar" style="background:${hex}"></div></div>` +
+                      `<span class="sqname" style="color:${hex}">${label}</span>`;
+      squadBarsEl.appendChild(row);
+      squadBarEls.push({ row, bar: row.querySelector('.sqbar'), c: { get hp() { return g.hp || 0; }, maxHp: g.data.id === 'blomba' ? 125 : 100, get downed() { return !!g.dn; } } });
+    }
+  }
+}
+// a client's own shots don't damage ghosts directly: local feedback + wire to the host
+function netClientShot(z, dmg, kx, kz, opts) {
+  if (!z.nid) return;
+  spawnDamageNumber(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
+  spawnBlood(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, 1);
+  flashBlob(z.blob);
+  try {
+    net.conns[0].send({ t: 'shot', id: z.nid, d: dmg, hd: !!opts.isHead, kx, kz,
+      ds: opts.dist || 0, wid: (opts.weapon || {}).id });
+  } catch (e) {}
+}
+// tear down whatever multiplayer state exists (safe to call any time)
+function netLeave() {
+  net.leaving = true;
+  netScanStop();
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  net.peer = null; net.role = null; net.conns = []; net.playerNum = 0; net.lobbyNum = 0;
+  net.sentDead = false; net.barSig = '';
+  for (const [nid] of [...net.ghosts]) netRemoveGhost(nid);
+  for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
+  for (const c of companions) { c.netP = null; c.netConn = null; c.netPose = null; }
+  net.leaving = false;
+}
+// the host vanished mid-run: everyone gets walked back out gracefully
+function showHostClosed() {
+  netLeave();
+  game.state = 'menu';
+  document.body.classList.remove('playing');
+  for (const id of ['startscreen', 'deathscreen', 'lobbyscreen', 'pausescreen']) document.getElementById(id).classList.add('hidden');
+  document.getElementById('hostclosed').classList.remove('hidden');
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+  stopTheme();
+}
+// remote-controlled cousins follow their player's streamed pose instead of squad AI
+function netPoseCompanion(c, dt) {
+  const p = c.netPose;
+  const b = c.blob;
+  if (p) {
+    const k = 1 - Math.exp(-12 * dt);
+    c.pos.x = lerp(c.pos.x, p.x, k);
+    c.pos.z = lerp(c.pos.z, p.z, k);
+    c.y = p.y; c.yaw = p.yw;
+    if (p.wp && WEAPONS[p.wp] && (c.weapon || {}).id !== p.wp) setCompanionWeapon(c, p.wp);
+    c.walkPhase += dt * (p.mv ? 10 : 0);
+  }
+  const swing = Math.sin(c.walkPhase) * (p && p.mv ? 0.8 : 0.05);
+  b.root.position.set(c.pos.x, c.y || groundHeight(c.pos.x, c.pos.z), c.pos.z);
+  b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
+  b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
+  b.arms[b.offArm].rotation.x = -swing * 0.7;
+  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee ? -0.9 : -Math.PI / 2;
+  placeShadow(b, c.pos.x, c.pos.z, c.y);
+  updateFlash(b, dt);
+}
+addEventListener('beforeunload', () => { if (net.peer) { try { net.peer.destroy(); } catch (e) {} } });
+
 // ---------- boot ----------
 refreshControlsBar();
 renderPrestige();
@@ -4259,7 +4706,7 @@ updateChunks(0, 0);
 player.pos.y = groundHeight(0, 0);
 playerBlob.root.position.copy(player.pos);
 window.__dbg = {
-  player, game, zombies, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop,
+  player, game, zombies, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop, net,
   openNearest: () => { const c = findNearCrate(); if (c) openCrate(c); },
   recruitNearest: () => { const c = findNearRecruit(); if (c) recruitCousin(c); },
   give: id => giveWeapon(id),
@@ -4277,37 +4724,40 @@ window.__dbg = {
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateCelebration(dt); updateFx(dt); },
 };
 
+// ---------- blob face icon (64px canvas): the favicon + lobby roster portraits ----------
+const faceCv = document.createElement('canvas'); faceCv.width = 64; faceCv.height = 64;
+const faceFx = faceCv.getContext('2d');
+function faceRounded(x, y, w, h, r) {
+  const fx = faceFx, [tl, tr, br, bl] = r;
+  fx.beginPath();
+  fx.moveTo(x + tl, y);
+  fx.lineTo(x + w - tr, y); fx.arcTo(x + w, y, x + w, y + tr, tr);
+  fx.lineTo(x + w, y + h - br); fx.arcTo(x + w, y + h, x + w - br, y + h, br);
+  fx.lineTo(x + bl, y + h); fx.arcTo(x, y + h, x, y + h - bl, bl);
+  fx.lineTo(x, y + tl); fx.arcTo(x, y, x + tl, y, tl);
+  fx.closePath();
+}
+function faceIcon(color) {
+  const fx = faceFx;
+  fx.clearRect(0, 0, 64, 64);
+  fx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+  faceRounded(8, 6, 48, 52, [24, 24, 20, 20]); fx.fill();        // rounded blob head
+  fx.fillStyle = 'rgba(0,0,0,.14)';
+  faceRounded(8, 42, 48, 16, [0, 0, 20, 20]); fx.fill();          // soft chin shading
+  for (const ex of [24, 40]) {                                    // two googly eyes
+    fx.fillStyle = '#fff';
+    fx.beginPath(); fx.ellipse(ex, 27, 7, 8, 0, 0, TAU); fx.fill();
+    fx.fillStyle = '#222';
+    fx.beginPath(); fx.arc(ex + 1.5, 29, 3.2, 0, TAU); fx.fill();
+  }
+  return faceCv.toDataURL('image/png');
+}
+
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------
 (function livingTab() {
   const link = document.createElement('link');
   link.rel = 'icon'; link.type = 'image/png';
   document.head.appendChild(link);
-  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
-  const fx = cv.getContext('2d');
-  function roundRect(x, y, w, h, r) {
-    const [tl, tr, br, bl] = r;
-    fx.beginPath();
-    fx.moveTo(x + tl, y);
-    fx.lineTo(x + w - tr, y); fx.arcTo(x + w, y, x + w, y + tr, tr);
-    fx.lineTo(x + w, y + h - br); fx.arcTo(x + w, y + h, x + w - br, y + h, br);
-    fx.lineTo(x + bl, y + h); fx.arcTo(x, y + h, x, y + h - bl, bl);
-    fx.lineTo(x, y + tl); fx.arcTo(x, y, x + tl, y, tl);
-    fx.closePath();
-  }
-  function faceIcon(color) {
-    fx.clearRect(0, 0, 64, 64);
-    fx.fillStyle = '#' + color.toString(16).padStart(6, '0');
-    roundRect(8, 6, 48, 52, [24, 24, 20, 20]); fx.fill();        // rounded blob head
-    fx.fillStyle = 'rgba(0,0,0,.14)';
-    roundRect(8, 42, 48, 16, [0, 0, 20, 20]); fx.fill();          // soft chin shading
-    for (const ex of [24, 40]) {                                  // two googly eyes
-      fx.fillStyle = '#fff';
-      fx.beginPath(); fx.ellipse(ex, 27, 7, 8, 0, 0, TAU); fx.fill();
-      fx.fillStyle = '#222';
-      fx.beginPath(); fx.arc(ex + 1.5, 29, 3.2, 0, TAU); fx.fill();
-    }
-    return cv.toDataURL('image/png');
-  }
   let ci = 0, li = 0;
   function tick() {
     const c = COUSINS[ci];
