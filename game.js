@@ -439,6 +439,18 @@ const SFX = {
   reloadDone() { tone(900, 0.05, 0.22, 'square'); setTimeout(() => tone(1250, 0.08, 0.24, 'square'), 110); },
   // hold-to-trade completion: a bright two-note ping
   tradePing() { tone(920, 0.08, 0.3, 'sine', 1100); setTimeout(() => tone(1380, 0.16, 0.3, 'sine', 1600), 100); },
+  // launching a drop kick: a sharp cloth-snap whoosh. hard = off a slide hop, which
+  // drops the pitch and leans on it for a heavier, meatier launch
+  dropKick(hard) {
+    noiseBurst(hard ? 0.16 : 0.12, hard ? 380 : 520, hard ? 0.5 : 0.36);
+    tone(hard ? 150 : 210, hard ? 0.16 : 0.12, hard ? 0.34 : 0.24, 'square', hard ? 55 : 85);
+  },
+  // the boot landing: a low thud with a crack on top, harder off a slide hop
+  dropKickHit(hard) {
+    noiseBurst(hard ? 0.14 : 0.1, hard ? 260 : 380, hard ? 0.7 : 0.5);
+    tone(hard ? 80 : 110, hard ? 0.2 : 0.14, hard ? 0.5 : 0.34, 'square', hard ? 32 : 48);
+    if (hard) tone(240, 0.1, 0.28, 'sawtooth', 70);
+  },
   // distinct mechanical "chk-chk" per gun when you cycle to it
   swap(w) {
     const id = w && w.id;
@@ -689,6 +701,17 @@ function meleeCarryLift(base, shoulderY, groundY, reach) {
   const room = clamp((shoulderY - groundY - 0.12) / L, 0, 1);
   return -Math.max(Math.abs(base), Math.acos(room));
 }
+// A swing that actually travels: cock back past the carry frame, whip through to
+// `through`, then ease home. p is 0..1 across the swing. The whip is the fast quarter —
+// smoothed on either side so the arm doesn't tick between poses.
+function meleeSwing(p, ready, through) {
+  if (p < 0.2) return lerp(ready, ready + 0.6, smooth(p / 0.2));                  // wind up
+  if (p < 0.45) return lerp(ready + 0.6, through, smooth((p - 0.2) / 0.25));      // whip through
+  return lerp(through, ready, smooth((p - 0.45) / 0.55));                         // recover to carry
+}
+// how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
+// held-down punching always chains, but a real pause drops you back to a 6 opener.
+const COMBO_WINDOW = 0.75;
 // melee weapons sit in the same fist socket as guns, blade/head pointing forward (-z)
 function shaftZ(len, r1, r2, color, near = 0.06) {
   const m = cyl(r1, r2, len, color, 8);
@@ -2535,6 +2558,12 @@ const player = {
   reloading: 0, shootCd: 0, lastShotT: -9, lastHurtT: -9, lastAimYaw: 0,
   walkPhase: 0, squash: 0, dead: false, idlePhase: 0,
   stumbleT: 0, stumbleX: 0, stumbleZ: 0, meleeArm: 0,
+  // fists combo: comboN is the swing's place in the current chain (0 = opener). It rolls
+  // 6,7,6,7 while the chain holds and resets to a 6 opener once COMBO_WINDOW lapses.
+  comboN: 0, lastPunchT: -9,
+  swingT: 0, swingDur: 0.999,           // drives the melee swing arc
+  dropKick: false, dropKickHard: false, // committed air move: rides out until you land
+  dropKickHits: null, dkX: 0, dkZ: 0,   // the locked-in line of the dive
   slideT: 0, slideDX: 0, slideDZ: 0, hopT: 0,
   dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1, jumpMult: 1,
   owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=hip .. 1=aiming down / zoomed
@@ -3129,6 +3158,8 @@ function resetGame() {
   player.reloading = 0;
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
+  player.comboN = 0; player.lastPunchT = -9; player.swingT = 0;
+  player.dropKick = false; player.dropKickHard = false; player.dropKickHits = null;
   player.slideT = 0; player.hopT = 0;
   // the hero starts with bare fists plus their own signature melee; recruits keep theirs
   player.owned = ['fists', COUSINS.find(c => c.id === selectedCousin).melee];
@@ -3374,6 +3405,47 @@ function getAimDir(out) {
   return out;
 }
 
+// ---------- drop kick ----------
+// Throwing bare fists in mid-air commits you: the boots come out, you ride the dive to
+// the ground, and nothing else fires until you land. That commitment is the whole point —
+// an armed melee jump swing can be mashed at its rpm, this one costs you a jump each time.
+const DROPKICK_DMG = 13, DROPKICK_RANGE = 2.1, DROPKICK_KNOCK = 22;
+function startDropKick() {
+  player.dropKick = true;
+  player.dropKickHard = player.hopT > 0;   // launched out of a slide hop: the hard version
+  player.dropKickHits = new Set();         // one boot per zombie, not one per frame
+  player.comboN = 0;                       // the kick is not a punch — it breaks the chain
+  player.swingT = 0;
+  player.lastShotT = game.time;
+  // lock the line of the dive along the aim and kill any remaining climb, so it reads as
+  // a committed fall rather than a float
+  getAimDir(_aimDir);
+  const l = Math.hypot(_aimDir.x, _aimDir.z) || 1;
+  player.dkX = _aimDir.x / l; player.dkZ = _aimDir.z / l;
+  if (player.vy > 0) player.vy *= 0.35;
+  SFX.dropKick(player.dropKickHard);
+  rumble(90, 0.5, 0.45);
+}
+function updateDropKick(dt) {
+  if (!player.dropKick) return;
+  const hard = player.dropKickHard;
+  for (const z of zombies) {
+    if (z.state === 'dying' || player.dropKickHits.has(z)) continue;
+    const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > DROPKICK_RANGE || Math.abs(z.blob.root.position.y - player.pos.y) > 2.2) continue;
+    player.dropKickHits.add(z);
+    const nx = d > 0.001 ? dx / d : player.dkX, nz = d > 0.001 ? dz / d : player.dkZ;
+    // a slide-hop kick hits twice as hard, same as any slide-hop melee
+    damageZombie(z, DROPKICK_DMG * (hard ? 2 : 1), nx, nz, DROPKICK_KNOCK * (hard ? 1.6 : 1),
+      { weapon: player.weapon, dist: d, isHead: false });
+    play3d(z.pos.x, z.pos.z, () => SFX.dropKickHit(hard));
+    rumble(110, 0.7, 0.5);
+    shakeAmp = Math.max(shakeAmp, hard ? 0.09 : 0.05);
+  }
+  if (player.grounded) { player.dropKick = false; player.dropKickHits = null; } // landed: free again
+}
+
 // ---------- shooting ----------
 const _from = new THREE.Vector3(), _to = new THREE.Vector3(), _gp = new THREE.Vector3();
 function fireWeapon() {
@@ -3382,10 +3454,27 @@ function fireWeapon() {
   getAimDir(_aimDir);
   player.lastAimYaw = Math.atan2(_aimDir.x, _aimDir.z);
   if (w.melee) {
+    // bare fists in the air are a drop kick, not a punch: a committed move you ride down
+    // (updateDropKick), so unlike an armed jump swing it can't be mashed. The !dropKick
+    // guard is the lock itself — re-entering would re-arm the hit set and let one jump
+    // land the boot over and over.
+    if (w.id === 'fists' && !player.grounded) { if (!player.dropKick) startDropKick(); return; }
     SFX.shoot(w);
     player.lastShotT = game.time;
-    // fists alternate hands; an armed melee always swings the weapon hand
-    player.meleeArm = w.id === 'fists' ? (player.meleeArm ^ 1) : playerBlob.gunArm;
+    player.swingDur = 60 / w.rpm * 0.9;   // the arc fills the weapon's own rpm gap
+    player.swingT = player.swingDur;
+    if (w.id === 'fists') {
+      // consecutive swings chain. The opener leads with the dominant hand — right for
+      // everyone, left for Blondie, since gunArm already carries the family handedness —
+      // and lands 6; the answering hand lands 7. Let the chain lapse and the next swing
+      // is a fresh 6 opener, so 6,7,6,7 is the reward for keeping it rolling.
+      player.comboN = game.time - player.lastPunchT > COMBO_WINDOW ? 0 : player.comboN + 1;
+      player.lastPunchT = game.time;
+      player.meleeArm = player.comboN % 2 === 0 ? playerBlob.gunArm : playerBlob.offArm;
+    } else {
+      player.meleeArm = playerBlob.gunArm;  // an armed melee always swings the weapon hand
+    }
+    const hop = player.hopT > 0;            // swung out of a slide hop: twice the damage
     for (const z of zombies) {
       if (z.state === 'dying') continue;
       const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
@@ -3394,11 +3483,12 @@ function fireWeapon() {
         const ang = Math.atan2(dx, dz);
         let diff = Math.abs(((ang - player.lastAimYaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
         if (diff < 1.15) {
-          // fists: one hand lands 7, the other 6 (matched to the visible swing);
-          // fists also send them staggering back. Melee ignores hero damage perks so
-          // the numbers stay true for everyone — the perks live on guns only.
-          const base = w.id === 'fists' ? (player.meleeArm ? 6 : 7) : w.dmg;
-          damageZombie(z, base * closeBonus(w, d), dx / d, dz / d, w.id === 'fists' ? 11 : 3.5, { weapon: w, dist: d, isHead: false });
+          // fists land on the chain, not the hand: opener 6, answer 7. Melee ignores hero
+          // damage perks so the numbers stay true for everyone — the perks live on guns.
+          const base = w.id === 'fists' ? (player.comboN % 2 === 0 ? 6 : 7) : w.dmg;
+          const knock = (w.id === 'fists' ? 11 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
+          damageZombie(z, base * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
+            { weapon: w, dist: d, isHead: false });
           rumble(...w.rmb);
           break;
         }
@@ -3556,6 +3646,11 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   spawnDamageNumber(z.pos.x, b.root.position.y + (isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
   z.pos.x += kx * knock * 0.12;
   z.pos.z += kz * knock * 0.12;
+  // the blow carries: an impulse the body keeps riding (integrated in updateZombies).
+  // Set before the kill check on purpose — a corpse should be thrown by the hit that
+  // killed it, not drop straight down on the spot.
+  z.kvx = (z.kvx || 0) + kx * knock * 0.5;
+  z.kvz = (z.kvz || 0) + kz * knock * 0.5;
   spawnBlood(z.pos.x, b.root.position.y + (isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, isHead ? 1.3 : 1);
   // wounds bleed: leave a stain on the body itself and start dripping a ground trail
   z.bleeding = true;
@@ -3948,6 +4043,12 @@ function updatePlayer(dt) {
     mvx += player.stumbleX * 7 * s;
     mvz += player.stumbleZ * 7 * s;
   }
+  // riding a drop kick: the dive owns your movement outright — no air steering, no
+  // slide momentum on top, you go where you committed
+  if (player.dropKick) {
+    const sp = player.dropKickHard ? 11 : 8.5;
+    mvx = player.dkX * sp; mvz = player.dkZ * sp;
+  }
   let nx = player.pos.x + mvx * dt;
   let nz = player.pos.z + mvz * dt;
   [nx, nz] = resolveCollision(nx, nz, 0.45, player.pos.y);
@@ -3981,10 +4082,13 @@ function updatePlayer(dt) {
   }
 
   player.shootCd -= dt;
+  player.swingT = Math.max(0, player.swingT - dt);
+  updateDropKick(dt);   // resolves the boots, and frees you the moment you land
   const wantShoot = input.shoot || input.shootGamepad;
   const w = player.weapon;
-  // hold the trigger to keep firing; every weapon — full-auto, semi-auto & melee — cycles at its own rpm
-  if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0) {
+  // hold the trigger to keep firing; every weapon — full-auto, semi-auto & melee — cycles at its own rpm.
+  // A live drop kick locks everything out until it lands.
+  if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0 && !player.dropKick) {
     fireWeapon();
     player.shootCd = 60 / w.rpm;
   }
@@ -4100,12 +4204,13 @@ function updatePlayer(dt) {
   b.legs[1].rotation.x = -swing - stumbleLean * 0.2;
   const aimAmt = player.aimT;
   if (w.melee) {
-    const punching = game.time - player.lastShotT < 0.18;
+    // swingT drives a real arc rather than snapping the arm to a pose: -1 when idle
+    const sw = player.swingT > 0 ? 1 - player.swingT / player.swingDur : -1;
     if (w.id === 'fists') {
-      // fists: alternate the punching arm each swing
+      // fists: the chain alternates which arm throws, so the swing plays on meleeArm
       b.arms[0].rotation.x = -swing * 0.8;
       b.arms[1].rotation.x = swing * 0.8;
-      if (punching) b.arms[player.meleeArm].rotation.x = -1.9;
+      if (sw >= 0) b.arms[player.meleeArm].rotation.x = meleeSwing(sw, b.arms[player.meleeArm].rotation.x, -2.5);
       else if (stumbling) { b.arms[0].rotation.x -= stumbleLean * 1.0; b.arms[1].rotation.x -= stumbleLean * 1.0; }
     } else {
       // armed melee: the weapon hand swings; between swings the carry frame keeps the
@@ -4114,7 +4219,7 @@ function updatePlayer(dt) {
       const reach = gunMesh ? gunMesh.userData.reach : 0.8;
       const ready = meleeCarryLift(-0.55 - aimAmt * 1.0 + bob,
         player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
-      b.arms[b.gunArm].rotation.x = punching ? -2.3 : ready;
+      b.arms[b.gunArm].rotation.x = sw >= 0 ? meleeSwing(sw, ready, -2.7) : ready;
       b.arms[b.offArm].rotation.x = -swing * 0.6 - aimAmt * 0.35;
       if (stumbling) { b.arms[b.gunArm].rotation.x -= stumbleLean * 0.6; b.arms[b.offArm].rotation.x -= stumbleLean * 1.0; }
     }
@@ -4132,9 +4237,18 @@ function updatePlayer(dt) {
     b.arms[b.offArm].rotation.x = -2.6;
   }
   if (!player.grounded) {
-    b.arms[b.offArm].rotation.x = -2.4;
-    if (w.melee) b.arms[b.gunArm].rotation.x = -2.4;
+    // airborne tuck — but never stomp on a live swing, or a jump attack reads as nothing
+    // but its sound effect. Whichever arm is mid-swing keeps its arc; the rest tuck.
+    const swingArm = player.swingT > 0 ? (w.id === 'fists' ? player.meleeArm : b.gunArm) : -1;
+    if (swingArm !== b.offArm) b.arms[b.offArm].rotation.x = -2.4;
+    if (w.melee && swingArm !== b.gunArm) b.arms[b.gunArm].rotation.x = -2.4;
     b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3;
+  }
+  if (player.dropKick) {
+    // drop kick: both boots thrust out front, torso cocked back behind them
+    b.wob.rotation.x = -0.75;
+    b.legs[0].rotation.x = -1.5; b.legs[1].rotation.x = -1.2;
+    b.arms[0].rotation.x = -2.7; b.arms[1].rotation.x = -2.7;
   }
 
   updateChunks(player.pos.x, player.pos.z);
@@ -4364,8 +4478,18 @@ function updateZombies(dt) {
     const z = zombies[i];
     const b = z.blob;
     updateFlash(b, dt);
+    // knockback rides on after the hit, corpses included — walls still stop a body
+    if (z.kvx || z.kvz) {
+      const [kx2, kz2] = resolveCollision(z.pos.x + z.kvx * dt, z.pos.z + z.kvz * dt, 0.4 * z.scale, b.root.position.y);
+      z.pos.x = kx2; z.pos.z = kz2;
+      const decay = Math.exp(-6 * dt);
+      z.kvx *= decay; z.kvz *= decay;
+      if (Math.hypot(z.kvx, z.kvz) < 0.08) { z.kvx = 0; z.kvz = 0; }
+    }
     if (z.state === 'dying') {
       z.deadT += dt;
+      // the corpse follows its knockback out; the alive branch owns this the rest of the time
+      b.root.position.x = z.pos.x; b.root.position.z = z.pos.z;
       b.root.rotation.x = Math.min(z.deadT * 4, Math.PI / 2);
       if (z.deadT > 1.2) b.root.position.y -= dt * 0.8;
       // shadow stays flat under the corpse's centre while the body topples/sinks
