@@ -648,6 +648,19 @@ function buildGunMesh(id) {
   } else if (w.melee && id !== 'fists') {
     buildMeleeMesh(g, id, c);
   }
+  if (!w.melee) {
+    // firearms ride forward out of the fist (they sat clipped inside it), and carry a
+    // muzzle anchor at the barrel tip so flashes + tracers leave the actual geometry
+    g.position.z = -0.14;
+    const tip = { pistol: [0.05, -0.3], magnum: [0.05, -0.3], smg: [0.04, -0.42],
+      shotgun: [0.05, -0.61], rifle: [0.05, -0.58], sniper: [0.06, -1.14] }[id];
+    if (tip) {
+      const muz = new THREE.Group();
+      muz.position.set(0, tip[0], tip[1]);
+      g.add(muz);
+      g.userData.muzzle = muz;
+    }
+  }
   // beefier reads better on the blocky blobs: guns +20%, melee +35%
   g.scale.setScalar(w.melee ? 1.35 : 1.2);
   if (w.melee && id !== 'fists') {
@@ -1012,8 +1025,21 @@ function windowPane(rng, w, h) {
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), darkGlassMat);
 }
 
+// stepped standable colliders under a pitched roof: a staircase of flat tiers hugging
+// the slope so feet ride on the shingles instead of falling through (or floating).
+// ridge runs along x when axis='x' (slopes fall away in ±z), along z when axis='z'.
+function roofSteps(colliders, bx, by, bz, axis, ridgeHalf, slopeHalf, rh) {
+  const N = 4;
+  for (let i = 0; i < N; i++) {
+    const topY = by + rh * (i + 1) / N;
+    const hs = Math.max(0.32, slopeHalf * (1 - (i + 1) / N));
+    colliders.push(axis === 'x'
+      ? aabb(bx, bz, ridgeHalf, hs, topY - by, by)
+      : aabb(bx, bz, hs, ridgeHalf, topY - by, by));
+  }
+}
 // pitched shingle roof + gables
-function addRoof(group, bx, by, bz, w, d, rng) {
+function addRoof(group, bx, by, bz, w, d, rng, colliders) {
   const rh = d * 0.32;
   const roofMat = roofMats[(rng() * roofMats.length) | 0];
   const slopeLen = Math.hypot(d / 2 + 0.5, rh);
@@ -1036,6 +1062,7 @@ function addRoof(group, bx, by, bz, w, d, rng) {
     gable.position.set(bx + s * w / 2, by, bz);
     group.add(gable);
   }
+  if (colliders) roofSteps(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
 }
 
 function makeBuilding(rng, bx, bz, group, colliders, crateList) {
@@ -1086,7 +1113,7 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
   const floor = box(w, 0.6, d, 0x4a453e);
   floor.position.set(bx, y0 - 0.24, bz);
   group.add(floor);
-  addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng); // roof sits down onto the walls
+  addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders); // roof sits down onto the walls, standable
   if (rng() < 0.85) makeShelf(rng, bx + (rng() - 0.5) * (w - 3), bz + (rng() - 0.5) * (d - 3), (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList);
   if (rng() < 0.7) makeCrate(rng, bx + (rng() - 0.5) * (w - 2.5), y0 + 0.08, bz + (rng() - 0.5) * (d - 2.5), group, colliders, crateList, false);
   // parked car near the building
@@ -1468,10 +1495,11 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
     col.position.set(x - w / 4 + i * (w / 6), y0 + h / 2, fz + faceDir * 1);
     townGroup.add(col);
   }
-  // portico roof: underside rests on the column tops
+  // portico roof: underside rests on the column tops; standable, feet on the slab top
   const roofSlab = box(w + 1, 0.3, d + 2.6, 0x8b8577);
   roofSlab.position.set(x, y0 + h + 0.15, z + faceDir * 0.8);
   townGroup.add(roofSlab);
+  townColliders.push(aabb(x, z + faceDir * 0.8, (w + 1) / 2, (d + 2.6) / 2, 0.3, y0 + h));
   const pedShape = new THREE.Shape();
   pedShape.moveTo(-w * 0.4, 0); pedShape.lineTo(w * 0.4, 0); pedShape.lineTo(0, 2.2); pedShape.closePath();
   const ped = new THREE.Mesh(new THREE.ShapeGeometry(pedShape), new THREE.MeshLambertMaterial({ color: 0xcfc9ba, side: THREE.DoubleSide }));
@@ -1503,7 +1531,8 @@ function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
   const body = box(w, h, d, wallC);
   body.position.set(x, y0 + h / 2, z);
   townGroup.add(body);
-  townColliders.push(aabb(x, z, w / 2, d / 2, h, y0)); // flat roof is standable
+  // flat roof is standable: collider tops out on the parapet slab, the surface you see
+  townColliders.push(aabb(x, z, w / 2 + 0.1, d / 2 + 0.1, h + 0.4, y0));
   const parapet = box(w + 0.2, 0.4, d + 0.2, 0x55493c);
   parapet.position.set(x, y0 + h + 0.2, z);
   townGroup.add(parapet);
@@ -1594,6 +1623,7 @@ function buildChurchyard(rng) {
     gable.position.set(cx, y0 + h - 0.05, cz + s * d / 2);
     townGroup.add(gable);
   }
+  roofSteps(townColliders, cx, y0 + h - 0.05, cz, 'z', d / 2 + 0.45, w / 2 + 0.5, rh); // scalable nave roof
   // bell tower + spire + leaning cross over the front (road-side) entrance
   const ridgeY = y0 + h - 0.05 + rh;
   const steepleZ = southZ + 2.4;
@@ -2531,7 +2561,7 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
 
 // ---------- pickups ----------
 const pickups = [];
-function spawnPickup(kind, x, z) {
+function spawnPickup(kind, x, z, fromY) {
   const g = new THREE.Group();
   if (kind === 'ammo') {
     const b = box(0.3, 0.2, 0.22, 0x3f6d3a, { emissive: 0x1a3a14, emissiveIntensity: 0.8 });
@@ -2542,9 +2572,12 @@ function spawnPickup(kind, x, z) {
     const c1 = box(0.22, 0.06, 0.07, 0xd23b3b); c1.position.y = 0.23; g.add(c1);
     const c2 = box(0.07, 0.06, 0.22, 0xd23b3b); c2.position.y = 0.23; g.add(c2);
   }
-  g.position.set(x, groundHeight(x, z), z);
+  // fromY: spawn airborne (crow kills) and fall until we land on a roof/car/terrain
+  const restY = supportTop(x, z, fromY != null ? fromY : groundHeight(x, z) + 0.1, 0.5);
+  g.position.set(x, fromY != null ? fromY : restY, z);
   scene.add(g);
-  pickups.push({ mesh: g, kind, pos: new THREE.Vector3(x, 0, z), t: 0 });
+  pickups.push({ mesh: g, kind, pos: new THREE.Vector3(x, 0, z), t: 0,
+    y: g.position.y, vy: 0, falling: fromY != null, restY });
 }
 
 // ---------- particles / tracers ----------
@@ -3178,8 +3211,9 @@ function fireWeapon() {
   shakeAmp = Math.max(shakeAmp, w.kick);
 
   if (gunMesh) {
-    gunMesh.getWorldPosition(flash.position);
-    flash.position.y += 0.05;
+    const muz = gunMesh.userData.muzzle;
+    (muz || gunMesh).getWorldPosition(flash.position);
+    if (!muz) flash.position.y += 0.05;
     flash.visible = true;
     flashT = 0.05;
   }
@@ -3228,7 +3262,7 @@ function fireWeapon() {
     }
     _to.set(_from.x + rdx * bestT, _from.y + rdy * bestT, _from.z + rdz * bestT);
     if (gunMesh) {
-      gunMesh.getWorldPosition(_gp);
+      (gunMesh.userData.muzzle || gunMesh).getWorldPosition(_gp);
       spawnTracer(_gp.clone(), _to.clone());
     }
     if (best) {
@@ -3940,7 +3974,9 @@ function updateCompanions(dt) {
           const t = rayAABB(c.pos.x, sy, c.pos.z, ddx, ddy, ddz, col);
           if (t < tWall) tWall = t;
         }
-        _cv.set(c.pos.x, sy, c.pos.z);
+        // cousin tracers also leave the barrel tip when a gun model is in hand
+        if (c.gunMesh && c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_cv);
+        else _cv.set(c.pos.x, sy, c.pos.z);
         if (tWall < dl - 0.35) {
           // blocked: the shot smacks the obstacle instead of magically reaching the zombie
           const hx = c.pos.x + ddx * tWall, hy = sy + ddy * tWall, hz = c.pos.z + ddz * tWall;
@@ -4588,6 +4624,9 @@ function killCrow(c, kx, kz, dmg) {
   spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 6, 2.5, 0.6);
   spawnGib(p.x, p.y + 0.3, p.z, c.purple ? CROW_PURPLE_BLOOD : CROW_FEATHER, kx, kz);
   play3d(p.x, p.z, () => tone(880, 0.09, 0.06, 'square', 260));
+  // shot crows shake loose a little reward that drops from where they were hit —
+  // except the purple ones, which give up nothing and stay a mystery
+  if (!c.purple) spawnPickup(Math.random() < 0.7 ? 'ammo' : 'medkit', p.x, p.z, p.y + 0.3);
   removeCrow(c);
 }
 // boss down: the whole murder lifts off and leaves the block, and no more spawn
@@ -4793,10 +4832,17 @@ function updatePickups(dt) {
   for (let i = pickups.length - 1; i >= 0; i--) {
     const p = pickups[i];
     p.t += dt;
-    p.mesh.position.y = groundHeight(p.pos.x, p.pos.z) + 0.1 + Math.sin(p.t * 3) * 0.08;
+    if (p.falling) { // crow drops tumble down from the kill and settle on whatever is below
+      p.vy -= 22 * dt;
+      p.y += p.vy * dt;
+      if (p.y <= p.restY) { p.y = p.restY; p.falling = false; }
+      p.mesh.position.y = p.y;
+    } else {
+      p.mesh.position.y = p.restY + 0.1 + Math.sin(p.t * 3) * 0.08;
+    }
     p.mesh.rotation.y += dt * 2;
     const d = Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z);
-    if (d < 1.1 && !player.dead) {
+    if (d < 1.1 && Math.abs(p.mesh.position.y - player.pos.y) < 2.2 && !player.dead) {
       if (p.kind === 'ammo' && !player.weapon.melee) {
         const add = Math.ceil(player.weapon.mag * 0.8 * player.ammoMult);
         reserves[player.weapon.id] = (reserves[player.weapon.id] | 0) + add;
