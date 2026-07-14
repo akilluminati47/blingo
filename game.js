@@ -1115,7 +1115,9 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
   const outX = doorSide === 2 ? -1 : doorSide === 3 ? 1 : 0;
   const outZ = doorSide === 0 ? -1 : doorSide === 1 ? 1 : 0;
   return { x: bx, z: bz, hw: w / 2 + 0.5, hd: d / 2 + 0.5,
-    doorX, doorZ, doorOutX: doorX + outX * 2.2, doorOutZ: doorZ + outZ * 2.2 };
+    doorX, doorZ, doorOutX: doorX + outX * 2.2, doorOutZ: doorZ + outZ * 2.2,
+    // roof ridge line (runs along x) — a crow perch
+    roofY: y0 + h - 0.05 + d * 0.32, ridgeHW: Math.max(1, w / 2 - 0.6) };
 }
 
 function makeTree(rng, x, z, group, colliders) {
@@ -1555,6 +1557,14 @@ function parkingLot(x, z, w, d, rows, rng) {
 
 function buildTown() {
   const rng = mulberry32(9001);
+  // persistent low-res ground apron under the whole town footprint. Chunks only
+  // stream in near the player, so without this the always-visible town buildings
+  // sit on transparent void when seen from far away. Sunk slightly below the
+  // streamed chunk terrain so the detailed ground draws over it with no z-fighting.
+  townGroup.add(terrainPlane(208, 208, 52, 52, 47, 2, grassMat(0.5), -0.15));
+  townGroup.add(terrainPlane(12.8, 208, 3, 52, -17, 2, roadMat, -0.06)); // far copy of the x=-17 road
+  townGroup.add(terrainPlane(12.8, 208, 3, 52, 103, 2, roadMat, -0.06)); // far copy of the x=103 road
+  townGroup.add(terrainPlane(208, 12.8, 52, 3, 47, -17, roadMat, -0.06)); // far copy of the z=-17 road
   // main street shops: road z in [-20,-14], shops face it from both sides
   const northNames = ['DINER', 'BAKERY', 'BOOKS', 'TOOLS', 'PIZZA'];
   const southNames = ['MART', 'LIQUOR', 'BARBER', 'TAILOR', 'RADIO'];
@@ -2699,6 +2709,7 @@ function resetGame() {
   if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
   bossState.boss = null; bossState.spawned = false; bossState.defeated = false;
   bossBarEl.classList.remove('show');
+  resetCrows();
   for (const p of pickups) scene.remove(p.mesh);
   pickups.length = 0;
   clearDamageNumbers();
@@ -2999,6 +3010,12 @@ function fireWeapon() {
         }
       }
     }
+    // crows are fair game too — a clean hit lands like a headshot
+    for (const cw of crows) {
+      const cs = cw.g.scale.x;
+      const ct = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw.g.position.x, cw.g.position.y + 0.38 * cs, cw.g.position.z, 0.45 * cs);
+      if (ct < bestT) { bestT = ct; best = { crow: cw }; }
+    }
     _to.set(_from.x + rdx * bestT, _from.y + rdy * bestT, _from.z + rdz * bestT);
     if (gunMesh) {
       gunMesh.getWorldPosition(_gp);
@@ -3007,12 +3024,19 @@ function fireWeapon() {
     if (best) {
       anyHit = true;
       const dHit = bestT;
-      const dmg = w.dmg * player.dmgMult * (best.isHead ? 2 : 1) * closeBonus(w, dHit) * rangeFactor(w, dHit);
-      damageZombie(best.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: best.isHead, limb: best.limb });
+      if (best.crow) {
+        killCrow(best.crow, rdx, rdz, w.dmg * player.dmgMult * 2 * closeBonus(w, dHit) * rangeFactor(w, dHit));
+      } else {
+        const dmg = w.dmg * player.dmgMult * (best.isHead ? 2 : 1) * closeBonus(w, dHit) * rangeFactor(w, dHit);
+        damageZombie(best.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: best.isHead, limb: best.limb });
+      }
     } else if (bestT < 80) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
     }
   }
+  // the bang flushes crows near the muzzle, and near where the shot landed
+  scareCrows(player.pos.x, player.pos.z, 16);
+  scareCrows(_to.x, _to.z, 9);
   if (anyHit) { hitmarkT = 0.18; SFX.hit(); }
 }
 // death bookkeeping: kills counter, gore burst, optional head-pop, loot drop
@@ -3304,6 +3328,7 @@ function animate() {
     updateCrates(dt);
     updatePickups(dt);
     updateBossFx();
+    updateCrows(dt);
     updateCelebration(dt);
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
@@ -4039,6 +4064,7 @@ function onBossDefeated(z) {
   bossState.defeated = true;
   if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
   bossBarEl.classList.remove('show');
+  crowsLeave(); // the whole murder abandons the block once its master falls
   // cleanup phase: kills must reach the NEXT full hundred so it's always 100+ more —
   // at 299 kills the target is 400, never a one-kill cheese to 300
   game.cleanup = true;
@@ -4082,6 +4108,326 @@ function updateBossFx() {
   if (bossState.beam) bossState.beam.material.opacity = 0.16 + Math.sin(performance.now() * 0.004) * 0.08;
   const z = bossState.boss;
   if (z && z.state !== 'dormant') bossHpEl.style.width = clamp(z.hp / z.maxHp, 0, 1) * 100 + '%';
+}
+
+// ---------- crows ----------
+// scavengers that dress the block (ported from the alien-farm crows): they peck at
+// sleeping zombies and flush the moment the meal stands up, circle in to perch on
+// house roof ridges, and roost on the civic rooftops — a chattering row along the
+// bank's portico edge, solos or pairs on the town hall and courthouse. Gunfire close
+// to them flushes them, a direct hit pops them like a headshot, 10% bleed purple,
+// and once the Two Horned One falls every crow leaves the block for good.
+const crows = [];
+const CROW_FEATHER = 0x1b1b20;
+const CROW_PURPLE_BLOOD = 0x9a2be0;
+let crowSpawnT = 2;
+let crowsGone = false; // boss defeated: the flock departs, none return this run
+let crowTargets = { bank: 4, hall: 2, court: 1 };
+
+function buildCrow(x, y, z, roost) {
+  const g = new THREE.Group();
+  const purple = Math.random() < 0.1; // the odd one bleeds (and glares) purple
+  const blk = 0x15151a;
+  const body = ball(1, blk); body.scale.set(0.21, 0.18, 0.33); body.position.y = 0.32; g.add(body);
+  const head = ball(0.16, blk); head.position.set(0, 0.52, 0.28); g.add(head);
+  const beak = cyl(0.01, 0.06, 0.22, 0xe0a02a, 5);
+  beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.5, 0.48); g.add(beak);
+  const tail = box(0.18, 0.04, 0.34, blk); tail.position.set(0, 0.32, -0.42); g.add(tail);
+  const mkWing = sgn => {
+    const piv = new THREE.Group(); piv.position.set(0.1 * sgn, 0.4, 0.02);
+    const w = box(0.5, 0.04, 0.34, blk); w.position.x = 0.26 * sgn;
+    piv.add(w); g.add(piv); return piv;
+  };
+  const wingL = mkWing(1), wingR = mkWing(-1);
+  const eyeC = purple ? 0xb04aff : 0xffd24a;
+  for (const sx of [-0.07, 0.07]) {
+    const e = ball(0.03, eyeC, { emissive: eyeC, emissiveIntensity: 0.6 });
+    e.position.set(sx, 0.56, 0.4); g.add(e);
+  }
+  g.scale.setScalar(1 + Math.random() * 0.35);
+  g.position.set(x, y, z);
+  g.rotation.y = Math.random() * TAU;
+  scene.add(g);
+  const c = { g, wingL, wingR, purple, roost: roost || null, target: null,
+    state: 'perch', t: Math.random() * 5, headBob: Math.random() * TAU, flap: Math.random() * TAU,
+    hopT: 0.6 + Math.random() * 2, hopFrom: null, hopTo: null, hopP: 1, flutterT: 0,
+    ang: Math.random() * TAU, angSpd: 0.6, cx: x, cz: z, ra: 12, rb: 10,
+    cruiseY: y + 12, flyT: 0, lx: x, ly: y, lz: z, leaveDir: 0 };
+  crows.push(c);
+  return c;
+}
+function removeCrow(c) {
+  const i = crows.indexOf(c);
+  if (i < 0) return;
+  scene.remove(c.g);
+  c.g.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE) o.geometry.dispose(); });
+  crows.splice(i, 1);
+}
+// the three civic roosts: portico slab front edges (crows face out over the street)
+function townRoosts() {
+  if (!townRoosts.list) townRoosts.list = [
+    { tag: 'bank',  x: 0,  y: groundHeight(0, -46) + 8.6 + 0.3, z: -35.9, hw: 9, face: 0 },
+    { tag: 'hall',  x: 88, y: groundHeight(88, -2) + 6.5 + 0.3, z: -10.1, hw: 7, face: Math.PI },
+    { tag: 'court', x: 88, y: groundHeight(88, -34) + 6 + 0.3,  z: -25.9, hw: 7, face: 0 },
+  ];
+  return townRoosts.list;
+}
+function roostSlot(r) { return { x: r.x + (Math.random() * 2 - 1) * r.hw, y: r.y, z: r.z }; }
+// a loaded chunk-house roof ridge in the mid distance to glide onto
+function pickHouseRoost() {
+  const ccx = Math.round(player.pos.x / CHUNK), ccz = Math.round(player.pos.z / CHUNK);
+  const cands = [];
+  for (let dx = -VIEW_R; dx <= VIEW_R; dx++) for (let dz = -VIEW_R; dz <= VIEW_R; dz++) {
+    const key = chunkKey(ccx + dx, ccz + dz);
+    const ch = chunks.get(key);
+    if (!ch || !ch.buildings) continue;
+    for (const b of ch.buildings) {
+      if (b.roofY == null) continue;
+      const d = Math.hypot(b.x - player.pos.x, b.z - player.pos.z);
+      if (d > 16 && d < 75) cands.push({ tag: 'house', x: b.x, y: b.roofY, z: b.z, hw: b.ridgeHW, face: null, key });
+    }
+  }
+  return cands.length ? cands[(Math.random() * cands.length) | 0] : null;
+}
+// spawn already airborne, circle the roost briefly, then glide down onto it
+function crowFliesIn(roost) {
+  const s = roostSlot(roost);
+  const ang = Math.random() * TAU;
+  const c = buildCrow(s.x + Math.sin(ang) * 30, s.y + 9 + Math.random() * 8, s.z + Math.cos(ang) * 30, roost);
+  c.state = 'fly';
+  c.cx = s.x; c.cz = s.z;
+  c.cruiseY = s.y + 8 + Math.random() * 6;
+  c.ra = 13 + Math.random() * 8; c.rb = 10 + Math.random() * 7;
+  c.angSpd = (Math.random() < 0.5 ? 1 : -1) * (0.5 + Math.random() * 0.3);
+  c.ang = Math.atan2(c.g.position.z - c.cz, c.g.position.x - c.cx);
+  c.flyT = 2 + Math.random() * 4;
+  c.lx = s.x; c.ly = s.y; c.lz = s.z;
+  return c;
+}
+// drop 1-2 crows straight onto the ground beside a sleeping zombie to pick at it
+function spawnPeckers() {
+  const cands = [];
+  for (const z of zombies) {
+    if (z.state !== 'sleep') continue;
+    const d = Math.hypot(z.pos.x - player.pos.x, z.pos.z - player.pos.z);
+    if (d < 26 || d > 72) continue; // close enough to see, far enough not to wake it
+    if (crows.filter(c => c.target === z).length >= 2) continue;
+    cands.push(z);
+  }
+  if (!cands.length) return;
+  const zz = cands[(Math.random() * cands.length) | 0];
+  const n = 1 + (Math.random() < 0.45 ? 1 : 0);
+  for (let i = 0; i < n; i++) {
+    const ang = Math.random() * TAU, d = 0.8 + Math.random() * 0.9;
+    const x = zz.pos.x + Math.sin(ang) * d, z2 = zz.pos.z + Math.cos(ang) * d;
+    const c = buildCrow(x, groundHeight(x, z2), z2, null);
+    c.state = 'peck'; c.target = zz; c.ly = c.g.position.y;
+    c.g.rotation.y = Math.atan2(zz.pos.x - x, zz.pos.z - z2); // face the meal
+  }
+}
+function crowCaw(x, z) {
+  play3d(x, z, () => tone(700 + Math.random() * 140, 0.1, 0.05, 'square', 430));
+  setTimeout(() => play3d(x, z, () => tone(640 + Math.random() * 90, 0.08, 0.04, 'square', 390)), 100);
+}
+function crowTakeoff(c) {
+  if (c.state === 'fly' || c.state === 'leave') return;
+  const p = c.g.position;
+  c.state = 'fly'; c.target = null; c.hopP = 1;
+  c.cx = p.x + (Math.random() - 0.5) * 12; c.cz = p.z + (Math.random() - 0.5) * 12;
+  c.ra = 13 + Math.random() * 8; c.rb = 10 + Math.random() * 7;
+  c.cruiseY = Math.max(p.y + 7, groundHeight(p.x, p.z) + 11) + Math.random() * 5;
+  c.angSpd = (Math.random() < 0.5 ? 1 : -1) * (0.5 + Math.random() * 0.3);
+  c.ang = Math.atan2(p.z - c.cz, p.x - c.cx);
+  c.flyT = 6 + Math.random() * 7;
+  spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 4, 2, 0.45); // feather puff
+  if (Math.random() < 0.7) crowCaw(p.x, p.z);
+}
+// gunfire / impacts near perched or pecking crows flush them
+function scareCrows(x, z, r) {
+  if (!crows.length) return;
+  const r2 = r * r;
+  for (const c of crows) {
+    if (c.state === 'fly' || c.state === 'leave') continue;
+    const dx = c.g.position.x - x, dz = c.g.position.z - z;
+    if (dx * dx + dz * dz < r2) crowTakeoff(c);
+  }
+}
+// a clean hit pops a crow like a headshot: burst, feathers, one tumbling scrap
+function killCrow(c, kx, kz, dmg) {
+  const p = c.g.position;
+  spawnDamageNumber(p.x, p.y + 0.6, p.z, dmg);
+  const bloodC = c.purple ? CROW_PURPLE_BLOOD : BLOOD;
+  const n = Math.round(6 * goreAmt());
+  if (n > 0) spawnParticles(p.x, p.y + 0.35, p.z, bloodC, n, 3, 0.5);
+  spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 6, 2.5, 0.6);
+  spawnGib(p.x, p.y + 0.3, p.z, c.purple ? CROW_PURPLE_BLOOD : CROW_FEATHER, kx, kz);
+  play3d(p.x, p.z, () => tone(880, 0.09, 0.06, 'square', 260));
+  removeCrow(c);
+}
+// boss down: the whole murder lifts off and leaves the block, and no more spawn
+function crowsLeave() {
+  crowsGone = true;
+  for (const c of crows) {
+    if (c.state === 'leave') continue;
+    const p = c.g.position;
+    if (c.state !== 'fly') spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 3, 2, 0.4);
+    c.state = 'leave';
+    c.leaveDir = Math.atan2(p.x - 47, p.z - 2) + (Math.random() - 0.5) * 0.7; // scatter away from town
+    if (Math.random() < 0.5) crowCaw(p.x, p.z);
+  }
+}
+function resetCrows() {
+  while (crows.length) removeCrow(crows[crows.length - 1]);
+  crowsGone = false;
+  crowSpawnT = 2;
+  townRoosts.list = null; // terrain-height cache is cheap to rebuild
+  crowTargets = {
+    bank: 3 + ((Math.random() * 3) | 0),          // an animated group on the bank edge
+    hall: 1 + (Math.random() < 0.5 ? 1 : 0),      // solo or pair
+    court: 1 + (Math.random() < 0.5 ? 1 : 0),
+  };
+}
+function updateCrows(dt) {
+  // trickle spawner: top up the civic roosts, a few house-ridge sitters, and peckers
+  if (!crowsGone) {
+    crowSpawnT -= dt;
+    if (crowSpawnT <= 0) {
+      crowSpawnT = 4 + Math.random() * 5;
+      let spawned = false;
+      for (const r of townRoosts()) {
+        const have = crows.filter(c => c.roost && c.roost.tag === r.tag).length;
+        const want = crowTargets[r.tag];
+        // an empty roost refills as a little flock so groups read as groups
+        for (let i = have; i < want && i < have + 3; i++) { crowFliesIn(r); spawned = true; }
+        if (spawned) break;
+      }
+      if (!spawned && crows.filter(c => c.roost && c.roost.tag === 'house').length < 3 && Math.random() < 0.6) {
+        const r = pickHouseRoost();
+        if (r) { crowFliesIn(r); spawned = true; }
+      }
+      if (!spawned && crows.filter(c => c.target).length < 4 && Math.random() < 0.75) spawnPeckers();
+      if (spawned) crowSpawnT = 2 + Math.random() * 2; // keep filling while under target
+    }
+  }
+  for (let i = crows.length - 1; i >= 0; i--) {
+    const c = crows[i], g = c.g;
+    c.t += dt;
+    // house roost's chunk streamed out: the roof is gone and so is the player — vanish quietly
+    if (c.roost && c.roost.key && !chunks.has(c.roost.key)) { removeCrow(c); continue; }
+    if (c.state === 'fly') {
+      c.flyT -= dt; c.ang += c.angSpd * dt;
+      const tx = c.cx + Math.cos(c.ang) * c.ra, tz = c.cz + Math.sin(c.ang) * c.rb;
+      const px = g.position.x, pz = g.position.z, k = 1 - Math.pow(0.02, dt);
+      g.position.x = lerp(px, tx, k); g.position.z = lerp(pz, tz, k);
+      g.position.y = lerp(g.position.y, c.cruiseY + Math.sin(game.time * 1.3 + c.flap) * 0.6, 1 - Math.pow(0.05, dt));
+      const vx = g.position.x - px, vz = g.position.z - pz;
+      if (Math.hypot(vx, vz) > 1e-3) g.rotation.y = Math.atan2(vx, vz);
+      g.rotation.z = clamp(-c.angSpd * 0.5, -0.5, 0.5); g.rotation.x = -0.12; // bank into the turn
+      const a = Math.sin(c.t * 16) * 0.9;
+      c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+      if (c.flyT <= 0) {
+        if (c.roost) {
+          const s = roostSlot(c.roost);
+          c.lx = s.x; c.ly = s.y; c.lz = s.z; c.state = 'descend';
+        } else if (c.target && c.target.state === 'sleep' && zombies.includes(c.target)) {
+          const ang = Math.random() * TAU, d = 0.8 + Math.random() * 0.9;
+          c.lx = c.target.pos.x + Math.sin(ang) * d; c.lz = c.target.pos.z + Math.cos(ang) * d;
+          c.ly = groundHeight(c.lx, c.lz); c.state = 'descend';
+        } else {
+          // nowhere to go back to — drift off the block
+          c.state = 'leave';
+          c.leaveDir = Math.atan2(g.position.x - player.pos.x, g.position.z - player.pos.z) + (Math.random() - 0.5) * 0.6;
+        }
+      }
+    } else if (c.state === 'descend') {
+      const k = 1 - Math.pow(0.04, dt);
+      g.position.x = lerp(g.position.x, c.lx, k); g.position.z = lerp(g.position.z, c.lz, k);
+      g.position.y = lerp(g.position.y, c.ly + 0.02, 1 - Math.pow(0.06, dt));
+      const dx = c.lx - g.position.x, dz = c.lz - g.position.z;
+      if (Math.hypot(dx, dz) > 1e-3) g.rotation.y = Math.atan2(dx, dz);
+      g.rotation.z = lerp(g.rotation.z, 0, k); g.rotation.x = lerp(g.rotation.x, 0.2, k); // flare
+      const a = Math.sin(c.t * 10) * 0.7;
+      c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+      if (Math.hypot(dx, dz) < 0.35 && Math.abs(g.position.y - c.ly) < 0.14) {
+        c.state = c.roost ? 'perch' : 'peck';
+        c.hopT = 1 + Math.random() * 3; c.hopP = 1;
+        g.rotation.set(0, c.roost && c.roost.face != null ? c.roost.face + (Math.random() - 0.5) * 0.5 : g.rotation.y, 0);
+        g.position.set(c.lx, c.ly, c.lz);
+      }
+    } else if (c.state === 'leave') {
+      g.position.x += Math.sin(c.leaveDir) * 13 * dt;
+      g.position.z += Math.cos(c.leaveDir) * 13 * dt;
+      g.position.y += 5.5 * dt;
+      g.rotation.y = c.leaveDir; g.rotation.x = -0.25; g.rotation.z = 0;
+      const a = Math.sin(c.t * 15) * 0.9;
+      c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+      if (Math.hypot(g.position.x - player.pos.x, g.position.z - player.pos.z) > 150) removeCrow(c);
+    } else if (c.state === 'peck') {
+      // meal stood up / got dragged into the fight / despawned → flush
+      if (!c.target || c.target.state !== 'sleep' || !zombies.includes(c.target)) { crowTakeoff(c); continue; }
+      c.wingL.rotation.z = lerp(c.wingL.rotation.z, 0, 1 - Math.pow(0.02, dt));
+      c.wingR.rotation.z = lerp(c.wingR.rotation.z, 0, 1 - Math.pow(0.02, dt));
+      if (c.hopP < 1) {
+        c.hopP = Math.min(1, c.hopP + dt * 3);
+        g.position.x = lerp(c.hopFrom.x, c.hopTo.x, c.hopP);
+        g.position.z = lerp(c.hopFrom.z, c.hopTo.z, c.hopP);
+        g.position.y = lerp(c.hopFrom.y, c.hopTo.y, c.hopP) + Math.sin(c.hopP * Math.PI) * 0.3;
+        const dx = c.hopTo.x - c.hopFrom.x, dz = c.hopTo.z - c.hopFrom.z;
+        if (Math.hypot(dx, dz) > 1e-3) g.rotation.y = Math.atan2(dx, dz);
+      } else {
+        c.headBob += dt * 6;
+        g.position.y = c.ly;
+        g.rotation.x = Math.sin(c.headBob) * 0.18 + 0.05; // pecking at the sprawl
+        c.hopT -= dt;
+        if (c.hopT <= 0) {
+          c.hopT = 0.7 + Math.random() * 1.6;
+          // hop around the body, staying within pecking reach
+          const ang = Math.atan2(c.target.pos.x - g.position.x, c.target.pos.z - g.position.z) + (Math.random() - 0.5) * 2.4;
+          const step = 0.4 + Math.random() * 0.7;
+          let nx = g.position.x + Math.sin(ang) * step, nz = g.position.z + Math.cos(ang) * step;
+          if (Math.hypot(nx - c.target.pos.x, nz - c.target.pos.z) > 2) {
+            nx = c.target.pos.x + (nx - c.target.pos.x) * 0.5;
+            nz = c.target.pos.z + (nz - c.target.pos.z) * 0.5;
+          }
+          c.hopFrom = { x: g.position.x, y: c.ly, z: g.position.z };
+          c.hopTo = { x: nx, y: groundHeight(nx, nz), z: nz };
+          c.hopP = 0; c.ly = c.hopTo.y;
+        }
+      }
+    } else { // perch: folded wings, idle nods, edge shuffles, the odd wing flutter
+      if (c.flutterT > 0) {
+        c.flutterT -= dt;
+        const a = Math.sin(c.t * 18) * 0.7;
+        c.wingL.rotation.z = a; c.wingR.rotation.z = -a;
+      } else {
+        c.wingL.rotation.z = lerp(c.wingL.rotation.z, 0, 1 - Math.pow(0.02, dt));
+        c.wingR.rotation.z = lerp(c.wingR.rotation.z, 0, 1 - Math.pow(0.02, dt));
+        if (Math.random() < dt * 0.12) c.flutterT = 0.4 + Math.random() * 0.4;
+      }
+      c.headBob += dt * (1.6 + Math.sin(c.flap) * 0.4);
+      g.rotation.x = Math.max(0, Math.sin(c.headBob)) * 0.22; // peckish nods
+      if (c.hopP < 1) {
+        c.hopP = Math.min(1, c.hopP + dt * 3.2);
+        g.position.x = lerp(c.hopFrom.x, c.hopTo.x, c.hopP);
+        g.position.z = lerp(c.hopFrom.z, c.hopTo.z, c.hopP);
+        g.position.y = c.ly + Math.sin(c.hopP * Math.PI) * 0.22;
+      } else {
+        g.position.y = c.ly;
+        c.hopT -= dt;
+        if (c.hopT <= 0) {
+          c.hopT = 2.5 + Math.random() * 5;
+          if (c.roost && Math.random() < 0.7) {
+            // sidestep along the edge/ridge, staying on it
+            const nx = clamp(g.position.x + (Math.random() - 0.5) * 1.6, c.roost.x - c.roost.hw, c.roost.x + c.roost.hw);
+            c.hopFrom = { x: g.position.x, z: g.position.z };
+            c.hopTo = { x: nx, z: c.roost.z != null && c.roost.tag !== 'house' ? c.roost.z : g.position.z };
+            c.hopP = 0;
+            if (c.roost.face == null) g.rotation.y = Math.atan2(nx - g.position.x, 0) + (Math.random() - 0.5) * 0.8;
+          }
+        }
+      }
+    }
+  }
 }
 
 function updateCrates(dt) {
