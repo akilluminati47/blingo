@@ -910,13 +910,14 @@ function aabb(x, z, hw, hd, h, y0, rot = 0) {
 function supportTop(x, z, feetY, maxStep = 0.45) {
   let top = groundHeight(x, z);
   for (const c of nearbyColliders(x, z)) {
-    if (c.y1 > feetY + maxStep || c.y1 <= top) continue;
+    const ct = c.roof ? roofTopAt(c, x, z) : c.y1; // sloped roofs support at the shingle surface
+    if (ct > feetY + maxStep || ct <= top) continue;
     let lx = x - c.x, lz = z - c.z;
     if (c.rot) {
       const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
       const tx = lx * cs - lz * sn; lz = lx * sn + lz * cs; lx = tx;
     }
-    if (Math.abs(lx) <= c.hw + 0.1 && Math.abs(lz) <= c.hd + 0.1) top = c.y1;
+    if (Math.abs(lx) <= c.hw + 0.1 && Math.abs(lz) <= c.hd + 0.1) top = ct;
   }
   return top;
 }
@@ -1025,18 +1026,19 @@ function windowPane(rng, w, h) {
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), darkGlassMat);
 }
 
-// stepped standable colliders under a pitched roof: a staircase of flat tiers hugging
-// the slope so feet ride on the shingles instead of falling through (or floating).
+// sloped standable roof collider: one entry whose walkable top follows the pitch, so
+// feet ride the shingle surface and walking up/down is smooth (no stair-hopping).
 // ridge runs along x when axis='x' (slopes fall away in ±z), along z when axis='z'.
-function roofSteps(colliders, bx, by, bz, axis, ridgeHalf, slopeHalf, rh) {
-  const N = 4;
-  for (let i = 0; i < N; i++) {
-    const topY = by + rh * (i + 1) / N;
-    const hs = Math.max(0.32, slopeHalf * (1 - (i + 1) / N));
-    colliders.push(axis === 'x'
-      ? aabb(bx, bz, ridgeHalf, hs, topY - by, by)
-      : aabb(bx, bz, hs, ridgeHalf, topY - by, by));
-  }
+function roofSlope(colliders, bx, by, bz, axis, ridgeHalf, slopeHalf, rh) {
+  const c = axis === 'x' ? aabb(bx, bz, ridgeHalf, slopeHalf, rh, by)
+                         : aabb(bx, bz, slopeHalf, ridgeHalf, rh, by);
+  c.roof = { axis, rh, slopeHalf };
+  colliders.push(c);
+}
+// shingle-surface height of a sloped roof collider under (x,z)
+function roofTopAt(c, x, z) {
+  const d = c.roof.axis === 'x' ? Math.abs(z - c.z) : Math.abs(x - c.x);
+  return c.y0 + c.roof.rh * clamp(1 - d / c.roof.slopeHalf, 0, 1);
 }
 // pitched shingle roof + gables
 function addRoof(group, bx, by, bz, w, d, rng, colliders) {
@@ -1062,7 +1064,7 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders) {
     gable.position.set(bx + s * w / 2, by, bz);
     group.add(gable);
   }
-  if (colliders) roofSteps(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
+  if (colliders) roofSlope(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
 }
 
 function makeBuilding(rng, bx, bz, group, colliders, crateList) {
@@ -1400,7 +1402,9 @@ function nearbyColliders(x, z) {
 function resolveCollision(x, z, r, y) {
   for (const c of nearbyColliders(x, z)) {
     if (y !== undefined) {
-      if (y >= c.y1 - 0.25) continue;   // standing on top of it
+      // standing on top of it (roofs: on the local shingle surface, so the box never
+      // shoves us sideways while we're walking the pitch)
+      if (y >= (c.roof ? roofTopAt(c, x, z) : c.y1) - 0.25) continue;
       if (c.y0 > y + 1.5) continue;     // walking underneath (awnings etc.)
     }
     if (c.rot) {
@@ -1623,7 +1627,7 @@ function buildChurchyard(rng) {
     gable.position.set(cx, y0 + h - 0.05, cz + s * d / 2);
     townGroup.add(gable);
   }
-  roofSteps(townColliders, cx, y0 + h - 0.05, cz, 'z', d / 2 + 0.45, w / 2 + 0.5, rh); // scalable nave roof
+  roofSlope(townColliders, cx, y0 + h - 0.05, cz, 'z', d / 2 + 0.45, w / 2 + 0.5, rh); // scalable nave roof
   // bell tower + spire + leaning cross over the front (road-side) entrance
   const ridgeY = y0 + h - 0.05 + rh;
   const steepleZ = southZ + 2.4;
@@ -3658,7 +3662,9 @@ function updatePlayer(dt) {
   }
   input.jump = false;
   if (player.grounded) {
-    if (groundY < player.pos.y - 0.05) { player.grounded = false; player.vy = 0; } // walked off an edge
+    // 0.15 tolerance: big enough to stick to a roof pitch sprinting downhill (no
+    // micro-hops), small enough that real ledges (crates, cars) still read as edges
+    if (groundY < player.pos.y - 0.15) { player.grounded = false; player.vy = 0; } // walked off an edge
     else player.pos.y = groundY;
   }
   if (!player.grounded) {
