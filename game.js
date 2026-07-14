@@ -86,6 +86,7 @@ const TOWN_RECTS = [
   [-16, -60, 110, 6],  // main street, shops, bank + fountain pavilion, town hall, courthouse
   [8, 12, 78, 64],     // shopping plaza + parking
   [36, -16, 46, 18],   // plaza driveway
+  [16, 68, 62, 94],    // old church + spiked graveyard, just north of the plaza
 ];
 function rectDist(x, z, r) {
   const dx = Math.max(r[0] - x, 0, x - r[2]);
@@ -1366,7 +1367,7 @@ function nearbyColliders(x, z) {
     const ch = chunks.get(chunkKey(ccx + dx, ccz + dz));
     if (ch) out.push(...ch.colliders);
   }
-  if (x > -50 && x < 140 && z > -70 && z < 90) out.push(...townColliders);
+  if (x > -50 && x < 140 && z > -70 && z < 100) out.push(...townColliders);
   return out;
 }
 function resolveCollision(x, z, r, y) {
@@ -1555,6 +1556,188 @@ function parkingLot(x, z, w, d, rows, rng) {
   }
 }
 
+// ---------- old church + spiked graveyard (north of the plaza) ----------
+// dirt-mound positions the dead claw out of — the ambient spawner and the Crimson
+// One's grave waves both draw from this list
+const graveSpots = [];
+const CHURCH = { x: 25, z: 81, doorX: 33 };            // long axis runs x, door faces the graveyard (+x)
+const GRAVEYARD = { x0: 40, z0: 70, x1: 58, z1: 92 };  // spike-fenced plot east of the church
+function buildChurchyard(rng) {
+  const ironMat = mat(0x23262c);
+  const cx = CHURCH.x, cz = CHURCH.z, w = 16, d = 11, h = 5.2;
+  const y0 = groundHeight(cx, cz);
+  // weathered stone body
+  const body = box(w, h, d, 0x6b6a62);
+  body.position.set(cx, y0 + h / 2, cz);
+  townGroup.add(body);
+  townColliders.push(aabb(cx, cz, w / 2, d / 2, h, y0));
+  addRoof(townGroup, cx, y0 + h - 0.05, cz, w, d, rng);
+  // steeple straddling the ridge near the front, topped by a spire and a leaning cross
+  const ridgeY = y0 + h - 0.05 + d * 0.32;
+  const tower = box(2.6, 3.4, 2.6, 0x615f58);
+  tower.position.set(cx + 5, ridgeY + 0.9, cz);
+  townGroup.add(tower);
+  for (const s of [-1, 1]) { // dark bell slats on the tower's road-facing sides
+    const slat = box(0.06, 1.1, 1.1, 0x14121a);
+    slat.position.set(cx + 5 + s * 1.31, ridgeY + 1.5, cz);
+    townGroup.add(slat);
+  }
+  const spire = cyl(0.02, 1.85, 2.8, 0x1f1d24, 4);
+  spire.position.set(cx + 5, ridgeY + 4, cz);
+  townGroup.add(spire);
+  const crossV = box(0.08, 0.95, 0.08, 0x14121a);
+  crossV.position.set(cx + 5, ridgeY + 5.75, cz); crossV.rotation.z = 0.09; // slightly askew
+  townGroup.add(crossV);
+  const crossH = box(0.5, 0.08, 0.08, 0x14121a);
+  crossH.position.set(cx + 5 - 0.02, ridgeY + 5.92, cz); crossH.rotation.z = 0.09;
+  townGroup.add(crossH);
+  // tall dark windows down both flanks + a black rose window over the door
+  for (const wx of [-5, 0, 5]) for (const s of [-1, 1]) {
+    const win = windowPane(rng, 1.0, 2.4);
+    win.position.set(cx + wx, y0 + h * 0.5, cz + s * (d / 2 + 0.03));
+    win.rotation.y = s > 0 ? 0 : Math.PI;
+    townGroup.add(win);
+  }
+  const rose = new THREE.Mesh(new THREE.CircleGeometry(0.85, 18), darkGlassMat);
+  rose.position.set(cx + w / 2 + 0.06, y0 + h + 0.9, cz);
+  rose.rotation.y = Math.PI / 2;
+  townGroup.add(rose);
+  // heavy double door facing the graves, with a couple of worn steps
+  const door = box(0.12, 2.6, 2.2, 0x241a12);
+  door.position.set(cx + w / 2 + 0.06, y0 + 1.3, cz);
+  townGroup.add(door);
+  for (const s of [1.35, 0.7]) {
+    const step = box(s, 0.2, 3, 0x55524a);
+    step.position.set(cx + w / 2 + (1.5 - s * 0.5), y0 + (s > 1 ? 0.1 : 0.3), cz);
+    townGroup.add(step);
+  }
+  const plate = textPlate('CHAPEL', 3.6, 0.9, '#2a2422', '#9a8f7a'); // faded sign
+  plate.position.set(cx + w / 2 + 0.06, y0 + h - 0.7, cz);
+  plate.rotation.y = Math.PI / 2;
+  townGroup.add(plate);
+
+  // --- the graveyard: dirt floor, spiked iron fence, slabs + fresh mounds ---
+  const g = GRAVEYARD;
+  const gw = g.x1 - g.x0, gd = g.z1 - g.z0, gcx = (g.x0 + g.x1) / 2, gcz = (g.z0 + g.z1) / 2;
+  townGroup.add(terrainPlane(gw, gd, 5, 6, gcx, gcz, mat(0x2e2a25), 0.035)); // bare packed earth
+  // fence: verticals with spike tips + rails, gate gap on the church side and two
+  // rusted-out breaches so the dead (and you) can squeeze through elsewhere
+  const gaps = {
+    w: [[gcz - 1.5, gcz + 1.5]],   // gate, facing the church door
+    s: [[46, 48.5]],               // broken sections
+    n: [[50, 52.5]],
+    e: [],
+  };
+  const inGap = (side, v) => gaps[side].some(([a, b]) => v > a && v < b);
+  const spikeBar = (x, z) => {
+    const yb = groundHeight(x, z);
+    const bar = box(0.07, 1.25, 0.07, 0x23262c);
+    bar.position.set(x, yb + 0.66, z);
+    townGroup.add(bar);
+    const tip = cyl(0.004, 0.05, 0.22, 0x2c3038, 4);
+    tip.position.set(x, yb + 1.39, z);
+    townGroup.add(tip);
+  };
+  for (let x = g.x0; x <= g.x1 + 0.01; x += 1.5) {
+    if (!inGap('s', x)) spikeBar(x, g.z0);
+    if (!inGap('n', x)) spikeBar(x, g.z1);
+  }
+  for (let z = g.z0 + 1.5; z < g.z1; z += 1.5) {
+    if (!inGap('w', z)) spikeBar(g.x0, z);
+    if (!inGap('e', z)) spikeBar(g.x1, z);
+  }
+  // rails + movement/bullet colliders per unbroken run (low, so shots clear the spikes)
+  const railRun = (x0, z0, x1, z1) => {
+    const len = Math.hypot(x1 - x0, z1 - z0), mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+    const yb = groundHeight(mx, mz);
+    for (const ry of [0.42, 1.12]) {
+      const rail = box(x1 > x0 ? len : 0.06, 0.07, z1 > z0 ? len : 0.06, 0x23262c);
+      rail.position.set(mx, yb + ry, mz);
+      townGroup.add(rail);
+    }
+    townColliders.push(aabb(mx, mz, x1 > x0 ? len / 2 : 0.1, z1 > z0 ? len / 2 : 0.1, 1.3, yb));
+  };
+  const runsAlong = (side, fixed, v0, v1, horiz) => {
+    let at = v0;
+    for (const [a, b] of [...gaps[side], [v1, v1]]) {
+      if (a - at > 0.5) horiz ? railRun(at, fixed, a, fixed) : railRun(fixed, at, fixed, a);
+      at = b;
+    }
+  };
+  runsAlong('s', g.z0, g.x0, g.x1, true);
+  runsAlong('n', g.z1, g.x0, g.x1, true);
+  runsAlong('w', g.x0, g.z0, g.z1, false);
+  runsAlong('e', g.x1, g.z0, g.z1, false);
+  // corner + gate posts with iron finials
+  const posts = [[g.x0, g.z0], [g.x1, g.z0], [g.x0, g.z1], [g.x1, g.z1], [g.x0, gcz - 1.5], [g.x0, gcz + 1.5]];
+  for (const [px, pz] of posts) {
+    const yb = groundHeight(px, pz);
+    const post = box(0.2, 1.7, 0.2, 0x1d2026);
+    post.position.set(px, yb + 0.85, pz);
+    townGroup.add(post);
+    const fin = ball(0.11, 0x2c3038);
+    fin.position.set(px, yb + 1.78, pz);
+    townGroup.add(fin);
+  }
+  // a fallen bar rusting by each breach
+  for (const [bx, bz, rot] of [[47.2, g.z0 + 0.7, 0.4], [51.4, g.z1 - 0.8, -0.7]]) {
+    const fallen = box(1.3, 0.07, 0.07, 0x2a2620);
+    fallen.position.set(bx, groundHeight(bx, bz) + 0.08, bz);
+    fallen.rotation.y = rot; fallen.rotation.z = 0.05;
+    townGroup.add(fallen);
+  }
+  // rows of slabs, crosses and the odd obelisk, each with a too-fresh dirt mound
+  const stones = [0x8a8578, 0x77746a, 0x99958a];
+  for (let col = 0; col < 6; col++) for (let row = 0; row < 6; row++) {
+    if (rng() < 0.12) continue; // the odd empty plot
+    const gx = g.x0 + 2.6 + col * 2.66 + (rng() - 0.5) * 0.5;
+    const gz = g.z0 + 2.4 + row * 3.5 + (rng() - 0.5) * 0.5;
+    const yb = groundHeight(gx, gz);
+    const stone = stones[(rng() * 3) | 0];
+    const kind = rng();
+    if (kind < 0.62) {                       // headstone slab
+      const slab = box(0.66, 0.85, 0.11, stone);
+      slab.position.set(gx, yb + 0.4, gz);
+      slab.rotation.z = (rng() - 0.5) * 0.22; slab.rotation.x = (rng() - 0.5) * 0.12;
+      townGroup.add(slab);
+    } else if (kind < 0.85) {                // cross
+      const v = box(0.14, 1.05, 0.12, stone);
+      v.position.set(gx, yb + 0.5, gz); v.rotation.z = (rng() - 0.5) * 0.3;
+      townGroup.add(v);
+      const hbar = box(0.56, 0.13, 0.12, stone);
+      hbar.position.set(gx, yb + 0.68, gz); hbar.rotation.z = v.rotation.z;
+      townGroup.add(hbar);
+    } else {                                 // obelisk
+      const ob = box(0.3, 1.5, 0.3, stone);
+      ob.position.set(gx, yb + 0.72, gz);
+      ob.rotation.z = (rng() - 0.5) * 0.16;
+      townGroup.add(ob);
+    }
+    const mz = gz + 1.05;                    // the grave itself, mounded like it was filled last night
+    const mound = ball(1, [0x40342a, 0x4a3c2e, 0x383026][(rng() * 3) | 0]);
+    mound.scale.set(0.5, 0.17, 0.92);
+    mound.position.set(gx, groundHeight(gx, mz) + 0.06, mz);
+    townGroup.add(mound);
+    graveSpots.push({ x: gx, z: mz });
+  }
+  // two dead trees clawing at the sky inside the fence line
+  for (const [tx, tz] of [[g.x0 + 1.8, g.z1 - 2], [g.x1 - 2, g.z0 + 2.2]]) {
+    const yb = groundHeight(tx, tz);
+    const trunk = cyl(0.09, 0.17, 2.3, 0x2b2118, 6);
+    trunk.position.set(tx, yb + 1.15, tz);
+    trunk.rotation.z = (rng() - 0.5) * 0.2;
+    townGroup.add(trunk);
+    for (let br = 0; br < 3; br++) {
+      const branch = cyl(0.015, 0.055, 1.3, 0x241c14, 5);
+      const ba = rng() * TAU;
+      branch.position.set(tx + Math.cos(ba) * 0.35, yb + 2 + rng() * 0.5, tz + Math.sin(ba) * 0.35);
+      branch.rotation.set((rng() - 0.5) * 1.6, ba, 0.6 + rng() * 0.5);
+      townGroup.add(branch);
+    }
+    townColliders.push(aabb(tx, tz, 0.2, 0.2, 2.3, yb));
+  }
+}
+
 function buildTown() {
   const rng = mulberry32(9001);
   // persistent low-res ground apron under the whole town footprint. Chunks only
@@ -1629,6 +1812,9 @@ function buildTown() {
   parkingLot(16, 22, 14, 10, 1, rng);   // smaller side parking
   // plaza driveway connects main road to parking
   townGroup.add(terrainPlane(6.4, 32, 2, 8, 41, 2, roadMat, 0.04));
+
+  // the old church and its spiked graveyard brood just north of the plaza
+  buildChurchyard(rng);
 
   // main-street pileups (all broken windows, some flipped)
   makePileup(rng, 30, -17, 'x', townGroup, townColliders);
@@ -2274,15 +2460,16 @@ const ZOMBIE_COLORS = [0x6fae4e, 0x7fb85a, 0x5f9a44, 0x8fbc6a];
 // opts.horns: purple boss-wave guard — wears the Two Horned One's horns and shields him while alive.
 function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const purple = !!opts.purple;              // boss-swarm variant: purple & 33% faster
+  const red = !!opts.red;                    // Crimson One's church swarm: red & quick
   const mode = opts.mode || 'pop';
   const scale = 0.85 + Math.random() * 0.5;
   // random rot-variants; brain-showing spawns are the rare weak-spot walkers
-  const droopy = !purple && Math.random() < 0.3;
+  const droopy = !purple && !red && Math.random() < 0.3;
   const brain = Math.random() < 0.12;
-  const blind = !purple && Math.random() < 0.16;
+  const blind = !purple && !red && Math.random() < 0.16;
   // extra-gore mode makes fresh zombies spawn already mangled and bloody
   const wounded = extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5;
-  const color = purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
+  const color = red ? 0xd43a3a : purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
   const blob = buildBlob({ color, zombie: true, scale, droopy, brain, blind, wounded });
   blob.root.position.set(x, groundHeight(x, z), z);
   if (opts.horns) {
@@ -2306,14 +2493,14 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   scene.add(blob.root);
   zombies.push({
     blob, pos: new THREE.Vector3(x, 0, z),
-    hp: (9 + Math.random() * 6) * scale * powerScale * (purple ? 1.2 : 1),
-    speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1) * (purple ? 1.33 : 1) * (mode === 'runner' ? 1.5 : 1),
+    hp: (9 + Math.random() * 6) * scale * powerScale * (purple || red ? 1.2 : 1),
+    speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1) * (purple ? 1.33 : red ? 1.25 : 1) * (mode === 'runner' ? 1.5 : 1),
     yaw: Math.random() * TAU,
     state: mode === 'grave' ? 'emerge' : mode === 'sleeper' ? 'sleep' : 'chase',
     attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
     brainExposed: brain, blind, stepT: Math.random(),
-    bleeding: wounded, dripT: 0, purple,
+    bleeding: wounded, dripT: 0, purple, red,
     mode, emergeT: 0, hornWave: !!opts.horns,
     despawnR: mode === 'runner' ? 140 : 85,
     wanderT: 0, wanderYaw: Math.random() * TAU, shotIgnoreT: -99,
@@ -2708,6 +2895,7 @@ function resetGame() {
   // reset the boss + its beam
   if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
   bossState.boss = null; bossState.spawned = false; bossState.defeated = false;
+  bossState.spawned2 = false; bossState.defeated2 = false;
   bossBarEl.classList.remove('show');
   resetCrows();
   for (const p of pickups) scene.remove(p.mesh);
@@ -3902,10 +4090,10 @@ function updateZombies(dt) {
       const sameRoom = z.isBoss || buildingAt(z.pos.x, z.pos.z) === buildingAt(player.pos.x, player.pos.z);
       if (!player.dead && sameRoom && pDist < reach && player.pos.y - b.root.position.y < vReach) {
         z.attackT = z.isBoss ? 1.1 : 0.9;
-        hurtPlayer(z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6, player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+        hurtPlayer((z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
       } else if (tgtC && !tgtC.downed && (tgtC.y || 0) - b.root.position.y < vReach) {
         const cd = Math.hypot(tgtC.pos.x - z.pos.x, tgtC.pos.z - z.pos.z);
-        if (cd < (z.isBoss ? 3.2 : 1.6)) { z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, z.isBoss ? 22 : 7 + Math.random() * 5); }
+        if (cd < (z.isBoss ? 3.2 : 1.6)) { z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, (z.isBoss ? 22 : 7 + Math.random() * 5) * (z.biteMult || 1)); }
       }
     }
 
@@ -3949,6 +4137,15 @@ function updateSpawner(dt) {
   const interval = Math.max(0.35, (3.6 - game.time / 80) / settings.zombieSpawn);
   if (game.spawnT <= 0 && zombies.length < maxZ) {
     game.spawnT = interval;
+    // the graveyard breathes: near the churchyard, some spawns claw up out of the mounds
+    if (graveSpots.length && Math.random() < 0.3) {
+      const gs = graveSpots[(Math.random() * graveSpots.length) | 0];
+      const d = Math.hypot(gs.x - player.pos.x, gs.z - player.pos.z);
+      if (d > 14 && d < 60) {
+        spawnZombie(gs.x, gs.z, 1 + game.time / 240, { mode: 'grave' });
+        return;
+      }
+    }
     const runner = Math.random() < 0.22; // far spawns already running our way
     let x = 0, z = 0, ok = false;
     for (let tries = 0; tries < 8 && !ok; tries++) {
@@ -3971,7 +4168,7 @@ function updateSpawner(dt) {
 }
 
 // ---------- boss: the Two Horned One ----------
-const bossState = { boss: null, beam: null, spawned: false, defeated: false };
+const bossState = { boss: null, beam: null, spawned: false, defeated: false, spawned2: false, defeated2: false };
 const bossBarEl = document.getElementById('bossbar');
 const bossHpEl = document.getElementById('bosshp');
 // unlocked once every cousin has been recruited
@@ -4012,11 +4209,46 @@ function spawnBoss() {
   toast('ALL COUSINS FOUND . . SOMETHING STIRS BY THE BANK .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
 }
+// the Crimson One: wakes at the church door once the block is scoured. Bites harder
+// than the Two Horned One but shuffles at the same pace, and his waves boil out of
+// the church doors (red horned guards + purple fodder) and up out of the graves.
+function spawnBoss2() {
+  bossState.spawned2 = true;
+  const bx = 36.5, bz = 81;                   // the strip between the church door and the graveyard gate
+  const blob = buildBlob({ color: 0xc22626, zombie: true, scale: 2.7 });
+  for (const s of [-1, 1]) {                  // the same crown of horns, rust-dark
+    const horn = cyl(0.02, 0.15, 0.55, 0x3a1414, 6);
+    horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
+    blob.head.add(horn);
+  }
+  blob.root.position.set(bx, groundHeight(bx, bz), bz);
+  scene.add(blob.root);
+  const hp = Math.round(750 * (1 + 0.4 * game.cycle));
+  const z = {
+    blob, pos: new THREE.Vector3(bx, 0, bz), hp, maxHp: hp, speed: 1.15, yaw: -Math.PI / 2, state: 'dormant',
+    attackT: 0, deadT: 0, walkPhase: 0, groanT: 2, scale: 2.7,
+    brainExposed: false, blind: false, stepT: 0, bleeding: false, dripT: 0, isBoss: true, isBoss2: true,
+    biteMult: 1.35, red: true, wavesFired: 0, dashT: 0, dashCdT: -9,
+  };
+  zombies.push(z);
+  bossState.boss = z;
+  // blood-red beam over the churchyard pointing the way
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.7, 1.7, 130, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xff3030, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+  );
+  beam.position.set(bx, groundHeight(bx, bz) + 64, bz);
+  scene.add(beam);
+  bossState.beam = beam;
+  bossBarEl.classList.remove('show');
+  toast('BLOCK SCOURED . . BUT THE GRAVES SHIFT BY THE OLD CHURCH .ᐟ', true);
+  initAudio(); play3d(bx, bz, () => SFX.groan());
+}
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;
   z.state = 'chase';
   bossBarEl.classList.add('show');
-  toast('THE TWO HORNED ONE AWAKENS!', true);
+  toast(z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS!', true);
   shakeAmp = Math.max(shakeAmp, 0.4);
   rumble(400, 1, 1);
   play3d(z.pos.x, z.pos.z, () => { noiseBurst(0.5, 200, 0.9); tone(60, 0.6, 0.5, 'sawtooth', 30); });
@@ -4047,13 +4279,29 @@ function bossShielded() {
 }
 function fireBossWave(z, n) {
   z.wavesFired = n;
-  const count = 4 + n * 3;                     // wave size grows 7 -> 10 -> 13
-  for (let k = 0; k < count; k++) {
-    // the only zombies allowed to walk out of a building: they pour from the bank doors.
-    // half the wave are purple horned guards (his shield); the rest are plain green fodder
-    const [x, zz] = resolveCollision((Math.random() - 0.5) * 12, -36.6 + Math.random() * 1.8, 0.5);
-    const guard = k < Math.ceil(count / 2);
-    spawnZombie(x, zz, 1 + game.time / 240, { purple: guard, horns: guard });
+  if (z.isBoss2) {
+    // the Crimson One calls bigger waves: red horned guards (his shield) and purple
+    // fodder pour out of the church doors while plain dead claw up from the graves
+    const count = 6 + n * 4;                   // wave size grows 10 -> 14 -> 18
+    for (let k = 0; k < count; k++) {
+      if (k % 2 === 0) {
+        const guard = k < count / 2;           // horned guards lead the church half
+        const [x, zz] = resolveCollision(33.8 + Math.random() * 2.4, 78.5 + Math.random() * 5, 0.5);
+        spawnZombie(x, zz, 1 + game.time / 240, guard ? { red: true, horns: true } : { purple: true });
+      } else {
+        const gs = graveSpots[(Math.random() * graveSpots.length) | 0];
+        spawnZombie(gs.x, gs.z, 1 + game.time / 240, { mode: 'grave' });
+      }
+    }
+  } else {
+    const count = 4 + n * 3;                   // wave size grows 7 -> 10 -> 13
+    for (let k = 0; k < count; k++) {
+      // the only zombies allowed to walk out of a building: they pour from the bank doors.
+      // half the wave are purple horned guards (his shield); the rest are plain green fodder
+      const [x, zz] = resolveCollision((Math.random() - 0.5) * 12, -36.6 + Math.random() * 1.8, 0.5);
+      const guard = k < Math.ceil(count / 2);
+      spawnZombie(x, zz, 1 + game.time / 240, { purple: guard, horns: guard });
+    }
   }
   bossDash(z);
   toast(`WAVE ${n}: KILL THE HORNED GUARDS TO BREAK HIS SHIELD`, true);
@@ -4061,6 +4309,21 @@ function fireBossWave(z, n) {
   shakeAmp = Math.max(shakeAmp, 0.2);
 }
 function onBossDefeated(z) {
+  if (z.isBoss2) {
+    // the final cleanse: with the Crimson One down, every walker left drops where it
+    // stands, and THEN the block has truly earned its street party
+    bossState.defeated2 = true;
+    if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+    bossBarEl.classList.remove('show');
+    for (const zz of [...zombies]) if (zz !== z && !zz.netGhost && zz.state !== 'dying') killZombie(zz, 0, 0, false);
+    toast('THE CRIMSON ONE FALLS . . THE BLOCK IS CLEANSED .ᐟ', true);
+    for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xff3030, 0xfff3d0][k % 3], 1, 6, 1.2);
+    rumble(600, 1, 1);
+    game.celebrateT = 5.5;
+    recordPrestige();
+    if (net.role === 'host') netBroadcast({ t: 'secured', tm: game.time }); // everyone banks the clear
+    return;
+  }
   bossState.defeated = true;
   if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
   bossBarEl.classList.remove('show');
@@ -4073,10 +4336,12 @@ function onBossDefeated(z) {
   for (let k = 0; k < 40; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xb03cff, 0x6fd8ff][k % 3], 1, 6, 1.2);
   rumble(600, 1, 1);
 }
-// every straggler hunted down: the block is secured for good. Record it on the
-// prestige page, throw a street party, then fade back to the menu for a new run.
+// every straggler hunted down: the hunt is done — but the block isn't clean yet.
+// The Crimson One stirs at the church instead of the street party; the celebration
+// only plays once HE falls (see onBossDefeated).
 function completeCleanup() {
   game.cleanup = false;
+  if (!bossState.spawned2 && !bossState.defeated2) { spawnBoss2(); return; }
   game.celebrateT = 5.5;
   recordPrestige();
   if (net.role === 'host') netBroadcast({ t: 'secured', tm: game.time }); // everyone banks the clear
@@ -4796,7 +5061,7 @@ function netHostTick(dt) {
     if (!z.nid) z.nid = ++net.zid;
     zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
       st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' ? 2 : 0),
-      sc: R(z.scale), pu: z.purple ? 1 : 0, ho: z.hornWave ? 1 : 0, bo: z.isBoss ? 1 : 0 });
+      sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, ho: z.hornWave ? 1 : 0, bo: z.isBoss ? 1 : 0 });
   }
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ac, zb,
@@ -4897,7 +5162,7 @@ function netApplySnapshot(m) {
     seenZ.add(zs.i);
     let g = net.ghosts.get(zs.i);
     if (!g) {
-      const color = zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
+      const color = zs.re ? 0xd43a3a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
       const blob = buildBlob({ color, zombie: true, scale: zs.sc });
       if (zs.ho || zs.bo) for (const s of [-1, 1]) {
         const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
