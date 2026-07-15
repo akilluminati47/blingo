@@ -189,13 +189,13 @@ function textPlate(txt, w, h, bg = '#3a3128', fg = '#ffe9c0') {
 // four times of day, cycled morning -> noon -> sunset -> night as blocks are cleared
 // (the heroes never stop rescuing); weather rerolls each cycle: 40% sunny / 40% cloudy / 20% rain
 const PHASES = [
-  { name: 'MORNING', top: '#6f9fd8', mid: '#f2c58e', hor: '#ffd9a8', sun: '#fff0c4', sunV: 0.40, sunR: 34,
+  { name: 'MORNING', top: '#6f9fd8', mid: '#f2c58e', hor: '#ffd9a8', sun: '#fff0c4', sunV: 0.40, sunR: 34, cloudC: '#fff2dd', cloudB: '#eccfa8',
     hemiSky: 0xbfd4ee, hemiGnd: 0x4a4436, hemiI: 0.95, dirC: 0xffe2ae, dirI: 0.9, dirPos: [40, 26, 55], ambC: 0x8a7458, ambI: 0.42, fog: '#c7ad91' },
-  { name: 'NOON', top: '#2e6fc9', mid: '#7ab5ea', hor: '#cde6f8', sun: '#ffffff', sunV: 0.12, sunR: 30,
+  { name: 'NOON', top: '#2e6fc9', mid: '#7ab5ea', hor: '#cde6f8', sun: '#ffffff', sunV: 0.12, sunR: 30, cloudC: '#ffffff', cloudB: '#d7e5f2',
     hemiSky: 0xd8e8ff, hemiGnd: 0x5a5442, hemiI: 1.1, dirC: 0xfff6e0, dirI: 1.0, dirPos: [12, 70, 18], ambC: 0x9a8a70, ambI: 0.42, fog: '#a9c3dd' },
-  { name: 'SUNSET', top: '#413a6e', mid: '#d96a4c', hor: '#ffb35c', sun: '#ffcf9a', sunV: 0.44, sunR: 40,
+  { name: 'SUNSET', top: '#413a6e', mid: '#d96a4c', hor: '#ffb35c', sun: '#ffcf9a', sunV: 0.44, sunR: 40, cloudC: '#ffd7b0', cloudB: '#e2926c',
     hemiSky: 0xd8a080, hemiGnd: 0x3a3040, hemiI: 0.85, dirC: 0xff9a5c, dirI: 0.8, dirPos: [-55, 16, 22], ambC: 0x7a5a48, ambI: 0.38, fog: '#8a5f52' },
-  { name: 'NIGHT', top: '#0a0e22', mid: '#1c2440', hor: '#2b3350', sun: '#dfe8ff', sunV: 0.30, sunR: 22, stars: true,
+  { name: 'NIGHT', top: '#0a0e22', mid: '#1c2440', hor: '#2b3350', sun: '#dfe8ff', sunV: 0.30, sunR: 22, stars: true, cloudC: '#2b3352', cloudB: '#20263f',
     hemiSky: 0x8fa3d0, hemiGnd: 0x2e2a22, hemiI: 0.75, dirC: 0xaebfff, dirI: 0.7, dirPos: [-30, 50, -20], ambC: 0x64513a, ambI: 0.32, fog: '#232a45' },
 ];
 function rollWeather() { const r = Math.random(); return r < 0.4 ? 'sunny' : r < 0.8 ? 'cloudy' : 'rain'; }
@@ -215,17 +215,26 @@ const moonOff = new THREE.Vector3(-30, 50, -20); // key-light offset, follows th
 function drawSky(p, weather) {
   const ctx = skyCanvas.getContext('2d');
   const W = skyCanvas.width, H = skyCanvas.height;
-  const g = ctx.createLinearGradient(0, 0, 0, H * 0.56);
-  g.addColorStop(0, p.top); g.addColorStop(0.72, p.mid); g.addColorStop(1, p.hor);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.56);
-  ctx.fillStyle = p.hor; ctx.fillRect(0, H * 0.55, W, H * 0.45);
-  ctx.fillStyle = 'rgba(28,28,34,.5)'; ctx.fillRect(0, H * 0.58, W, H * 0.42); // haze below the horizon
+  // weather tints the palette itself instead of flat-washing the finished sky,
+  // so the gradient keeps its depth in any mood
+  const mood = weather === 'cloudy' ? ['#9aa2b0', 0.42] : weather === 'rain' ? ['#59606e', 0.62] : null;
+  const tint = hex => mood ? '#' + new THREE.Color(hex).lerp(new THREE.Color(mood[0]), mood[1]).getHexString() : hex;
+  // one clean sweep from zenith to horizon. The top stop is held flat for the first
+  // stretch so the sphere's pole pinch lands inside a single tone — no more grey
+  // circle stamped overhead — and no haze band muddying the horizon line.
+  const g = ctx.createLinearGradient(0, 0, 0, H * 0.54);
+  g.addColorStop(0, tint(p.top)); g.addColorStop(0.14, tint(p.top));
+  g.addColorStop(0.6, tint(p.mid)); g.addColorStop(1, tint(p.hor));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.54);
+  // below the horizon a single quiet floor tone — terrain and fog own that half anyway
+  ctx.fillStyle = '#' + new THREE.Color(tint(p.hor)).multiplyScalar(0.34).getHexString();
+  ctx.fillRect(0, H * 0.53, W, H * 0.47);
   if (p.stars && weather === 'sunny') {
     const srng = mulberry32(42);
     ctx.fillStyle = '#fff';
     for (let i = 0; i < 170; i++) {
       ctx.globalAlpha = 0.25 + srng() * 0.75;
-      ctx.fillRect(srng() * W, srng() * H * 0.5, srng() < 0.12 ? 2 : 1, 1);
+      ctx.fillRect(srng() * W, H * (0.04 + srng() * 0.44), srng() < 0.12 ? 2 : 1, 1);
     }
     ctx.globalAlpha = 1;
   }
@@ -239,27 +248,63 @@ function drawSky(p, weather) {
     ctx.fillStyle = p.sun;
     ctx.beginPath(); ctx.arc(sx, sy, r * (weather === 'cloudy' ? 0.75 : 1), 0, TAU); ctx.fill();
   }
-  // clouds: a few white puffs when sunny, a grey blanket when cloudy, dark rollers in rain
-  const crng = mulberry32(7 + game.cycle * 31 + game.phase);
-  const night = !!p.stars;
-  const nC = weather === 'sunny' ? 5 : weather === 'cloudy' ? 24 : 32;
-  for (let i = 0; i < nC; i++) {
-    const cx2 = crng() * W, cy2 = (0.14 + crng() * 0.34) * H;
-    const cw2 = 50 + crng() * 130, chh = 10 + crng() * 16;
-    ctx.fillStyle = night
-      ? (weather === 'sunny' ? 'rgba(52,60,86,.7)' : 'rgba(30,34,52,.85)')
-      : weather === 'sunny' ? 'rgba(255,255,255,.55)'
-      : weather === 'cloudy' ? 'rgba(208,212,220,.8)'
-      : 'rgba(88,94,106,.85)';
-    for (let k2 = 0; k2 < 4; k2++) {
-      ctx.beginPath();
-      ctx.ellipse(cx2 + (crng() - 0.5) * cw2, cy2 + (crng() - 0.5) * chh, cw2 * (0.3 + crng() * 0.3), chh * (0.6 + crng() * 0.6), 0, 0, TAU);
-      ctx.fill();
-    }
-  }
-  if (weather === 'cloudy') { ctx.fillStyle = 'rgba(148,153,163,.25)'; ctx.fillRect(0, 0, W, H); }
-  if (weather === 'rain') { ctx.fillStyle = 'rgba(66,72,84,.45)'; ctx.fillRect(0, 0, W, H); }
   skyTex.needsUpdate = true;
+}
+// ---------- cloud dome ----------
+// the clouds live on their own transparent shell just inside the sky dome, so they can
+// drift slowly around the block while the gradient, sun and stars hold still. They ride
+// a mid band — clear of the horizon smear AND the zenith pinch that used to stamp a grey
+// circle overhead.
+const cloudCanvas = document.createElement('canvas');
+cloudCanvas.width = 1024; cloudCanvas.height = 512;
+const cloudTex = new THREE.CanvasTexture(cloudCanvas);
+cloudTex.colorSpace = THREE.SRGBColorSpace;
+cloudTex.flipY = false;
+const cloudDome = new THREE.Mesh(
+  new THREE.SphereGeometry(232, 24, 16),
+  new THREE.MeshBasicMaterial({ map: cloudTex, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true })
+);
+cloudDome.renderOrder = -9;
+scene.add(cloudDome);
+// one flat-bottomed puff: lobed top, straight base, a darker belly for depth.
+// Solid fills keep the silhouette crisp — cartoon, but tailored.
+function drawPuff(ctx, x, y, s, fill, belly, rng) {
+  const w = (95 + rng() * 85) * s, h = (22 + rng() * 12) * s;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x - w, y - h * 2.6, w * 2, h * 2.6); ctx.clip(); // everything stops at the flat base
+  ctx.fillStyle = fill;
+  const lobes = 3 + ((rng() * 3) | 0);
+  for (let i = 0; i < lobes; i++) {
+    const lx = x + (i / (lobes - 1) - 0.5) * w * 0.72;
+    const lr = h * (0.55 + rng() * 0.5) * (1 - Math.abs(i / (lobes - 1) - 0.5) * 0.55);
+    ctx.beginPath(); ctx.arc(lx, y - lr * 0.55, lr, 0, TAU); ctx.fill();
+  }
+  ctx.beginPath(); ctx.ellipse(x, y - h * 0.32, w * 0.42, h * 0.42, 0, 0, TAU); ctx.fill(); // the body
+  ctx.fillStyle = belly;
+  ctx.beginPath(); ctx.ellipse(x, y - h * 0.1, w * 0.34, h * 0.16, 0, 0, TAU); ctx.fill(); // shaded underside
+  ctx.restore();
+}
+function drawClouds(p, weather) {
+  const ctx = cloudCanvas.getContext('2d');
+  const W = cloudCanvas.width, H = cloudCanvas.height;
+  ctx.clearRect(0, 0, W, H);
+  const night = !!p.stars;
+  // each phase dresses its clouds from its palette; weather greys them down with intent
+  let fill = p.cloudC, belly = p.cloudB;
+  if (weather === 'cloudy') { fill = night ? '#272e46' : '#c6ccd8'; belly = night ? '#1d2338' : '#a9b0bf'; }
+  if (weather === 'rain')   { fill = night ? '#1a1f30' : '#6d7484'; belly = night ? '#141827' : '#565e6c'; }
+  const crng = mulberry32(7 + game.cycle * 31 + game.phase);
+  const nC = weather === 'sunny' ? 6 : weather === 'cloudy' ? 13 : 9;
+  for (let i = 0; i < nC; i++) {
+    const cx2 = crng() * W;
+    const cy2 = (0.15 + crng() * 0.21) * H; // the mid band
+    const s = 0.55 + crng() * 0.85;
+    const seed = (crng() * 1e9) | 0;        // same seed twice = identical twin across the seam
+    drawPuff(ctx, cx2, cy2, s, fill, belly, mulberry32(seed));
+    if (cx2 < 180) drawPuff(ctx, cx2 + W, cy2, s, fill, belly, mulberry32(seed));
+    else if (cx2 > W - 180) drawPuff(ctx, cx2 - W, cy2, s, fill, belly, mulberry32(seed));
+  }
+  cloudTex.needsUpdate = true;
 }
 // live wind: direction & strength drift over time, gusting harder in worse weather.
 // rain streaks lean and drift with it, and the wind bed swells/pans to match.
@@ -326,6 +371,7 @@ function applyEnvironment() {
   const p = PHASES[game.phase] || PHASES[0];
   const w = game.weather || 'sunny';
   drawSky(p, w);
+  drawClouds(p, w);
   const dimD = w === 'sunny' ? 1 : w === 'cloudy' ? 0.55 : 0.35;
   const dimH = w === 'sunny' ? 1 : w === 'cloudy' ? 0.85 : 0.7;
   hemi.color.set(p.hemiSky); hemi.groundColor.set(p.hemiGnd); hemi.intensity = p.hemiI * dimH;
@@ -5711,6 +5757,8 @@ function updateCamera(dt) {
     shakeAmp *= Math.exp(-10 * dt);
   }
   skyDome.position.copy(camera.position); // the sky rides along so it never has edges
+  cloudDome.position.copy(camera.position);
+  cloudDome.rotation.y = game.time * 0.005; // the puffs drift — slow enough to feel, not watch
   moon.position.set(player.pos.x + moonOff.x, moonOff.y, player.pos.z + moonOff.z);
   moon.target.position.copy(player.pos);
   moon.target.updateMatrixWorld();
