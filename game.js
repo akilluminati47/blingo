@@ -3778,7 +3778,9 @@ function startDropKick() {
   player.dkX = _aimDir.x / l; player.dkZ = _aimDir.z / l;
   if (player.vy > 0) player.vy *= 0.35;
   SFX.dropKick(player.dropKickHard);
-  rumble(90, 0.5, 0.45);
+  // the commit, not the impact: a short snap weighted to the high-frequency motor.
+  // long + even across both motors reads as a wobble, which the boots are not.
+  rumble(player.dropKickHard ? 55 : 40, player.dropKickHard ? 0.5 : 0.3, player.dropKickHard ? 1 : 0.75);
 }
 function updateDropKick(dt) {
   if (!player.dropKick) return;
@@ -3794,7 +3796,9 @@ function updateDropKick(dt) {
     damageZombie(z, DROPKICK_DMG * (hard ? 2 : 1), nx, nz, DROPKICK_KNOCK * (hard ? 1.6 : 1),
       { weapon: player.weapon, dist: d, isHead: false });
     play3d(z.pos.x, z.pos.z, () => SFX.dropKickHit(hard));
-    rumble(110, 0.7, 0.5);
+    // boot connecting: the sharpest thing in the game. peaks above the launch snap so it
+    // always cuts through it, and a slide-hop kick cracks harder like it hits harder.
+    rumble(hard ? 70 : 50, hard ? 1 : 0.65, hard ? 1 : 0.9);
     shakeAmp = Math.max(shakeAmp, hard ? 0.09 : 0.05);
   }
   if (player.grounded) { player.dropKick = false; player.dropKickHits = null; } // landed: free again
