@@ -2368,8 +2368,10 @@ touchLayer.addEventListener('touchmove', e => {
       input.moveX = dx / JOY_R;
       input.moveY = dy / JOY_R;
     } else if (t.identifier === camTouchId) {
-      input.lookDX += (t.clientX - camLast.x) * 0.006;
-      input.lookDY += (t.clientY - camLast.y) * 0.006;
+      // the same notch that drives the mouse drives the swipe — it just wears the other name
+      const sens = settings.mouseSens || 1;
+      input.lookDX += (t.clientX - camLast.x) * 0.006 * sens;
+      input.lookDY += (t.clientY - camLast.y) * 0.006 * sens;
       camLast = { x: t.clientX, y: t.clientY };
     }
   }
@@ -2754,7 +2756,7 @@ const player = {
   camYaw: 0, camPitch: -0.24, groundCamT: 0,
   weapon: WEAPONS.fists,
   clip: Infinity,
-  reloading: 0, shootCd: 0, lastShotT: -9, lastHurtT: -9, lastAimYaw: 0,
+  reloading: 0, shootCd: 0, lastShotT: -9, lastHurtT: -9,
   walkPhase: 0, squash: 0, dead: false, idlePhase: 0,
   stumbleT: 0, stumbleX: 0, stumbleZ: 0, meleeArm: 0,
   // fists combo: comboN is the swing's place in the current chain (0 = opener). It rolls
@@ -3751,7 +3753,9 @@ document.addEventListener('visibilitychange', () => document.hidden ? onWindowBl
 // ---------- settings UI: snappy 5-notch bars, two columns, gamepad navigable ----------
 const SETTING_DEFS = [
   ['master', 'Master'], ['sfx', 'SFX'], ['music', 'Music'], ['ambience', 'Ambience'],
-  ['mouseSens', 'Mouse Sens'], ['padSens', 'Pad Sens'],
+  // one look-sensitivity notch serves mouse and thumb both; a phone has no mouse to tune,
+  // so it takes the name of the thing they actually have in their hands
+  ['mouseSens', isTouch ? 'Swipe Sens' : 'Mouse Sens'], ['padSens', 'Pad Sens'],
   ['zombieSpawn', 'Zombies'], ['lootSpawn', 'Loot'],
   ['gore', 'Gore'], ['extraGore', 'Extra Gore'],
 ];
@@ -3900,11 +3904,27 @@ function updateDropKick(dt) {
 
 // ---------- shooting ----------
 const _from = new THREE.Vector3(), _to = new THREE.Vector3(), _gp = new THREE.Vector3();
+// the zombie a swing would land on right now, or null. Reach plus a wide forward cone —
+// not the nearest one, but the first inside both, which is exactly what the swing itself
+// takes. Auto-attack asks this before committing, so the probe and the swing can never
+// disagree and leave the hero punching air.
+const _mDir = new THREE.Vector3();
+function meleeTarget(w) {
+  getAimDir(_mDir);
+  const yaw = Math.atan2(_mDir.x, _mDir.z);
+  for (const z of zombies) {
+    if (z.state === 'dying') continue;
+    const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
+    if (Math.hypot(dx, dz) >= w.range) continue;
+    const diff = Math.abs(((Math.atan2(dx, dz) - yaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
+    if (diff < 1.15) return z;
+  }
+  return null;
+}
 function fireWeapon() {
   if (squadCmd.mode === 'lineup') squadCmd.mode = null; // gunfire breaks up the trade line
   const w = player.weapon;
   getAimDir(_aimDir);
-  player.lastAimYaw = Math.atan2(_aimDir.x, _aimDir.z);
   if (w.melee) {
     // bare fists in the air are a drop kick, not a punch: a committed move you ride down
     // (updateDropKick), so unlike an armed jump swing it can't be mashed. The !dropKick
@@ -3927,24 +3947,17 @@ function fireWeapon() {
       player.meleeArm = playerBlob.gunArm;  // an armed melee always swings the weapon hand
     }
     const hop = player.hopT > 0;            // swung out of a slide hop: twice the damage
-    for (const z of zombies) {
-      if (z.state === 'dying') continue;
-      const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
+    const hit = meleeTarget(w);
+    if (hit) {
+      const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z;
       const d = Math.hypot(dx, dz);
-      if (d < w.range) {
-        const ang = Math.atan2(dx, dz);
-        let diff = Math.abs(((ang - player.lastAimYaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
-        if (diff < 1.15) {
-          // fists land on the chain, not the hand: opener 6, answer 7. Melee ignores hero
-          // damage perks so the numbers stay true for everyone — the perks live on guns.
-          const base = w.id === 'fists' ? (player.comboN % 2 === 0 ? 6 : 7) : w.dmg;
-          const knock = (w.id === 'fists' ? 11 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
-          damageZombie(z, base * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
-            { weapon: w, dist: d, isHead: false });
-          rumble(...w.rmb);
-          break;
-        }
-      }
+      // fists land on the chain, not the hand: opener 6, answer 7. Melee ignores hero
+      // damage perks so the numbers stay true for everyone — the perks live on guns.
+      const base = w.id === 'fists' ? (player.comboN % 2 === 0 ? 6 : 7) : w.dmg;
+      const knock = (w.id === 'fists' ? 11 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
+      damageZombie(hit, base * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
+        { weapon: w, dist: d, isHead: false });
+      rumble(...w.rmb);
     }
     return;
   }
@@ -4574,7 +4587,17 @@ function updatePlayer(dt) {
   // A gun with nothing left to load stays quiet rather than auto-fire: there's no thumb
   // deciding to stop, so it would dry-click at full rpm for as long as a target's in view.
   const spent = !w.melee && player.clip <= 0 && !(reserves[w.id] | 0);
-  const wantShoot = input.shoot || input.shootGamepad || (input.device === 'touch' && aimHot && !spent);
+  // Bullets go wherever the crosshair points, so guns open up on the flare itself. A swing
+  // doesn't, and the flare is the wrong cue for it twice over: it lights for a zombie clear
+  // across the block, and the third-person crosshair rides a ray angled at the ground that
+  // only crosses a zombie's height around 3-5m out — past fists' 2.4m reach. Gate a swing on
+  // it and the hero stands there being eaten by the one chewing his ankle. So melee takes the
+  // signal that actually decides whether it lands: inside its reach and inside its arc, which
+  // is all holding the attack button ever swung at. He chops at his own rpm (the arc always
+  // finishes first), stops dead when nothing's in front, and picks back up on the next one to
+  // close. Whatever slips around the arc to flank him is outside it, which is the trade.
+  const autoTouch = input.device === 'touch' && (w.melee ? !!meleeTarget(w) : aimHot && !spent);
+  const wantShoot = input.shoot || input.shootGamepad || autoTouch;
   // hold the trigger to keep firing; every weapon — full-auto, semi-auto & melee — cycles at its own rpm.
   // A live drop kick locks everything out until it lands.
   if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0 && !player.dropKick && !player.downed) {
