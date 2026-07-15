@@ -127,34 +127,24 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   .tbtn:active, .tbtn.pressed { background:rgba(255,255,255,.4); }
   .tbtn img { width:55%; height:55%; opacity:.9; pointer-events:none; }
-  /* two large (jump + slide), the main attack + interact medium, rest small */
+  /* two large (jump + slide), interact medium, rest small */
   #btnJump, #btnSlide { width:var(--tl); height:var(--tl); }
-  #btnShoot, #btnInteract { width:var(--tm); height:var(--tm); }
-  #btnAim, #btnView, #btnReload, #btnSprint, #btnEmote, #btnShoot2 { width:var(--ts); height:var(--ts); }
-  /* right cluster: jump anchors the corner, slide beside it, the attack circle above the
-     slide with interact popping in above the attack, aim + view stacked to their left */
+  #btnInteract { width:var(--tm); height:var(--tm); }
+  #btnAim, #btnView, #btnReload, #btnSprint, #btnEmote, #btnPause { width:var(--ts); height:var(--ts); }
+  /* right cluster: jump anchors the corner, slide beside it, interact popping in above the
+     slide (the hero auto-fires on touch, so no attack circle), aim + view stacked to their left */
   #btnJump { right:calc(20px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:11px; }
   #btnSlide { right:calc(120px + env(safe-area-inset-right)); bottom:calc(110px + env(safe-area-inset-bottom)); font-size:11px; }
-  #btnShoot, #btnShoot2 { background:rgba(255,80,80,.22); border-color:rgba(255,120,120,.6); }
-  #btnShoot { right:calc(129px + env(safe-area-inset-right)); bottom:calc(210px + env(safe-area-inset-bottom)); }
-  #btnInteract { right:calc(129px + env(safe-area-inset-right)); bottom:calc(292px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
+  #btnInteract { right:calc(129px + env(safe-area-inset-right)); bottom:calc(210px + env(safe-area-inset-bottom)); background:rgba(90,180,255,.22); border-color:rgba(140,200,255,.6); display:none; }
   #btnAim { right:calc(211px + env(safe-area-inset-right)); bottom:calc(217px + env(safe-area-inset-bottom)); font-size:11px; background:rgba(120,180,255,.2); border-color:rgba(150,200,255,.6); }
   #btnAim.pressed { background:rgba(120,200,255,.5); }
   #btnView { right:calc(211px + env(safe-area-inset-right)); bottom:calc(285px + env(safe-area-inset-bottom)); font-size:10px; }
   #btnView.pressed { background:rgba(120,200,255,.5); }
   #btnReload { right:calc(36px + env(safe-area-inset-right)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:8px; letter-spacing:.3px; }
-  /* left cluster: one small column — run, emote, then the secondary attack on top */
+  /* left cluster: one small column — run, emote, then pause crowning it. Pause lives here
+     rather than a screen corner so it's a thumb's reach from the stick, like everything else. */
   #btnSprint { left:calc(24px + env(safe-area-inset-left)); bottom:calc(210px + env(safe-area-inset-bottom)); font-size:10px; }
-  #btnShoot2 { left:calc(24px + env(safe-area-inset-left)); bottom:calc(346px + env(safe-area-inset-bottom)); }
-  /* attack buttons wear the live crosshair: same X, same enemy flare + twist */
-  .tbtn .xh { position:relative; width:26px; height:26px; pointer-events:none; transition:transform .13s ease; }
-  #btnShoot2 .xh { width:19px; height:19px; } /* small circle: keep the 1.4x enemy flare inside the ring */
-  .tbtn .xh::before, .tbtn .xh::after { content:''; position:absolute; left:50%; top:50%; width:2.5px; height:100%;
-    background:#fff; box-shadow:0 0 3px #000; transition:background .1s, box-shadow .1s; }
-  .tbtn .xh::before { transform:translate(-50%,-50%) rotate(45deg); }
-  .tbtn .xh::after { transform:translate(-50%,-50%) rotate(-45deg); }
-  .tbtn .xh.enemy { transform:rotate(90deg) scale(1.4); }
-  .tbtn .xh.enemy::before, .tbtn .xh.enemy::after { background:#ff4d4d; box-shadow:0 0 7px rgba(255,60,60,.9); }
+  #btnPause { left:calc(24px + env(safe-area-inset-left)); bottom:calc(346px + env(safe-area-inset-bottom)); font-size:13px; }
   /* the weapon + ammo readout IS the swap button on touch: a squircle around both */
   #btnCycle { display:none; }
   body.touchmode #bottomright { pointer-events:auto; background:rgba(255,255,255,.14); border:2px solid rgba(255,255,255,.4);
@@ -204,7 +194,9 @@
   /* the wheel wears the settings-menu badge look: dark panel, hero-coloured trim */
   #ewheel { position:fixed; inset:0; z-index:24; display:flex; align-items:center; justify-content:center;
     pointer-events:none; opacity:0; transition:opacity .16s; }
-  #ewheel.show { opacity:1; }
+  /* open, the wheel owns every touch on screen — a thumb steering it must never leak
+     through to the camera or the buttons underneath */
+  #ewheel.show { opacity:1; pointer-events:auto; }
   #ewring { position:relative; width:290px; height:290px; border-radius:50%; backdrop-filter:blur(6px);
     border:2px solid var(--hero); box-shadow:0 0 46px rgba(0,0,0,.65), 0 0 18px -6px var(--hero), inset 0 0 60px rgba(0,0,0,.5); }
   #ewring::after { content:'EMOTE'; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -307,6 +299,9 @@
     color:#eee; font-size:15px; display:none; align-items:center; justify-content:center; pointer-events:auto; cursor:pointer; backdrop-filter:blur(6px); }
   body.playing #btnPauseHud { display:flex; }
   #btnPauseHud:active { background:rgba(255,255,255,.22); }
+  /* touch keeps both top corners clear: pause is the circle crowning the left button
+     column, and the touch cluster is its own legend so the hint bar has nothing to say */
+  body.touchmode #btnPauseHud, body.touchmode #controls { display:none; }
 
   #bloodsplat { position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .55s; mix-blend-mode:multiply;
     background:
@@ -378,16 +373,15 @@
     body.touchmode #bottomright { padding:8px 12px 6px; border-radius:18px; }
     #btnJump { right:calc(16px + env(safe-area-inset-right)); bottom:calc(92px + env(safe-area-inset-bottom)); }
     #btnSlide { right:calc(90px + env(safe-area-inset-right)); bottom:calc(92px + env(safe-area-inset-bottom)); font-size:10px; }
-    #btnShoot { right:calc(95px + env(safe-area-inset-right)); bottom:calc(166px + env(safe-area-inset-bottom)); }
-    #btnInteract { right:calc(95px + env(safe-area-inset-right)); bottom:calc(230px + env(safe-area-inset-bottom)); }
+    #btnInteract { right:calc(95px + env(safe-area-inset-right)); bottom:calc(166px + env(safe-area-inset-bottom)); }
     #btnAim { right:calc(159px + env(safe-area-inset-right)); bottom:calc(171px + env(safe-area-inset-bottom)); font-size:10px; }
     #btnView { right:calc(159px + env(safe-area-inset-right)); bottom:calc(225px + env(safe-area-inset-bottom)); font-size:9px; }
     #btnReload { right:calc(26px + env(safe-area-inset-right)); bottom:calc(166px + env(safe-area-inset-bottom)); font-size:7px; }
     #btnSprint { left:calc(20px + env(safe-area-inset-left)); bottom:calc(168px + env(safe-area-inset-bottom)); font-size:9px; }
     #btnEmote { left:calc(20px + env(safe-area-inset-left)); bottom:calc(222px + env(safe-area-inset-bottom)); font-size:13px; }
-    #btnShoot2 { left:calc(20px + env(safe-area-inset-left)); bottom:calc(276px + env(safe-area-inset-bottom)); }
+    #btnPause { left:calc(20px + env(safe-area-inset-left)); bottom:calc(276px + env(safe-area-inset-bottom)); font-size:11px; }
   }
-  /* portrait: aim + view leave the shoot column and stack above reload on the far right,
+  /* portrait: aim + view leave the interact column and stack above reload on the far right,
      keeping the middle of a narrow screen clear */
   @media (orientation: portrait) {
     #btnAim { right:calc(36px + env(safe-area-inset-right)); bottom:calc(278px + env(safe-area-inset-bottom)); }
@@ -447,8 +441,7 @@
   <div id="joyBase" class="home"><div id="joyKnob"></div></div>
   <div class="tbtn" id="btnJump">JUMP</div>
   <div class="tbtn" id="btnSlide">SLIDE</div>
-  <div class="tbtn" id="btnShoot"><div class="xh"></div></div>
-  <div class="tbtn" id="btnShoot2"><div class="xh"></div></div>
+  <div class="tbtn" id="btnPause">❚❚</div>
   <div class="tbtn" id="btnAim">AIM</div>
   <div class="tbtn" id="btnView">VIEW</div>
   <div class="tbtn" id="btnCycle">GUN</div>

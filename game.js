@@ -493,6 +493,8 @@ syncDerived();
 const AC = window.AudioContext || window.webkitAudioContext;
 let actx = null, masterGain = null, sfxGain = null, musicGain = null, ambGain = null;
 let sfxDest = null;
+// set while the window is in the background: everything rides silent until they're back
+let blurMuted = false;
 function initAudio() {
   if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
   actx = new AC();
@@ -504,7 +506,7 @@ function initAudio() {
 }
 function applyAudioSettings() {
   if (!actx) return;
-  masterGain.gain.value = settings.master;
+  masterGain.gain.value = blurMuted ? 0 : settings.master;
   sfxGain.gain.value = settings.sfx;
   musicGain.gain.value = settings.music;
   ambGain.gain.value = settings.ambience;
@@ -662,7 +664,7 @@ function startAmbience() {
 // fade the rain bed with the current weather (wind is driven live by updateWind)
 function syncWeatherAmbience() {
   if (!actx || !ambStarted) return;
-  rainGainNode.gain.setTargetAtTime(game.weather === 'rain' ? 0.275 : 0, actx.currentTime, 1.2);
+  rainGainNode.gain.setTargetAtTime(game.weather === 'rain' ? 0.09 : 0, actx.currentTime, 1.2);
 }
 const NF = s => 220 * Math.pow(2, s / 12);
 // each cousin has a persona motif (chiptune-ish MIDI feel)
@@ -2287,8 +2289,7 @@ function bindBtn(id, down, up) {
 }
 bindBtn('btnJump', () => { input.jump = true; });
 bindBtn('btnSlide', () => { input.slide = true; });
-bindBtn('btnShoot', () => { input.shoot = true; input.shootPressed = true; }, () => { input.shoot = false; });
-bindBtn('btnShoot2', () => { input.shoot = true; input.shootPressed = true; }, () => { input.shoot = false; }); // left-hand attack twin
+bindBtn('btnPause', () => { togglePause(); }); // touch has no corner pause: it's this circle
 // aim is a toggle: tap on, tap off (the lit state survives bindBtn's touchend un-press)
 bindBtn('btnAim', () => { input.aimTouch = !input.aimTouch; },
   () => { document.getElementById('btnAim').classList.toggle('pressed', input.aimTouch); });
@@ -2302,8 +2303,20 @@ if (isTouch) {
   wpanel.addEventListener('touchcancel', () => wpanel.classList.remove('pressed'), { passive: true });
 }
 bindBtn('btnInteract', () => { input.interact = true; input.interactHeld = true; }, () => { input.interactHeld = false; });
-bindBtn('btnEmote', () => { ewheel.open ? ewClose() : ewOpen('touch'); }); // toggle for touch
-const shootXhEls = [...document.querySelectorAll('.tbtn .xh')]; // mini crosshairs on both attack buttons
+// emote: hold the button and keep swiping to steer the wheel (ewTouchStart takes it from
+// here), or just tap it and the wheel stays up to thumb through
+{
+  const el = document.getElementById('btnEmote');
+  el.addEventListener('touchstart', e => {
+    e.preventDefault(); e.stopPropagation();
+    el.classList.add('pressed'); initAudio();
+    ewOpen('touch');
+    ewTouchStart(e.changedTouches[0], 'btn');
+  }, { passive: false });
+  const up = () => el.classList.remove('pressed');
+  el.addEventListener('touchend', up, { passive: true });
+  el.addEventListener('touchcancel', up, { passive: true });
+}
 bindBtn('btnSprint', () => {
   sprintToggle = !sprintToggle;
   document.getElementById('btnSprint').style.background = sprintToggle ? 'rgba(120,255,140,.35)' : 'rgba(255,255,255,.14)';
@@ -3112,9 +3125,20 @@ function ewOpen(src) {
   if (game.state !== 'playing' || ewheel.open) return;
   ewheel.open = true; ewheel.src = src; ewheel.sel = -1; ewheel.vx = 0; ewheel.vy = 0;
   ewheelEl.classList.add('show');
+  // these only live as long as the wheel does: a non-passive touchmove parked on the window
+  // costs the whole document its scrolling fast path, and the menus scroll
+  addEventListener('touchmove', ewTouchMove, { passive: false });
+  addEventListener('touchend', ewTouchEnd);
+  addEventListener('touchcancel', ewTouchEnd);
   ewRender();
 }
-function ewClose() { ewheel.open = false; ewheelEl.classList.remove('show'); }
+function ewClose() {
+  ewheel.open = false; ewTouch = null;
+  ewheelEl.classList.remove('show');
+  removeEventListener('touchmove', ewTouchMove);
+  removeEventListener('touchend', ewTouchEnd);
+  removeEventListener('touchcancel', ewTouchEnd);
+}
 function ewRelease() {
   if (!ewheel.open) return;
   if (ewheel.sel >= 0) fireEmote(ewheel.sel);
@@ -3134,6 +3158,56 @@ function ewSteer(dx, dy, absolute) {
   if (ewheel.sel !== was) {
     ewRender();
     if (ewheel.sel >= 0) tone(500 + ewheel.sel * 60, 0.04, 0.15, 'square');
+  }
+}
+// touch steering: hold and swipe and the wedge under your thumb swells exactly like the
+// mouse hover, then lifting fires it. Two ways in, so both read the same:
+//   'ring' — thumb down on the wheel itself, so the wedge it points at from the centre is
+//            the pick (angle only: parking outside the ring still aims at a wedge)
+//   'btn'  — dragged straight off the emote button, which sits nowhere near the centre, so
+//            the swipe is measured from where the thumb started instead
+let ewTouch = null;
+const EW_CANCEL_R = 1.9; // ring taps this far out are a dismiss, not a pick
+function ewTouchStart(t, mode) {
+  if (!ewheel.open || ewTouch) return;
+  ewTouch = { id: t.identifier, mode, sx: t.clientX, sy: t.clientY };
+  if (mode === 'ring') ewTouchSteer(t);
+}
+function ewTouchSteer(t) {
+  const r = ewringEl.getBoundingClientRect();
+  const rad = r.width / 2 || 145;
+  let dx, dy;
+  if (ewTouch.mode === 'ring') {
+    dx = (t.clientX - (r.left + rad)) / rad;
+    dy = (t.clientY - (r.top + rad)) / rad;
+    if (Math.hypot(dx, dy) > EW_CANCEL_R) { dx = 0; dy = 0; }
+  } else {
+    dx = (t.clientX - ewTouch.sx) / rad;
+    dy = (t.clientY - ewTouch.sy) / rad;
+  }
+  ewSteer(dx, dy, true);
+}
+// the overlay only takes touches once it's up (pointer-events rides the .show class)
+ewheelEl.addEventListener('touchstart', e => {
+  if (!ewheel.open) return;
+  e.preventDefault();
+  ewTouchStart(e.changedTouches[0], 'ring');
+}, { passive: false });
+function ewTouchMove(e) {
+  if (!ewTouch) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier === ewTouch.id) { e.preventDefault(); ewTouchSteer(t); }
+  }
+}
+function ewTouchEnd(e) {
+  if (!ewTouch) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier !== ewTouch.id) continue;
+    const tapped = ewTouch.mode === 'btn' && ewheel.sel < 0;
+    ewTouch = null;
+    // a bare tap on the emote button leaves the wheel up to browse; everything else is a
+    // real pick — including a thumb that came to rest in the dead centre, which closes it
+    if (!tapped) ewRelease();
   }
 }
 // the hero accent (the settings-menu trim colour) as an rgba() string for inline tints
@@ -3486,6 +3560,8 @@ function toast(txt, long) {
   toastT = long ? 4.2 : 1.6;
 }
 let hitmarkT = 0;
+// set from the crosshair test each frame in updateFx — an enemy is under the sights
+let aimHot = false;
 
 // ---------- game state ----------
 const game = { state: 'menu', time: 0, kills: 0, cratesOpened: 0, spawnT: 2, lastShot: new THREE.Vector3(), lastShotT: -99,
@@ -3653,6 +3729,24 @@ addEventListener('keydown', e => {
     togglePause();
   }
 });
+
+// ---------- looking away ----------
+// Tab out of a solo run and the world stops dead with you — nobody comes back to a corpse
+// they never saw. A multiplayer world can't stop for one person, so that run only goes
+// quiet. Either way the sound waits at zero until you're actually back looking at it.
+function setBlurMute(on) {
+  blurMuted = on;
+  if (actx) masterGain.gain.setTargetAtTime(on ? 0 : settings.master, actx.currentTime, 0.06);
+}
+function onWindowBlur() {
+  if (game.state === 'menu') return;
+  if (game.state === 'playing' && net.role === null) pauseGame();
+  setBlurMute(true);
+}
+addEventListener('blur', onWindowBlur);
+addEventListener('focus', () => setBlurMute(false));
+// phones background the tab without ever firing blur
+document.addEventListener('visibilitychange', () => document.hidden ? onWindowBlur() : setBlurMute(false));
 
 // ---------- settings UI: snappy 5-notch bars, two columns, gamepad navigable ----------
 const SETTING_DEFS = [
@@ -4473,8 +4567,14 @@ function updatePlayer(dt) {
   player.shootCd -= dt;
   player.swingT = Math.max(0, player.swingT - dt);
   updateDropKick(dt);   // resolves the boots, and frees you the moment you land
-  const wantShoot = input.shoot || input.shootGamepad;
   const w = player.weapon;
+  // touch gave up its trigger circles to auto-fire: the crosshair flaring on a target IS
+  // the shot, so a thumb only ever has to steer. (aimHot is last frame's crosshair test —
+  // updateFx runs after us — which at 60fps is under the reaction time it replaces.)
+  // A gun with nothing left to load stays quiet rather than auto-fire: there's no thumb
+  // deciding to stop, so it would dry-click at full rpm for as long as a target's in view.
+  const spent = !w.melee && player.clip <= 0 && !(reserves[w.id] | 0);
+  const wantShoot = input.shoot || input.shootGamepad || (input.device === 'touch' && aimHot && !spent);
   // hold the trigger to keep firing; every weapon — full-auto, semi-auto & melee — cycles at its own rpm.
   // A live drop kick locks everything out until it lands.
   if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0 && !player.dropKick && !player.downed) {
@@ -5959,7 +6059,7 @@ function updateFx(dt) {
     }
   }
   hud.crosshair.classList.toggle('enemy', hot);
-  for (const xh of shootXhEls) xh.classList.toggle('enemy', hot); // both touch attack buttons flare with it
+  aimHot = hot; // touch has no trigger: the flare itself is what opens fire (see updatePlayer)
   if (hitmarkT > 0) {
     hitmarkT -= dt;
     hud.hitmarker.style.opacity = 1;
