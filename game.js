@@ -76,9 +76,16 @@ function vnoise(x, z, s) {
     lerp(vhash(ix, iz), vhash(ix + 1, iz), sx),
     lerp(vhash(ix, iz + 1), vhash(ix + 1, iz + 1), sx), sz);
 }
-// distance from a coordinate to nearest road centerline (roads repeat every 120 at offset -17)
-function roadAxisDist(v) {
+// distance from a coordinate to the nearest road centreline (roads repeat every 120).
+// Horizontal roads (the z axis, incl. the main street at z=-17) keep the -17 offset;
+// vertical roads (the x axis) sit 3 further west at -20, which slides the town's western
+// cross street clear of the bank so it no longer sits on the tarmac.
+function roadAxisDist(v) {          // z axis — horizontal roads
   let m = ((v + 17) % 120 + 120) % 120;
+  return Math.min(m, 120 - m);
+}
+function roadAxisDistX(v) {         // x axis — vertical roads, shifted 3 west
+  let m = ((v + 20) % 120 + 120) % 120;
   return Math.min(m, 120 - m);
 }
 // town footprint rectangles [x0,z0,x1,z1] - flattened terrain + no random spawns inside
@@ -99,7 +106,7 @@ function inTown(x, z, margin = 0) {
 }
 function groundHeight(x, z) {
   const base = (vnoise(x, z, 57) - 0.5) * 3.4 + (vnoise(x, z, 23) - 0.5) * 1.1 + (vnoise(x, z, 131) - 0.5) * 2.2;
-  const dr = Math.min(roadAxisDist(x), roadAxisDist(z));
+  const dr = Math.min(roadAxisDistX(x), roadAxisDist(z));
   let f = smooth(clamp((dr - 6.7) / 10, 0, 1)); // graded flat near roads
   let td = Infinity;
   for (const r of TOWN_RECTS) td = Math.min(td, rectDist(x, z, r));
@@ -108,7 +115,7 @@ function groundHeight(x, z) {
 }
 // roads are two-way now: a lane each direction, 12.8 wide in total
 function onRoad(x, z, margin = 0) {
-  return roadAxisDist(x) < 6.4 + margin || roadAxisDist(z) < 6.4 + margin;
+  return roadAxisDistX(x) < 6.4 + margin || roadAxisDist(z) < 6.4 + margin;
 }
 
 // shared materials/geometries
@@ -512,17 +519,15 @@ function startAmbience() {
   rainGainNode = actx.createGain(); rainGainNode.gain.value = 0;
   rsrc.connect(rf); rf.connect(rainGainNode); rainGainNode.connect(ambGain);
   rsrc.start();
-  // each weather roll has its own life on top of the wind bed: sunny = songbirds by
-  // day / crickets at night, cloudy = crows + low moaning gusts, rain = distant thunder
+  // each weather roll has its own life on top of the wind bed: sunny = crickets at
+  // night (daytime songbirds retired — the crows own the daylight air now, with their
+  // own 3D caws), cloudy = far-off crows + low moaning gusts, rain = distant thunder
   (function weatherLife() {
     setTimeout(() => {
       if (actx) {
         if (game.weather === 'sunny') {
           if (game.phase === 3) {
             for (let i = 0; i < 6; i++) setTimeout(() => tone(3400 + Math.random() * 300, 0.035, 0.05, 'sine', undefined, ambGain), i * 85);
-          } else {
-            const base = 1800 + Math.random() * 900;
-            for (let i = 0; i < 2 + ((Math.random() * 3) | 0); i++) setTimeout(() => tone(base + Math.random() * 500, 0.09, 0.055, 'sine', base - 400, ambGain), i * 170);
           }
         } else if (game.weather === 'cloudy') {
           if (Math.random() < 0.45) {
@@ -1339,18 +1344,20 @@ function buildChunk(cx, cz) {
 
   group.add(terrainPlane(CHUNK, CHUNK, 10, 10, ox, oz, grassMat(rng())));
 
-  // roads on grid lines every 3 chunks (center at ox-17 / oz-17)
+  // roads on grid lines every 3 chunks (vertical centre ox-20, horizontal oz-17)
   const hasVRoad = ((cx % 3) + 3) % 3 === 0;
   const hasHRoad = ((cz % 3) + 3) % 3 === 0;
-  if (hasVRoad) group.add(terrainPlane(12.8, CHUNK, 3, 10, ox - 17, oz, roadMat, 0.04));
+  if (hasVRoad) group.add(terrainPlane(12.8, CHUNK, 3, 10, ox - 20, oz, roadMat, 0.04));
   if (hasHRoad) group.add(terrainPlane(CHUNK, 12.8, 10, 3, ox, oz - 17, roadMat, 0.04));
   // dotted yellow centre line between the two lanes, broken well clear of intersections
   for (const vert of [true, false]) {
     if (vert ? !hasVRoad : !hasHRoad) continue;
     for (let off = -CHUNK / 2 + 1.6; off < CHUNK / 2; off += 4.2) {
-      const dxp = vert ? ox - 17 : ox + off;
+      const dxp = vert ? ox - 20 : ox + off;
       const dzp = vert ? oz + off : oz - 17;
-      if (roadAxisDist(vert ? dzp : dxp) < 8.4) continue;
+      // skip dashes near a crossing: on a vertical road that's a horizontal road (z), on a
+      // horizontal road that's a vertical road (x) — each axis has its own offset now
+      if ((vert ? roadAxisDist(dzp) : roadAxisDistX(dxp)) < 8.4) continue;
       const dash = box(vert ? 0.16 : 1.7, 0.02, vert ? 1.7 : 0.16, 0xd8b62a);
       dash.position.set(dxp, groundHeight(dxp, dzp) + 0.075, dzp);
       group.add(dash);
@@ -1404,7 +1411,7 @@ function buildChunk(cx, cz) {
   }
   // traffic pileups on roads
   if (hasVRoad && rng() < 0.3 && !(cx === 0 && cz === 0)) {
-    makePileup(rng, ox - 17, oz + (rng() - 0.5) * 16, 'z', group, colliders);
+    makePileup(rng, ox - 20, oz + (rng() - 0.5) * 16, 'z', group, colliders);
   }
   if (hasHRoad && rng() < 0.3 && !inTown(ox, oz - 17, 8)) {
     makePileup(rng, ox + (rng() - 0.5) * 16, oz - 17, 'x', group, colliders);
@@ -1562,6 +1569,29 @@ function rayAABB(ox, oy, oz, dx, dy, dz, c) {
     }
   }
   return tmin;
+}
+// ray vs a pitched roof's ACTUAL shingle surface (its two slope planes), not the crude
+// bounding box the collider carries. A round that clears the roofline passes over instead
+// of being swallowed by the box — that's what lets a crow perched on the ridge get shot.
+// Returns the nearest t where the ray crosses a shingle within the roof's footprint, else Infinity.
+function rayRoof(ox, oy, oz, dx, dy, dz, c) {
+  const rh = c.roof.rh, sh = c.roof.slopeHalf, k = rh / sh, ridgeTop = c.y0 + rh;
+  const alongX = c.roof.axis === 'x';          // ridge runs along x -> slopes fall off in z
+  let best = Infinity;
+  for (const s of [1, -1]) {                   // the two facing slopes
+    const along = alongX ? (oz - c.z) : (ox - c.x);       // offset from ridge, on the slope axis
+    const alongD = alongX ? dz : dx;
+    const den = dy + s * k * alongD;
+    if (Math.abs(den) < 1e-8) continue;
+    const t = (ridgeTop - oy - s * k * along) / den;
+    if (t <= 0 || t >= best) continue;
+    const hx = ox + dx * t, hz = oz + dz * t;
+    // within the ridge's length, and on this slope's side within one slope's run
+    if (alongX) { if (Math.abs(hx - c.x) > c.hw || (hz - c.z) * s < 0 || (hz - c.z) * s > sh + 1e-4) continue; }
+    else        { if (Math.abs(hz - c.z) > c.hd || (hx - c.x) * s < 0 || (hx - c.x) * s > sh + 1e-4) continue; }
+    best = t;
+  }
+  return best;
 }
 function raySphere(ox, oy, oz, dx, dy, dz, sx, sy, sz, r) {
   const lx = sx - ox, ly = sy - oy, lz = sz - oz;
@@ -1922,8 +1952,8 @@ function buildTown() {
   // sit on transparent void when seen from far away. Sunk slightly below the
   // streamed chunk terrain so the detailed ground draws over it with no z-fighting.
   townGroup.add(terrainPlane(208, 208, 52, 52, 47, 2, grassMat(0.5), -0.15));
-  townGroup.add(terrainPlane(12.8, 208, 3, 52, -17, 2, roadMat, -0.06)); // far copy of the x=-17 road
-  townGroup.add(terrainPlane(12.8, 208, 3, 52, 103, 2, roadMat, -0.06)); // far copy of the x=103 road
+  townGroup.add(terrainPlane(12.8, 208, 3, 52, -20, 2, roadMat, -0.06)); // far copy of the x=-20 road
+  townGroup.add(terrainPlane(12.8, 208, 3, 52, 100, 2, roadMat, -0.06)); // far copy of the x=100 road
   townGroup.add(terrainPlane(208, 12.8, 52, 3, 47, -17, roadMat, -0.06)); // far copy of the z=-17 road
   // main street shops: road z in [-20,-14], shops face it from both sides
   const northNames = ['DINER', 'BAKERY', 'BOOKS', 'TOOLS', 'PIZZA'];
@@ -1933,18 +1963,20 @@ function buildTown() {
     shopBuilding(12 + i * 13, -28.1, 9.5, 7, 3.4 + rng() * 0.8, 1, southNames[i], rng); // south side faces north (+z)
   }
   // town hall & courthouse face each other across the east end of main street,
-  // pulled west of the x=103 cross road so nothing overlaps it
-  grandBuilding(88, -2, 18, 12, 6.5, 0x8a7f6a, 'TOWN HALL', rng, -1);
-  grandBuilding(88, -34, 18, 12, 6, 0x9a9aa2, 'COURTHOUSE', rng, 1);
-  // the bank anchors the west end of the shop road, a third grander than town hall,
-  // set back to leave room for the fountain pavilion (and the boss arena between them)
-  grandBuilding(0, -46, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
+  // pulled west to sit clear of the x=100 cross road (which slid 3 west with its grid)
+  grandBuilding(85, -2, 18, 12, 6.5, 0x8a7f6a, 'TOWN HALL', rng, -1);
+  grandBuilding(85, -34, 18, 12, 6, 0x9a9aa2, 'COURTHOUSE', rng, 1);
+  // the bank anchors the west end of the shop road, a third grander than town hall.
+  // The western cross road was slid 3 west (off its left flank), so the bank sits on
+  // the lawn now, not the tarmac. Set well back to leave room for the fountain
+  // pavilion and the boss arena between them.
+  grandBuilding(0, -50.2, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
 
-  // fountain pavilion — pulled up to sit right at the main-street road (its paved
-  // apron kisses the tarmac) so the bank keeps a small grassy lawn out front instead
-  // of butting straight onto the street. The bank itself never moved back. The Two
-  // Horned One still wakes on the open lawn between the fountain and the bank steps.
-  const fz = -24;
+  // fountain pavilion — sat back into the lawn with the bank so its 4.8-radius paved
+  // apron just touches the main-street tarmac at its front edge (road south edge z=-23.4)
+  // rather than spilling onto the road. Open lawn runs from the apron back to the bank
+  // steps — the Two Horned One still wakes on it between the fountain and the bank.
+  const fz = -28.2;
   {
     const fy = groundHeight(0, fz);
     const pave = new THREE.Mesh(new THREE.CircleGeometry(4.8, 26), lotMat);
@@ -2000,7 +2032,7 @@ function buildTown() {
   // main-street pileups (all broken windows, some flipped)
   makePileup(rng, 30, -17, 'x', townGroup, townColliders);
   makePileup(rng, 62, -17, 'x', townGroup, townColliders);
-  makePileup(rng, -17, 26, 'z', townGroup, townColliders);
+  makePileup(rng, -20, 26, 'z', townGroup, townColliders);
   // parked cars near town buildings
   makeCar(rng, 84, -14, townGroup, townColliders, { broken: true, rotY: 0.3 });
   makeCar(rng, 20, -32.5, townGroup, townColliders, { broken: rng() < 0.5, rotY: Math.PI / 2 });
@@ -3725,7 +3757,10 @@ function fireWeapon() {
 
     let tWall = rayGround(_from.x, _from.y, _from.z, rdx, rdy, rdz, 80);
     for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
-      const t = rayAABB(_from.x, _from.y, _from.z, rdx, rdy, rdz, c);
+      // roofs stop a round on their real pitch, not the box that errs large, so a bird on the
+      // ridge (poking above the roofline) is hittable instead of the box eating the shot
+      const t = c.roof ? rayRoof(_from.x, _from.y, _from.z, rdx, rdy, rdz, c)
+                       : rayAABB(_from.x, _from.y, _from.z, rdx, rdy, rdz, c);
       if (t < tWall) tWall = t;
     }
     let best = null, bestT = Math.min(tWall, 80);
@@ -3748,15 +3783,12 @@ function fireWeapon() {
         }
       }
     }
-    // crows are fair game too — a clean hit lands like a headshot. Airborne birds get a
-    // more generous hitbox: wings-out flight silhouette is visually wider than the perched
-    // pose, so keeping the sphere perch-sized made a "clean" shot on a fleeing crow whiff
-    // more than it should — no bullet immunity just because it took off scared.
+    // crows are fair game too — a clean hit lands like a headshot. One shared hit-sphere
+    // (crowRayT) that the crosshair flare reads from as well, so a bird that's under the
+    // aim always gibs from first contact: no invincibility frames while perched, landed,
+    // mid-hop or taking off, and no "dropped feathers and flew off alive" whiffs.
     for (const cw of crows) {
-      const cs = cw.g.scale.x;
-      const airborne = cw.state === 'fly' || cw.state === 'leave' || cw.state === 'descend';
-      const cr = (airborne ? 0.75 : 0.45) * cs;
-      const ct = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw.g.position.x, cw.g.position.y + 0.38 * cs, cw.g.position.z, cr);
+      const ct = crowRayT(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw);
       if (ct < bestT) { bestT = ct; best = { crow: cw }; }
     }
     _to.set(_from.x + rdx * bestT, _from.y + rdy * bestT, _from.z + rdz * bestT);
@@ -4942,7 +4974,7 @@ function maybeSpawnBoss() {
 }
 function spawnBoss() {
   bossState.spawned = true;
-  const bx = 0, bz = -33.5;                   // the open ground between the fountain and the bank steps
+  const bx = 0, bz = -37.7;                   // the open ground between the fountain and the bank steps
   const blob = buildBlob({ color: BOSS_PURPLE, zombie: true, scale: 2.7 });
   for (const s of [-1, 1]) {                  // horns
     const horn = cyl(0.02, 0.15, 0.55, 0x2a1a3a, 6);
@@ -5065,7 +5097,7 @@ function fireBossWave(z, n) {
     for (let k = 0; k < count; k++) {
       // the only zombies allowed to walk out of a building: they pour from the bank doors.
       // half the wave are purple horned guards (his shield); the rest are plain green fodder
-      const [x, zz] = resolveCollision((Math.random() - 0.5) * 12, -36.6 + Math.random() * 1.8, 0.5);
+      const [x, zz] = resolveCollision((Math.random() - 0.5) * 12, -40.8 + Math.random() * 1.8, 0.5);
       const guard = k < Math.ceil(count / 2);
       spawnZombie(x, zz, 1 + game.time / 240, { purple: guard, horns: guard });
     }
@@ -5225,9 +5257,9 @@ function removeCrow(c) {
 // the three civic roosts: portico slab front edges (crows face out over the street)
 function townRoosts() {
   if (!townRoosts.list) townRoosts.list = [
-    { tag: 'bank',  x: 0,  y: groundHeight(0, -46) + 8.6 + 0.3, z: -35.9, hw: 9, face: 0 },
-    { tag: 'hall',  x: 88, y: groundHeight(88, -2) + 6.5 + 0.3, z: -10.1, hw: 7, face: Math.PI },
-    { tag: 'court', x: 88, y: groundHeight(88, -34) + 6 + 0.3,  z: -25.9, hw: 7, face: 0 },
+    { tag: 'bank',  x: 0,  y: groundHeight(0, -50.2) + 8.6 + 0.3, z: -40.1, hw: 9, face: 0 },
+    { tag: 'hall',  x: 85, y: groundHeight(85, -2) + 6.5 + 0.3, z: -10.1, hw: 7, face: Math.PI },
+    { tag: 'court', x: 85, y: groundHeight(85, -34) + 6 + 0.3,  z: -25.9, hw: 7, face: 0 },
   ];
   return townRoosts.list;
 }
@@ -5261,6 +5293,7 @@ function crowFliesIn(roost) {
   c.ang = Math.atan2(c.g.position.z - c.cz, c.g.position.x - c.cx);
   c.flyT = 2 + Math.random() * 4;
   c.lx = s.x; c.ly = s.y; c.lz = s.z;
+  if (Math.random() < 0.6) crowCaw(c.g.position.x, c.g.position.z, 'idle'); // announces itself inbound
   return c;
 }
 // drop 1-2 crows straight onto the ground beside a sleeping zombie to pick at it
@@ -5289,9 +5322,23 @@ function spawnPeckers() {
     }
   }
 }
-function crowCaw(x, z) {
-  play3d(x, z, () => tone(700 + Math.random() * 140, 0.1, 0.05, 'square', 430));
-  setTimeout(() => play3d(x, z, () => tone(640 + Math.random() * 90, 0.08, 0.04, 'square', 390)), 100);
+// crow voice, all in 3D: every caw is 1-3 short square rasps that pitch-fall like the
+// real bird, with pitch/length/syllable jitter so no two land the same. Kinds cue what
+// the bird is doing: 'idle' perch/peck chatter, 'alarm' the sharp fast flush cry,
+// 'land' a low double as it settles, 'die' one strangled squawk cut off at the top.
+function crowCaw(x, z, kind = 'idle') {
+  const K = {
+    idle:  { n: 1 + ((Math.random() * 3) | 0), f: 640, j: 170, len: 0.11, gap: 155, g: 0.05 },
+    alarm: { n: 2 + ((Math.random() * 2) | 0), f: 780, j: 170, len: 0.075, gap: 90, g: 0.06 },
+    land:  { n: 2, f: 540, j: 90, len: 0.13, gap: 175, g: 0.045 },
+    die:   { n: 1, f: 900, j: 140, len: 0.16, gap: 0, g: 0.07 },
+  }[kind] || { n: 2, f: 700, j: 140, len: 0.1, gap: 100, g: 0.05 };
+  const base = K.f + Math.random() * K.j;
+  for (let i = 0; i < K.n; i++) {
+    const fall = base * (1 - i * 0.07) + Math.random() * 40; // each rasp a shade lower
+    setTimeout(() => play3d(x, z, () => tone(fall, K.len * (1 - i * 0.1), K.g, 'square', fall * 0.55)),
+      i * (K.gap + Math.random() * 45));
+  }
 }
 function crowTakeoff(c) {
   if (c.state === 'fly' || c.state === 'leave') return;
@@ -5307,7 +5354,7 @@ function crowTakeoff(c) {
   c.ang = Math.atan2(p.z - c.cz, p.x - c.cx);
   c.flyT = 6 + Math.random() * 7;
   spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 4, 2, 0.45); // feather puff
-  if (Math.random() < 0.7) crowCaw(p.x, p.z);
+  crowCaw(p.x, p.z, 'alarm'); // the flush cry is the cue — every takeoff sounds off
 }
 // gunfire / impacts near perched or pecking crows flush them
 function scareCrows(x, z, r) {
@@ -5319,6 +5366,16 @@ function scareCrows(x, z, r) {
     if (dx * dx + dz * dz < r2) crowTakeoff(c);
   }
 }
+// shared crow hit-sphere: the bullet and the crosshair flare read from the exact same
+// volume, so if the X lights up on a bird the shot connects. Generous and consistent in
+// every state (perched, landed, mid-hop, taking off, in flight) — crows have no
+// invincibility frames and gib from first contact the instant they're under the aim.
+function crowRayT(ox, oy, oz, dx, dy, dz, cw) {
+  const cs = cw.g.scale.x;
+  const airborne = cw.state === 'fly' || cw.state === 'leave' || cw.state === 'descend';
+  const r = (airborne ? 0.85 : 0.7) * cs; // wings-out flight silhouette is a touch wider
+  return raySphere(ox, oy, oz, dx, dy, dz, cw.g.position.x, cw.g.position.y + 0.4 * cs, cw.g.position.z, r);
+}
 // a clean hit pops a crow like a headshot: burst, feathers, one tumbling scrap
 function killCrow(c, kx, kz, dmg) {
   const p = c.g.position;
@@ -5328,7 +5385,7 @@ function killCrow(c, kx, kz, dmg) {
   if (n > 0) spawnParticles(p.x, p.y + 0.35, p.z, bloodC, n, 3, 0.5);
   spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 6, 2.5, 0.6);
   spawnGib(p.x, p.y + 0.3, p.z, c.purple ? CROW_PURPLE_BLOOD : CROW_FEATHER, kx, kz);
-  play3d(p.x, p.z, () => tone(880, 0.09, 0.06, 'square', 260));
+  crowCaw(p.x, p.z, 'die'); // one strangled squawk, cut off at the top
   // shot crows shake loose a little reward that drops from where they were hit —
   // except the purple ones, which give up nothing and stay a mystery
   if (!c.purple) spawnPickup(Math.random() < 0.7 ? 'ammo' : 'medkit', p.x, p.z, p.y + 0.3);
@@ -5343,7 +5400,7 @@ function crowsLeave() {
     if (c.state !== 'fly') spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 3, 2, 0.4);
     c.state = 'leave';
     c.leaveDir = Math.atan2(p.x - 47, p.z - 2) + (Math.random() - 0.5) * 0.7; // scatter away from town
-    if (Math.random() < 0.5) crowCaw(p.x, p.z);
+    if (Math.random() < 0.5) crowCaw(p.x, p.z, 'alarm');
   }
 }
 function resetCrows() {
@@ -5420,6 +5477,7 @@ function updateCrows(dt) {
       crowWings(c, Math.sin(c.t * 10) * 0.7, c.fold);
       if (Math.hypot(dx, dz) < 0.35 && Math.abs(g.position.y - c.ly) < 0.14) {
         c.state = c.roost ? 'perch' : 'peck';
+        if (Math.random() < 0.5) crowCaw(c.lx, c.lz, 'land'); // low double as it settles
         c.hopT = 1 + Math.random() * 3; c.hopP = 1;
         g.rotation.set(0, c.roost && c.roost.face != null ? c.roost.face + (Math.random() - 0.5) * 0.5 : g.rotation.y, 0);
         g.position.set(c.lx, c.ly, c.lz);
@@ -5451,6 +5509,7 @@ function updateCrows(dt) {
         c.hopT -= dt;
         if (c.hopT <= 0) {
           c.hopT = 0.7 + Math.random() * 1.6;
+          if (Math.random() < 0.25) crowCaw(g.position.x, g.position.z, 'idle'); // a rasp between mouthfuls
           // hop around the body, staying within pecking reach
           const ang = Math.atan2(c.target.pos.x - g.position.x, c.target.pos.z - g.position.z) + (Math.random() - 0.5) * 2.4;
           const step = 0.4 + Math.random() * 0.7;
@@ -5472,7 +5531,11 @@ function updateCrows(dt) {
       } else {
         c.fold = Math.min(1, c.fold + dt * 2.5);
         crowWings(c, 0, c.fold);
-        if (Math.random() < dt * 0.12) c.flutterT = 0.4 + Math.random() * 0.4;
+        if (Math.random() < dt * 0.12) {
+          c.flutterT = 0.4 + Math.random() * 0.4;
+          // half the flutters come with chatter — the roost row talks over the block
+          if (Math.random() < 0.5) crowCaw(g.position.x, g.position.z, 'idle');
+        }
       }
       c.headBob += dt * (1.6 + Math.sin(c.flap) * 0.4);
       g.rotation.x = Math.max(0, Math.sin(c.headBob)) * 0.22; // peckish nods
@@ -5745,6 +5808,10 @@ function updateFx(dt) {
       const gy2 = z.blob.root.position.y;
       if (raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale) !== Infinity ||
           raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale) !== Infinity) { hot = true; break; }
+    }
+    // crows light the crosshair up like any other spawn — same sphere the bullet uses
+    if (!hot) for (const cw of crows) {
+      if (crowRayT(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, cw) !== Infinity) { hot = true; break; }
     }
   }
   hud.crosshair.classList.toggle('enemy', hot);
