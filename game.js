@@ -5590,7 +5590,14 @@ function showLobbies() {
       });
     }
   });
-  scan.on('error', () => { lobbyHintEl.textContent = 'Lobby service unreachable . . host one instead'; });
+  // Probing four fixed ids means every EMPTY slot answers 'peer-unavailable' — that is
+  // simply what an empty lobby list looks like, not a broker outage. Shouting about it
+  // was scaring people off a working list: the errors land after the rows do, so a real
+  // lobby could be sitting right there while the hint claimed the service was down.
+  scan.on('error', e => {
+    if (e.type === 'peer-unavailable') return;
+    if (!found) lobbyHintEl.textContent = 'Lobby service unreachable . . host one instead';
+  });
   setTimeout(() => { if (net.scan === scan && !found) lobbyHintEl.textContent = 'No open lobbies . . host one .ᐟ'; }, 3500);
 }
 function netScanStop() { if (net.scan) { try { net.scan.destroy(); } catch (e) {} net.scan = null; } }
