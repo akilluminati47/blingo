@@ -707,12 +707,21 @@ function previewTheme(id) {
 }
 
 // ---------- rumble ----------
+// The motors only answer to the pad: the moment a key or the mouse moves, input.device
+// flips to 'kbm' and rumble goes silent — touch the stick again and it comes straight back.
 let gpIndex = null;
+let rumbleEnd = 0, rumblePeak = 0;
 function rumble(ms, strong = 0.6, weak = 0.4) {
-  if (gpIndex === null) return;
+  if (gpIndex === null || input.device !== input.gamepadKind) return;
   const gp = navigator.getGamepads()[gpIndex];
   const act = gp && gp.vibrationActuator;
   if (!act) return;
+  // playEffect replaces whatever is running, so a punchier effect outranks a weaker one
+  // while it's still live — footstep ticks never stomp on a magnum going off.
+  const now = performance.now();
+  const peak = Math.max(strong, weak);
+  if (now < rumbleEnd && peak < rumblePeak) return;
+  rumbleEnd = now + ms; rumblePeak = peak;
   try {
     act.playEffect('dual-rumble', { duration: ms, strongMagnitude: clamp(strong, 0, 1), weakMagnitude: clamp(weak, 0, 1) }).catch(() => {});
   } catch (e) {}
@@ -738,8 +747,8 @@ const WEAPONS = {
   smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 2, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1, fRange: 9 },
   rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 5, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, skullcrack: true, fRange: 30 },
   shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 2, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true, fRange: 7 },
-  magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [90, 0.6, 0.5],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18 },
-  sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 22,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [180, 1, 0.8],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
+  magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [140, 1, 0.75],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18 },
+  sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 22,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [260, 1, 1],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
 };
 // inventory slot order: melee group first (fists then found melee by weight), then guns by tier
 const SLOT_ORDER = ['fists', 'pipe', 'bat', 'machete', 'katana', 'sledge', 'axe', 'pistol', 'smg', 'rifle', 'shotgun', 'magnum', 'sniper'];
@@ -4379,7 +4388,8 @@ function updatePlayer(dt) {
     const l = Math.hypot(vx, vz) || 1;
     player.slideDX = vx / l; player.slideDZ = vz / l;
     SFX.slide();
-    rumble(70, 0.3, 0.5);
+    // a sprint slide is a body hitting the deck, a walking slide is a scuff
+    rumble(sprinting ? 150 : 70, sprinting ? 0.85 : 0.3, sprinting ? 0.7 : 0.5);
   }
   input.slide = false;
 
@@ -4421,7 +4431,7 @@ function updatePlayer(dt) {
     player.grounded = false;
     player.squash = -0.25;
     SFX.jump();
-    rumble(40, 0.15, 0.3);
+    rumble(sprinting ? 70 : 40, sprinting ? 0.35 : 0.15, sprinting ? 0.5 : 0.3);
   }
   input.jump = false;
   if (player.grounded) {
@@ -4434,7 +4444,13 @@ function updatePlayer(dt) {
     player.vy -= 20 * dt;
     player.pos.y += player.vy * dt;
     if (player.vy <= 0 && player.pos.y <= groundY) {
-      if (player.vy < -4) { player.squash = 0.3; SFX.land(); rumble(60, 0.25, 0.4); }
+      if (player.vy < -4) {
+        player.squash = 0.3; SFX.land();
+        // scaled to how fast you came down: stepping off a kerb taps, a sprint-hop
+        // or a roof drop lands with the motors buried
+        const hit = clamp((-player.vy - 4) / 6, 0, 1);
+        rumble(70 + hit * 110, 0.3 + hit * 0.7, 0.4 + hit * 0.5);
+      }
       player.pos.y = groundY; player.vy = 0; player.grounded = true; player.hopT = 0;
     }
   }
@@ -4541,10 +4557,15 @@ function updatePlayer(dt) {
   // hide our own head only in first person so it doesn't block the view
   b.head.visible = player.fpvT < 0.55;
 
-  // footsteps on each half of the walk cycle
+  // footsteps on each half of the walk cycle — the pad ticks in time with the stride,
+  // so a sprint drums twice as fast and twice as hard as a walk
   if (moving && player.grounded) {
     const ph = Math.floor(player.walkPhase / Math.PI);
-    if (ph !== player.lastStepPh) { player.lastStepPh = ph; SFX.step(sprinting); }
+    if (ph !== player.lastStepPh) {
+      player.lastStepPh = ph;
+      SFX.step(sprinting);
+      rumble(sprinting ? 55 : 32, sprinting ? 0.34 : 0.1, sprinting ? 0.5 : 0.18);
+    }
   }
 
   const recentShot = game.time - player.lastShotT < 2.2 && !w.melee;
