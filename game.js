@@ -3220,7 +3220,14 @@ function startRun() {
 document.getElementById('playbtn').addEventListener('click', () => { netLeave(); startRun(); });
 document.getElementById('respawnbtn').addEventListener('click', () => { netLeave(); startRun(); });
 document.getElementById('mpbtn').addEventListener('click', () => { initAudio(); showLobbies(); });
-document.getElementById('hostbtn').addEventListener('click', () => hostLobby());
+document.getElementById('hostbtn').addEventListener('click', () => hostLobby(codeEl.value));
+document.getElementById('joincodebtn').addEventListener('click', () => joinLobby(codeEl.value));
+document.getElementById('lobbycode').addEventListener('input', () => updateCodeHint());
+// enter in the code box joins — hosting is the deliberate button press
+document.getElementById('lobbycode').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); joinLobby(codeEl.value); }
+  e.stopPropagation();   // typing must never leak into the game's key bindings
+});
 document.getElementById('lobbybackbtn').addEventListener('click', () => {
   netScanStop();
   document.getElementById('lobbyscreen').classList.add('hidden');
@@ -5555,14 +5562,34 @@ function updateFx(dt) {
 })();
 
 // ---------- multiplayer: PeerJS lobbies + host-authoritative co-op ----------
-// lobbies live at fixed ids (blingo-lobby-1..4) on the public PeerJS broker. The host
-// runs the world; joiners assume a cousin in it. Terrain is deterministic, so clients
-// generate their own map and only zombies, actors and events travel the wire.
-const NET_LOBBIES = 4, NET_SLOTS = 6;
-const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyNum: 0,
+// A lobby is just a code on the public PeerJS broker. The host runs the world; joiners
+// assume a cousin in it. Terrain is deterministic, so clients generate their own map and
+// only zombies, actors and events travel the wire.
+//
+// Your cousin's name is the code you get for free, which makes the six names the entire
+// public directory: leave the code alone and the browser can find you, type your own and
+// only people you hand it to can knock. (This replaced four fixed ids that everyone on
+// the internet shared — strangers collided in them and dead peers squatted them.)
+const NET_SLOTS = 6;
+const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
   ghosts: new Map(), actors: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '' };
 const lobbyHintEl = document.getElementById('lobbyhint');
 const lobbyListEl = document.getElementById('lobbylist');
+const codeEl = document.getElementById('lobbycode');
+const codeHintEl = document.getElementById('codehint');
+// broker ids must be predictable, so codes normalise hard: letters and digits only
+function normCode(s) { return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12); }
+function lobbyId(code) { return 'blingo-lobby-' + normCode(code); }
+const PUBLIC_CODES = COUSINS.map(c => normCode(c.name));
+function isPublicCode(code) { return PUBLIC_CODES.includes(normCode(code)); }
+function defaultCode() { return (COUSINS.find(c => c.id === selectedCousin) || COUSINS[0]).name; }
+// says out loud what the code they're typing will actually do
+function updateCodeHint() {
+  const c = normCode(codeEl.value);
+  codeHintEl.textContent = !c ? 'Give it a code . .'
+    : isPublicCode(c) ? `Public . . anyone scanning will find ${c.toUpperCase()}`
+    : `Private . . only players you hand ${c.toUpperCase()} to can join`;
+}
 function netAvailable() { return typeof Peer !== 'undefined'; }
 function netBroadcast(m) { for (const c of net.conns) { try { c.send(m); } catch (e) {} } }
 function cousinByConn(conn) { return companions.find(c => c.netConn === conn); }
@@ -5572,14 +5599,17 @@ function showLobbies() {
   document.getElementById('startscreen').classList.add('hidden');
   document.getElementById('lobbyscreen').classList.remove('hidden');
   lobbyListEl.innerHTML = '';
+  codeEl.value = defaultCode();   // your own name, ready to host as public
+  updateCodeHint();
   if (!netAvailable()) { lobbyHintEl.textContent = 'Multiplayer needs an internet connection . .'; return; }
   lobbyHintEl.textContent = 'Scanning for lobbies . .';
   netScanStop();
   const scan = net.scan = new Peer(undefined, { debug: 0 });
   let found = 0;
   scan.on('open', () => {
-    for (let n = 1; n <= NET_LOBBIES; n++) {
-      const conn = scan.connect('blingo-lobby-' + n, { reliable: true });
+    // the public directory is exactly the six cousin names
+    for (const code of PUBLIC_CODES) {
+      const conn = scan.connect(lobbyId(code), { reliable: true });
       conn.on('open', () => conn.send({ t: 'query' }));
       conn.on('data', m => {
         if (m.t !== 'info') return;
@@ -5604,15 +5634,16 @@ function netScanStop() { if (net.scan) { try { net.scan.destroy(); } catch (e) {
 // one row per live lobby: badge in the host's hero colour, slots taken, and the
 // cousin faces of everyone inside in the order they joined
 function renderLobbyRow(m) {
-  const old = lobbyListEl.querySelector(`[data-ln="${m.ln}"]`);
+  const code = normCode(m.code);
+  const old = lobbyListEl.querySelector(`[data-code="${code}"]`);
   if (old) old.remove();
   const host = m.players.find(p => p.n === 1);
   const hostData = COUSINS.find(c => c.id === (host && host.c)) || COUSINS[0];
   const row = document.createElement('div');
   row.className = 'lobbyrow';
-  row.dataset.ln = m.ln;
+  row.dataset.code = code;
   row.style.setProperty('--bc', '#' + hostData.color.toString(16).padStart(6, '0'));
-  row.innerHTML = `<span>LOBBY ${m.ln}</span><span class="slots">${m.players.length}/${NET_SLOTS}</span>`;
+  row.innerHTML = `<span>${code.toUpperCase()}</span><span class="slots">${m.players.length}/${NET_SLOTS}</span>`;
   for (const p of [...m.players].sort((a, b) => a.n - b.n)) {
     const cd = COUSINS.find(c => c.id === p.c);
     if (!cd) continue;
@@ -5621,27 +5652,30 @@ function renderLobbyRow(m) {
     img.title = 'Player ' + p.n;
     row.appendChild(img);
   }
-  row.addEventListener('click', () => joinLobby(m.ln));
+  row.addEventListener('click', () => joinLobby(code));
   lobbyListEl.appendChild(row);
 }
 
 // --- hosting ---
-function hostLobby(n = 1) {
+function hostLobby(rawCode) {
   if (!netAvailable()) { lobbyHintEl.textContent = 'Multiplayer needs an internet connection . .'; return; }
+  const code = normCode(rawCode);
+  if (!code) { lobbyHintEl.textContent = 'Give the lobby a code first . .'; return; }
   netScanStop();
   lobbyHintEl.textContent = 'Opening a lobby . .';
-  const peer = new Peer('blingo-lobby-' + n, { debug: 0 });
+  const peer = new Peer(lobbyId(code), { debug: 0 });
   peer.on('open', () => {
-    net.peer = peer; net.role = 'host'; net.playerNum = 1; net.lobbyNum = n; net.leaving = false;
+    net.peer = peer; net.role = 'host'; net.playerNum = 1; net.lobbyCode = code; net.leaving = false;
     peer.on('connection', conn => wireHostConn(conn));
     startRun();
-    toast(`HOSTING LOBBY ${n} .ᐟ YOU ARE PLAYER 1`, true);
+    toast(`HOSTING ${code.toUpperCase()} .ᐟ ${isPublicCode(code) ? 'PUBLIC' : 'PRIVATE'} .ᐟ YOU ARE PLAYER 1`, true);
   });
   peer.on('error', e => {
     if (e.type === 'unavailable-id') {
       try { peer.destroy(); } catch (er) {}
-      if (n < NET_LOBBIES) hostLobby(n + 1);
-      else lobbyHintEl.textContent = 'All lobbies are taken . .';
+      // the code IS the lobby's name now, so no silent hop to some other slot — say it's
+      // taken and let them choose, or they'd never know where they actually landed
+      lobbyHintEl.textContent = `${code.toUpperCase()} is already hosting . . pick another code`;
     } else if (!net.role) lobbyHintEl.textContent = 'Lobby service unreachable . .';
   });
 }
@@ -5653,7 +5687,7 @@ function lobbyPlayers() {
 function wireHostConn(conn) {
   conn.on('data', m => {
     if (m.t === 'query') {
-      try { conn.send({ t: 'info', ln: net.lobbyNum, players: lobbyPlayers() }); } catch (e) {}
+      try { conn.send({ t: 'info', code: net.lobbyCode, players: lobbyPlayers() }); } catch (e) {}
       setTimeout(() => { try { conn.close(); } catch (e) {} }, 600);
     } else if (m.t === 'hi') {
       if (lobbyPlayers().length >= NET_SLOTS || game.state === 'menu') { try { conn.send({ t: 'full' }); } catch (e) {} return; }
@@ -5741,27 +5775,32 @@ function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
 }
 
 // --- joining ---
-function joinLobby(n) {
-  lobbyHintEl.textContent = `Joining Lobby ${n} . .`;
+function joinLobby(rawCode) {
+  const code = normCode(rawCode);
+  if (!code) { lobbyHintEl.textContent = 'Type a code to join . .'; return; }
+  lobbyHintEl.textContent = `Joining ${code.toUpperCase()} . .`;
   netScanStop();
   const peer = new Peer(undefined, { debug: 0 });
   peer.on('open', () => {
-    const conn = peer.connect('blingo-lobby-' + n, { reliable: true });
+    const conn = peer.connect(lobbyId(code), { reliable: true });
     conn.on('open', () => conn.send({ t: 'hi', cousin: selectedCousin }));
-    conn.on('data', m => netClientData(m, conn, peer, n));
+    conn.on('data', m => netClientData(m, conn, peer, code));
     conn.on('close', () => { if (net.role === 'client' && !net.leaving) showHostClosed(); });
     conn.on('error', () => { if (net.role === 'client' && !net.leaving) showHostClosed(); });
   });
   peer.on('error', e => {
-    if (net.role !== 'client') lobbyHintEl.textContent = 'Could not reach that lobby . .';
-    else if (!net.leaving) showHostClosed();
+    if (net.role === 'client') { if (!net.leaving) showHostClosed(); return; }
+    // a typo'd code is the common case here, so name it rather than blaming the service
+    lobbyHintEl.textContent = e.type === 'peer-unavailable'
+      ? `Nobody is hosting ${code.toUpperCase()} . .`
+      : 'Could not reach that lobby . .';
   });
 }
-function netClientData(m, conn, peer, n) {
+function netClientData(m, conn, peer, code) {
   if (m.t === 'full') { lobbyHintEl.textContent = 'That lobby is full . .'; try { peer.destroy(); } catch (e) {} return; }
   if (m.t === 'welcome') {
     net.peer = peer; net.role = 'client'; net.conns = [conn];
-    net.playerNum = m.n; net.lobbyNum = n; net.leaving = false;
+    net.playerNum = m.n; net.lobbyCode = code; net.leaving = false;
     applyCousin(m.cousin);
     startRun();
     // this world belongs to the host: no local squad, no local spawner
@@ -5776,7 +5815,7 @@ function netClientData(m, conn, peer, n) {
     game.weather = m.w; game.phase = m.ph; applyEnvironment();
     game.time = m.tm; game.kills = m.k; hud.kills.textContent = m.k;
     player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
-    toast(`JOINED LOBBY ${n} .ᐟ YOU ARE PLAYER ${m.n}`, true);
+    toast(`JOINED ${code.toUpperCase()} .ᐟ YOU ARE PLAYER ${m.n}`, true);
   } else if (m.t === 's') {
     netApplySnapshot(m);
   } else if (m.t === 'hurt') {
@@ -5994,7 +6033,7 @@ function netLeave() {
   net.leaving = true;
   netScanStop();
   if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
-  net.peer = null; net.role = null; net.conns = []; net.playerNum = 0; net.lobbyNum = 0;
+  net.peer = null; net.role = null; net.conns = []; net.playerNum = 0; net.lobbyCode = '';
   net.sentDead = false; net.barSig = '';
   for (const [nid] of [...net.ghosts]) netRemoveGhost(nid);
   for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
