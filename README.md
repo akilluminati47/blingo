@@ -17,7 +17,7 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - https://blingo.pages.dev
 - Public or Private (code-based) Multiplayer in browser
   
-## Controls
+## Controls (PC / Xbox* / Touch) 
 
 - Move: WASD / left stick / left-side touch joystick
 - Aim: mouse / right stick / right-side touch drag
@@ -27,3 +27,6 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - Jump: Space / A / on-screen button
 - Sprint: Shift / L3 / on-screen button
 - Pause: Esc or P / Start / on-screen pause button
+- View: V / Select / on-screen button
+
+  *Xbox controller example for gamepads, Playstation & Nintendo supported
