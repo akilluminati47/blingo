@@ -2760,7 +2760,7 @@ const player = {
   weapon: WEAPONS.fists,
   clip: Infinity,
   reloading: 0, shootCd: 0, lastShotT: -9, lastHurtT: -9,
-  walkPhase: 0, squash: 0, dead: false, idlePhase: 0,
+  walkPhase: 0, squash: 0, dead: false, idlePhase: 0, bobT: 0,
   stumbleT: 0, stumbleX: 0, stumbleZ: 0, meleeArm: 0,
   // fists combo: comboN is the swing's place in the current chain (0 = opener). It rolls
   // 6,7,6,7 while the chain holds and resets to a 6 opener once COMBO_WINDOW lapses.
@@ -4673,6 +4673,9 @@ function updatePlayer(dt) {
   const stumbling = player.stumbleT > 0;
   player.walkPhase += dt * (moving ? (sprinting ? 13 : 9) : 2);
   player.idlePhase += dt;
+  // how hard the first-person head bob is running (updateCamera rides this). Eased so it
+  // never snaps on mid-stride, and dead in the air — a jump should read as a jump.
+  player.bobT = lerp(player.bobT, moving && player.grounded ? (sprinting ? 1 : 0.68) : 0, 1 - Math.exp(-7 * dt));
   const b = playerBlob;
   b.root.position.copy(player.pos);
   updateFlash(b, dt);
@@ -5260,6 +5263,16 @@ function updateSpawner(dt) {
 const bossState = { boss: null, beam: null, spawned: false, defeated: false, spawned2: false, defeated2: false };
 const bossBarEl = document.getElementById('bossbar');
 const bossHpEl = document.getElementById('bosshp');
+const bossLabelEl = document.getElementById('bosslabel');
+// The Crimson One is always a clear step up from the Two Horned One — taken off his number
+// rather than parked beside it, so tuning one can never quietly leave the second boss the
+// softer of the two. Each cleared block then wakes tougher versions of both.
+const BOSS_HP = 650, BOSS2_HP = Math.round(BOSS_HP * 1.25);
+// each boss flies his own colours: the purple bar belongs to the Two Horned One alone
+function dressBossBar(isBoss2) {
+  bossLabelEl.textContent = isBoss2 ? 'The Crimson One' : 'The Two Horned One';
+  bossBarEl.classList.toggle('crimson', !!isBoss2);
+}
 // unlocked once every cousin has been recruited
 function maybeSpawnBoss() {
   if (bossState.spawned || bossState.defeated || game.state !== 'playing') return;
@@ -5277,7 +5290,7 @@ function spawnBoss() {
   }
   blob.root.position.set(bx, groundHeight(bx, bz), bz);
   scene.add(blob.root);
-  const hp = Math.round(650 * (1 + 0.4 * game.cycle)); // each cleared block wakes a tougher one
+  const hp = Math.round(BOSS_HP * (1 + 0.4 * game.cycle)); // each cleared block wakes a tougher one
   const z = {
     blob, pos: new THREE.Vector3(bx, 0, bz), hp, maxHp: hp, speed: 1.15, yaw: 0, state: 'dormant',
     attackT: 0, deadT: 0, walkPhase: 0, groanT: 2, scale: 2.7,
@@ -5312,7 +5325,7 @@ function spawnBoss2() {
   }
   blob.root.position.set(bx, groundHeight(bx, bz), bz);
   scene.add(blob.root);
-  const hp = Math.round(750 * (1 + 0.4 * game.cycle));
+  const hp = Math.round(BOSS2_HP * (1 + 0.4 * game.cycle));
   const z = {
     blob, pos: new THREE.Vector3(bx, 0, bz), hp, maxHp: hp, speed: 1.15, yaw: -Math.PI / 2, state: 'dormant',
     attackT: 0, deadT: 0, walkPhase: 0, groanT: 2, scale: 2.7,
@@ -5336,6 +5349,7 @@ function spawnBoss2() {
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;
   z.state = 'chase';
+  dressBossBar(z.isBoss2);
   bossBarEl.classList.add('show');
   toast(z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS!', true);
   shakeAmp = Math.max(shakeAmp, 0.4);
@@ -5481,6 +5495,8 @@ function updateBossFx() {
 const crows = [];
 const CROW_FEATHER = 0x1b1b20;
 const CROW_PURPLE_BLOOD = 0x9a2be0;
+const CROW_GREY = 0x44444d;  // beak + legs: dark grey, a shade up from the feathers so they read
+const CROW_GAP = 0.55;       // closest two crows ever stand: a row, never one inside another
 let crowSpawnT = 2;
 let crowsGone = false; // boss defeated: the flock departs, none return this run
 let crowTargets = { bank: 4, hall: 2, court: 1 };
@@ -5494,15 +5510,36 @@ function buildCrow(x, y, z, roost) {
   const breast = ball(0.13, 0x2b2b33); breast.scale.set(0.13, 0.11, 0.1);
   breast.position.set(0, 0.3, 0.22); g.add(breast);
   const head = ball(0.16, blk); head.position.set(0, 0.52, 0.28); g.add(head);
-  const beak = cyl(0.01, 0.06, 0.22, 0xe0a02a, 5);
+  const beak = cyl(0.01, 0.06, 0.22, CROW_GREY, 5);
   beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.5, 0.48); g.add(beak);
   const tail = box(0.18, 0.04, 0.34, blk); tail.position.set(0, 0.32, -0.42); g.add(tail);
-  // two-segment wings: shoulder panel + tip panel with splayed primary feathers,
-  // so they can fold back along the flanks at rest instead of sticking out flat
+  // skinny legs filling the gap the floating body leaves: a shaft down to a foot of three
+  // toes fanned forward and one hind toe back — along the bird, not across it. The whole
+  // leg swings back under the tail once the wings open (see crowPose).
+  const mkLeg = sgn => {
+    const leg = new THREE.Group(); leg.position.set(0.075 * sgn, 0.15, 0.02);
+    const shin = cyl(0.012, 0.015, 0.15, CROW_GREY, 4); shin.position.y = -0.075; leg.add(shin);
+    const foot = new THREE.Group(); foot.position.y = -0.15; leg.add(foot);
+    for (const t of [-0.36, 0, 0.36]) {          // three toes fanned forward
+      const toe = box(0.018, 0.014, 0.11, CROW_GREY);
+      toe.position.set(Math.sin(t) * 0.055, 0, 0.05);
+      toe.rotation.y = t;
+      foot.add(toe);
+    }
+    const hind = box(0.018, 0.014, 0.07, CROW_GREY); // and the one that grips backwards
+    hind.position.set(0, 0, -0.035); foot.add(hind);
+    g.add(leg);
+    return leg;
+  };
+  const legL = mkLeg(1), legR = mkLeg(-1);
+  // two-segment wings: a shoulder pivot that sweeps them back along the body, a roll group
+  // inside it that turns the whole plane up onto its edge the way a real wing rotates as it
+  // shuts, then shoulder panel + tip panel with splayed primary feathers
   const mkWing = sgn => {
     const piv = new THREE.Group(); piv.position.set(0.1 * sgn, 0.4, 0.02);
+    const roll = new THREE.Group(); piv.add(roll);
     const inner = box(0.3, 0.045, 0.36, blk); inner.position.x = 0.15 * sgn;
-    piv.add(inner);
+    roll.add(inner);
     const tip = new THREE.Group(); tip.position.set(0.3 * sgn, 0, 0);
     const outer = box(0.28, 0.035, 0.3, blk); outer.position.set(0.13 * sgn, 0, -0.02);
     tip.add(outer);
@@ -5511,8 +5548,8 @@ function buildCrow(x, y, z, roost) {
       fe.position.set((0.06 + f * 0.075) * sgn, 0, -0.2 + f * 0.025);
       tip.add(fe);
     }
-    piv.add(tip); g.add(piv);
-    return { piv, tip };
+    roll.add(tip); g.add(piv);
+    return { piv, roll, tip };
   };
   const wl = mkWing(1), wr = mkWing(-1);
   const wingL = wl.piv, wingR = wr.piv;
@@ -5525,7 +5562,8 @@ function buildCrow(x, y, z, roost) {
   g.position.set(x, y, z);
   g.rotation.y = Math.random() * TAU;
   scene.add(g);
-  const c = { g, wingL, wingR, tipL: wl.tip, tipR: wr.tip, breast, beak, purple,
+  const c = { g, wingL, wingR, rollL: wl.roll, rollR: wr.roll, tipL: wl.tip, tipR: wr.tip,
+    legL, legR, breast, beak, purple,
     fold: 1, redBeak: false, dropsBlood: false, roost: roost || null, target: null,
     state: 'perch', t: Math.random() * 5, headBob: Math.random() * TAU, flap: Math.random() * TAU,
     hopT: 0.6 + Math.random() * 2, hopFrom: null, hopTo: null, hopP: 1, flutterT: 0,
@@ -5534,14 +5572,54 @@ function buildCrow(x, y, z, roost) {
   crows.push(c);
   return c;
 }
-// one call poses both wings: `a` is the flap beat, `fold` 0..1 tucks them back
-// along the flanks (tips swept over the tail) and puffs the breast out at rest
-function crowWings(c, a, fold) {
-  c.wingL.rotation.z = a - fold * 0.3; c.wingR.rotation.z = -a + fold * 0.3;
-  c.tipL.rotation.z = a * 0.55 + fold * 0.25; c.tipR.rotation.z = -a * 0.55 - fold * 0.25;
-  c.tipL.rotation.y = fold * 1.05; c.tipR.rotation.y = -fold * 1.05;
+// one call poses the whole bird. `a` is the flap beat; `fold` 0..1 shuts it up for standing.
+// Closing runs in two turns, which is what makes it read as a wing rather than a hinge: the
+// plane first rolls up onto its edge (rollL/rollR, applied inside the shoulder), then the
+// shoulder sweeps that edge back along the flank, so a standing crow wears its wings flat
+// against its sides with the tips over the tail, instead of holding them out like a shelf.
+// Legs swing back under the tail as it opens up, and the breast puffs out at rest.
+function crowPose(c, a, fold) {
+  c.rollL.rotation.x = fold * 1.45; c.rollR.rotation.x = -fold * 1.45;
+  c.wingL.rotation.set(0, fold * 1.5, a - fold * 0.12);
+  c.wingR.rotation.set(0, -fold * 1.5, -a + fold * 0.12);
+  c.tipL.rotation.z = a * 0.55; c.tipR.rotation.z = -a * 0.55;
+  c.tipL.rotation.y = fold * 0.45; c.tipR.rotation.y = -fold * 0.45;
+  c.legL.rotation.x = (1 - fold) * 1.2; c.legR.rotation.x = (1 - fold) * 1.2;
   const puff = 1 + fold * 0.45 + Math.sin(c.t * 2.2) * fold * 0.06; // slow breathing at rest
   c.breast.scale.set(0.13 * puff, 0.11 * puff, 0.1 * (0.7 + fold * 0.55));
+}
+// where a crow is standing, or the spot it has already committed to. A bird gliding down
+// owns its slot before it gets there, so two can't pick the same gap in the same breath.
+function crowClaim(c) {
+  if (c.state === 'descend') return { x: c.lx, y: c.ly, z: c.lz };
+  if (c.hopP < 1 && c.hopTo) return { x: c.hopTo.x, y: c.hopTo.y != null ? c.hopTo.y : c.ly, z: c.hopTo.z };
+  return { x: c.g.position.x, y: c.ly, z: c.g.position.z };
+}
+function crowNearestD(x, y, z, ignore) {
+  let best = Infinity;
+  for (const o of crows) {
+    if (o === ignore || o.state === 'fly' || o.state === 'leave') continue;
+    const q = crowClaim(o);
+    if (Math.abs(q.y - y) > 0.6) continue;   // different roof entirely — no argument
+    best = Math.min(best, Math.hypot(q.x - x, q.z - z));
+  }
+  return best;
+}
+// roll for a spot nobody else has. `orBest` takes the roomiest roll when they're all
+// crowded — a bird already committed to landing has to go somewhere; one merely thinking
+// about a sidestep gets null instead and just stays where it is. `from` is a hop's take-off
+// point: the midpoint gets checked too, so it can't hop clean through the neighbour it's
+// trying to get around to reach open rail on the far side.
+function crowSpot(gen, ignore, orBest, from) {
+  let best = null, bestD = -1;
+  for (let i = 0; i < 10; i++) {
+    const s = gen();
+    let d = crowNearestD(s.x, s.y, s.z, ignore);
+    if (from) d = Math.min(d, crowNearestD((from.x + s.x) / 2, s.y, (from.z + s.z) / 2, ignore));
+    if (d >= CROW_GAP) return s;
+    if (d > bestD) { bestD = d; best = s; }
+  }
+  return orBest ? best : null;
 }
 function removeCrow(c) {
   const i = crows.indexOf(c);
@@ -5578,7 +5656,7 @@ function pickHouseRoost() {
 }
 // spawn already airborne, circle the roost briefly, then glide down onto it
 function crowFliesIn(roost) {
-  const s = roostSlot(roost);
+  const s = crowSpot(() => roostSlot(roost), null, true);
   const ang = Math.random() * TAU;
   const c = buildCrow(s.x + Math.sin(ang) * 30, s.y + 9 + Math.random() * 8, s.z + Math.cos(ang) * 30, roost);
   c.state = 'fly';
@@ -5606,8 +5684,13 @@ function spawnPeckers() {
   const zz = cands[(Math.random() * cands.length) | 0];
   const n = 1 + (Math.random() < 0.45 ? 1 : 0);
   for (let i = 0; i < n; i++) {
-    const ang = Math.random() * TAU, d = 0.8 + Math.random() * 0.9;
-    const x = zz.pos.x + Math.sin(ang) * d, z2 = zz.pos.z + Math.cos(ang) * d;
+    // the pair drop either side of the meal, never both onto the same patch of it
+    const s = crowSpot(() => {
+      const ang = Math.random() * TAU, d = 0.8 + Math.random() * 0.9;
+      const x = zz.pos.x + Math.sin(ang) * d, z = zz.pos.z + Math.cos(ang) * d;
+      return { x, y: groundHeight(x, z), z };
+    }, null, true);
+    const x = s.x, z2 = s.z;
     const c = buildCrow(x, groundHeight(x, z2), z2, null);
     c.state = 'peck'; c.target = zz; c.ly = c.g.position.y;
     c.g.rotation.y = Math.atan2(zz.pos.x - x, zz.pos.z - z2); // face the meal
@@ -5747,15 +5830,19 @@ function updateCrows(dt) {
       if (Math.hypot(vx, vz) > 1e-3) g.rotation.y = Math.atan2(vx, vz);
       g.rotation.z = clamp(-c.angSpd * 0.5, -0.5, 0.5); g.rotation.x = -0.12; // bank into the turn
       c.fold = Math.max(0, c.fold - dt * 4);
-      crowWings(c, Math.sin(c.t * 16) * 0.9, c.fold);
+      crowPose(c, Math.sin(c.t * 16) * 0.9, c.fold);
       if (c.flyT <= 0) {
         if (c.roost) {
-          const s = roostSlot(c.roost);
+          // claim a gap on the rail nobody's already standing in or gliding down to
+          const s = crowSpot(() => roostSlot(c.roost), c, true);
           c.lx = s.x; c.ly = s.y; c.lz = s.z; c.state = 'descend';
         } else if (c.target && c.target.state === 'sleep' && zombies.includes(c.target)) {
-          const ang = Math.random() * TAU, d = 0.8 + Math.random() * 0.9;
-          c.lx = c.target.pos.x + Math.sin(ang) * d; c.lz = c.target.pos.z + Math.cos(ang) * d;
-          c.ly = groundHeight(c.lx, c.lz); c.state = 'descend';
+          const s = crowSpot(() => {
+            const ang = Math.random() * TAU, d = 0.8 + Math.random() * 0.9;
+            const x = c.target.pos.x + Math.sin(ang) * d, z = c.target.pos.z + Math.cos(ang) * d;
+            return { x, y: groundHeight(x, z), z };
+          }, c, true);
+          c.lx = s.x; c.ly = s.y; c.lz = s.z; c.state = 'descend';
         } else {
           // nowhere to go back to — drift off the block
           c.state = 'leave';
@@ -5770,7 +5857,7 @@ function updateCrows(dt) {
       if (Math.hypot(dx, dz) > 1e-3) g.rotation.y = Math.atan2(dx, dz);
       g.rotation.z = lerp(g.rotation.z, 0, k); g.rotation.x = lerp(g.rotation.x, 0.2, k); // flare
       c.fold = Math.max(0, c.fold - dt * 4);
-      crowWings(c, Math.sin(c.t * 10) * 0.7, c.fold);
+      crowPose(c, Math.sin(c.t * 10) * 0.7, c.fold);
       if (Math.hypot(dx, dz) < 0.35 && Math.abs(g.position.y - c.ly) < 0.14) {
         c.state = c.roost ? 'perch' : 'peck';
         if (Math.random() < 0.5) crowCaw(c.lx, c.lz, 'land'); // low double as it settles
@@ -5784,13 +5871,13 @@ function updateCrows(dt) {
       g.position.y += 5.5 * dt;
       g.rotation.y = c.leaveDir; g.rotation.x = -0.25; g.rotation.z = 0;
       c.fold = Math.max(0, c.fold - dt * 4);
-      crowWings(c, Math.sin(c.t * 15) * 0.9, c.fold);
+      crowPose(c, Math.sin(c.t * 15) * 0.9, c.fold);
       if (Math.hypot(g.position.x - player.pos.x, g.position.z - player.pos.z) > 150) removeCrow(c);
     } else if (c.state === 'peck') {
       // meal stood up / got dragged into the fight / despawned → flush
       if (!c.target || c.target.state !== 'sleep' || !zombies.includes(c.target)) { crowTakeoff(c); continue; }
       c.fold = Math.min(1, c.fold + dt * 2.5);
-      crowWings(c, 0, c.fold);
+      crowPose(c, 0, c.fold);
       if (c.hopP < 1) {
         c.hopP = Math.min(1, c.hopP + dt * 3);
         g.position.x = lerp(c.hopFrom.x, c.hopTo.x, c.hopP);
@@ -5806,27 +5893,33 @@ function updateCrows(dt) {
         if (c.hopT <= 0) {
           c.hopT = 0.7 + Math.random() * 1.6;
           if (Math.random() < 0.25) crowCaw(g.position.x, g.position.z, 'idle'); // a rasp between mouthfuls
-          // hop around the body, staying within pecking reach
-          const ang = Math.atan2(c.target.pos.x - g.position.x, c.target.pos.z - g.position.z) + (Math.random() - 0.5) * 2.4;
-          const step = 0.4 + Math.random() * 0.7;
-          let nx = g.position.x + Math.sin(ang) * step, nz = g.position.z + Math.cos(ang) * step;
-          if (Math.hypot(nx - c.target.pos.x, nz - c.target.pos.z) > 2) {
-            nx = c.target.pos.x + (nx - c.target.pos.x) * 0.5;
-            nz = c.target.pos.z + (nz - c.target.pos.z) * 0.5;
+          // hop around the body, staying within pecking reach — and never onto the bird
+          // already eating there. Boxed in on every roll, it just keeps its mouthful.
+          const s = crowSpot(() => {
+            const ang = Math.atan2(c.target.pos.x - g.position.x, c.target.pos.z - g.position.z) + (Math.random() - 0.5) * 2.4;
+            const step = 0.4 + Math.random() * 0.7;
+            let nx = g.position.x + Math.sin(ang) * step, nz = g.position.z + Math.cos(ang) * step;
+            if (Math.hypot(nx - c.target.pos.x, nz - c.target.pos.z) > 2) {
+              nx = c.target.pos.x + (nx - c.target.pos.x) * 0.5;
+              nz = c.target.pos.z + (nz - c.target.pos.z) * 0.5;
+            }
+            return { x: nx, y: groundHeight(nx, nz), z: nz };
+          }, c, false, g.position);
+          if (s) {
+            c.hopFrom = { x: g.position.x, y: c.ly, z: g.position.z };
+            c.hopTo = { x: s.x, y: s.y, z: s.z };
+            c.hopP = 0; c.ly = c.hopTo.y;
           }
-          c.hopFrom = { x: g.position.x, y: c.ly, z: g.position.z };
-          c.hopTo = { x: nx, y: groundHeight(nx, nz), z: nz };
-          c.hopP = 0; c.ly = c.hopTo.y;
         }
       }
     } else { // perch: folded wings, idle nods, edge shuffles, the odd wing flutter
       if (c.flutterT > 0) {
         c.flutterT -= dt;
         c.fold = Math.max(0.2, c.fold - dt * 5); // wings half-unfurl for the flutter
-        crowWings(c, Math.sin(c.t * 18) * 0.7, c.fold);
+        crowPose(c, Math.sin(c.t * 18) * 0.7, c.fold);
       } else {
         c.fold = Math.min(1, c.fold + dt * 2.5);
-        crowWings(c, 0, c.fold);
+        crowPose(c, 0, c.fold);
         if (Math.random() < dt * 0.12) {
           c.flutterT = 0.4 + Math.random() * 0.4;
           // half the flutters come with chatter — the roost row talks over the block
@@ -5846,12 +5939,18 @@ function updateCrows(dt) {
         if (c.hopT <= 0) {
           c.hopT = 2.5 + Math.random() * 5;
           if (c.roost && Math.random() < 0.7) {
-            // sidestep along the edge/ridge, staying on it
-            const nx = clamp(g.position.x + (Math.random() - 0.5) * 1.6, c.roost.x - c.roost.hw, c.roost.x + c.roost.hw);
-            c.hopFrom = { x: g.position.x, z: g.position.z };
-            c.hopTo = { x: nx, z: c.roost.z != null && c.roost.tag !== 'house' ? c.roost.z : g.position.z };
-            c.hopP = 0;
-            if (c.roost.face == null) g.rotation.y = Math.atan2(nx - g.position.x, 0) + (Math.random() - 0.5) * 0.8;
+            // sidestep along the edge/ridge, staying on it — and never into the neighbour.
+            // A bird hemmed in on both sides holds its place instead of shoving through.
+            const s = crowSpot(() => {
+              const nx = clamp(g.position.x + (Math.random() - 0.5) * 1.6, c.roost.x - c.roost.hw, c.roost.x + c.roost.hw);
+              return { x: nx, y: c.ly, z: c.roost.z != null && c.roost.tag !== 'house' ? c.roost.z : g.position.z };
+            }, c, false, g.position);
+            if (s) {
+              c.hopFrom = { x: g.position.x, z: g.position.z };
+              c.hopTo = { x: s.x, z: s.z };
+              c.hopP = 0;
+              if (c.roost.face == null) g.rotation.y = Math.atan2(s.x - g.position.x, 0) + (Math.random() - 0.5) * 0.8;
+            }
           }
         }
       }
@@ -5949,10 +6048,17 @@ function updateCamera(dt) {
   const tpY = pivotY - Math.sin(cp) * tpDist;
   const tpZ = pivotZ + Math.cos(cy) * Math.cos(cp) * tpDist;
   // ---- first-person eye + forward look ----
+  // the slightest head bob: a dip on each footfall (walkPhase turns over twice a stride) and
+  // a slow sway across the whole stride. Kept under a centimetre and a half — enough that
+  // walking has a pulse, not so much that the sights swim. Third person never gets it: that
+  // rig is already alive out there, and doubling it up would just read as a wobbly camera.
+  const bob = player.bobT;
+  const bobY = Math.sin(player.walkPhase * 2) * 0.014 * bob;
+  const bobX = Math.sin(player.walkPhase) * 0.011 * bob;
   const fwdX = -Math.sin(cy) * Math.cos(cp), fwdY = Math.sin(cp), fwdZ = -Math.cos(cy) * Math.cos(cp);
-  const eyeX = player.pos.x + fwdX * 0.16;
-  const eyeY = player.pos.y + 1.52 + fwdY * 0.16;
-  const eyeZ = player.pos.z + fwdZ * 0.16;
+  const eyeX = player.pos.x + fwdX * 0.16 + rightX * bobX;
+  const eyeY = player.pos.y + 1.52 + fwdY * 0.16 + bobY;
+  const eyeZ = player.pos.z + fwdZ * 0.16 + rightZ * bobX;
   // ---- blend the two rigs by the view toggle ----
   const tX = lerp(tpX, eyeX, fpv), tY = lerp(tpY, eyeY, fpv), tZ = lerp(tpZ, eyeZ, fpv);
   const k = 1 - Math.exp(-14 * dt);
@@ -6361,7 +6467,8 @@ function netHostTick(dt) {
   }
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb,
-    bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1 });
+    bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
+    b2: !!(boss && boss.isBoss2) }); // which one is up: clients dress the bar in his colours
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
   const R = v => Math.round(v * 20) / 20;
@@ -6457,7 +6564,7 @@ function netApplySnapshot(m) {
   if (m.ck != null && Math.abs(m.ck - (game.clock ?? 0)) > 0.15) game.clock = m.ck;
   if (m.w && m.w !== wx.to) { wx.from = game.weather; wx.to = m.w; wx.u = 0; }
   bossBarEl.classList.toggle('show', m.bb >= 0);
-  if (m.bb >= 0) bossHpEl.style.width = m.bb * 100 + '%';
+  if (m.bb >= 0) { dressBossBar(m.b2); bossHpEl.style.width = m.bb * 100 + '%'; }
   const seenA = new Set();
   for (const a of m.ac) {
     if (a.p === net.playerNum) continue;          // that's me
