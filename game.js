@@ -1764,6 +1764,7 @@ function buildChurchyard(rng) {
   }
   const spire = cyl(0.02, 1.85, 2.8, 0x1f1d24, 4);
   spire.position.set(cx, ridgeY + 4, steepleZ);
+  spire.rotation.y = Math.PI / 4; // 4-sided cone's corners default to the box's face centers; twist to cap the tower's faces instead
   townGroup.add(spire);
   const crossV = box(0.08, 0.95, 0.08, 0x14121a);
   crossV.position.set(cx, ridgeY + 5.75, steepleZ); crossV.rotation.z = 0.09; // slightly askew
@@ -1796,13 +1797,15 @@ function buildChurchyard(rng) {
   plate.position.set(cx, y0 + h - 0.7, southZ - 0.06);
   plate.rotation.y = Math.PI;
   townGroup.add(plate);
-  // side door on the graveyard flank (east), lined up with the fence gate, its own step down
+  // side door on the graveyard flank (east), lined up with the fence gate, its own step down.
+  // tall riser against the door, short one further out — climbs up toward the threshold
+  // instead of the reverse.
   const sideDoor = box(0.12, 2.4, 1.8, 0x241a12);
   sideDoor.position.set(eastX + 0.06, y0 + 1.2, cz);
   townGroup.add(sideDoor);
   for (const s of [1.2, 0.6]) {
     const step = box(s, 0.2, 2.4, 0x55524a);
-    step.position.set(eastX + (1.3 - s * 0.5), y0 + (s > 1 ? 0.1 : 0.3), cz);
+    step.position.set(eastX + (1.3 - s * 0.5), y0 + (s > 1 ? 0.3 : 0.1), cz);
     townGroup.add(step);
   }
 
@@ -3745,10 +3748,15 @@ function fireWeapon() {
         }
       }
     }
-    // crows are fair game too — a clean hit lands like a headshot
+    // crows are fair game too — a clean hit lands like a headshot. Airborne birds get a
+    // more generous hitbox: wings-out flight silhouette is visually wider than the perched
+    // pose, so keeping the sphere perch-sized made a "clean" shot on a fleeing crow whiff
+    // more than it should — no bullet immunity just because it took off scared.
     for (const cw of crows) {
       const cs = cw.g.scale.x;
-      const ct = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw.g.position.x, cw.g.position.y + 0.38 * cs, cw.g.position.z, 0.45 * cs);
+      const airborne = cw.state === 'fly' || cw.state === 'leave' || cw.state === 'descend';
+      const cr = (airborne ? 0.75 : 0.45) * cs;
+      const ct = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw.g.position.x, cw.g.position.y + 0.38 * cs, cw.g.position.z, cr);
       if (ct < bestT) { bestT = ct; best = { crow: cw }; }
     }
     _to.set(_from.x + rdx * bestT, _from.y + rdy * bestT, _from.z + rdz * bestT);
