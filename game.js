@@ -1455,7 +1455,14 @@ function grassMat(hue) {
   if (!grassMats[key]) grassMats[key] = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(0.26 + hue * 0.05, 0.3, 0.25 + hue * 0.05) });
   return grassMats[key];
 }
-const roadMat = new THREE.MeshLambertMaterial({ color: 0x2c2e33 });
+const ROAD_GREY = 0x2c2e33;
+const roadMat = new THREE.MeshLambertMaterial({ color: ROAD_GREY });
+// the same pour as the road — same grey, off the same constant so they can never drift apart —
+// but biased to win the depth test wherever it laps over the tarmac. That lets a slab bury its
+// edge under the road rather than butt a hairline against it, with nothing visible to give the
+// join away. (Reusing roadMat itself would put the offset on every road in the world.)
+const roadJoinMat = new THREE.MeshLambertMaterial({ color: ROAD_GREY,
+  polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 const lotMat = new THREE.MeshLambertMaterial({ color: 0x35373d });
 
 function buildChunk(cx, cz) {
@@ -2099,27 +2106,33 @@ function buildTown() {
   grandBuilding(0, -50.2, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
 
   // fountain pavilion — the apron is a U opening onto the street: two straight arms run up
-  // either side of the basin to the main-street kerb, closed off behind by a semicircle round
-  // its back. The arms meet the tarmac flush along their full width, so the pavement joins the
-  // road on one straight edge — a plain circle only ever kissed the kerb at a single point and
-  // left a thin lip of lawn curving away either side of it. The arms stop dead on the kerb and
-  // never spill onto the road. Open lawn still runs from the back of the U to the bank steps —
-  // the Two Horned One wakes on it between the fountain and the bank.
+  // either side of the basin and out over the main-street tarmac, closed off behind by a
+  // semicircle round the basin's back. It is poured as road, not as a lot: the road's own grey,
+  // and the road's own terrain-following height, sampled from the same groundHeight it rides
+  // and lifted the same 0.04. Butting it against the kerb still left a hairline no matter how
+  // close the numbers got — two surfaces tessellated differently never quite agree along a
+  // shared edge — so the arms run a little PAST the kerb and let the join sit buried under the
+  // road, where identical grey at an identical height leaves nothing to catch the eye. Open
+  // lawn still runs from the back of the U to the bank steps — the Two Horned One wakes on it.
   const fz = -28.2;
   {
     const fy = groundHeight(0, fz);
-    const R = 4.8, KERB_Z = -23.4;        // apron radius; main street's south edge
+    const R = 4.8, KERB_Z = -23.4, LAP = 0.6;  // apron radius; main street's south edge; overlap
     // the mesh is built flat in XY and then tipped over, so shape y maps to world z as fz - y
-    const armY = fz - KERB_Z;             // where the arms stop: the kerb
+    const armY = fz - (KERB_Z + LAP);     // where the arms end: out on the tarmac, past the kerb
     const shape = new THREE.Shape();
-    shape.moveTo(R, armY);                // right arm, standing on the kerb
-    shape.lineTo(R, 0);                   // down it to the basin's centre line
+    shape.moveTo(R, armY);                // right arm, run out over the road
+    shape.lineTo(R, 0);                   // back down it to the basin's centre line
     shape.absarc(0, 0, R, 0, Math.PI, false);  // round the back of the basin (arms sit tangent
     shape.lineTo(-R, armY);               // to the arc, so the U has no corner to catch the eye)
-    shape.closePath();                    // and straight back across the frontage
-    const pave = new THREE.Mesh(new THREE.ShapeGeometry(shape, 20), lotMat);
-    pave.rotation.x = -Math.PI / 2;
-    pave.position.set(0, fy + 0.06, fz);
+    shape.closePath();
+    const geo = new THREE.ShapeGeometry(shape, 20);
+    geo.rotateX(-Math.PI / 2);            // tip it flat, then ride the ground exactly as the road does
+    const pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) pos.setY(i, groundHeight(pos.getX(i), fz + pos.getZ(i)) + 0.04);
+    geo.computeVertexNormals();
+    const pave = new THREE.Mesh(geo, roadJoinMat);
+    pave.position.set(0, 0, fz);          // height already baked into the vertices, as terrainPlane does
     townGroup.add(pave);
     const basin = cyl(2.8, 3.0, 0.85, 0x9a948a, 18);
     basin.position.set(0, fy + 0.42, fz);
