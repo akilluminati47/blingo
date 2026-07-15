@@ -5512,7 +5512,9 @@ function buildCrow(x, y, z, roost) {
   const head = ball(0.16, blk); head.position.set(0, 0.52, 0.28); g.add(head);
   const beak = cyl(0.01, 0.06, 0.22, CROW_GREY, 5);
   beak.rotation.x = Math.PI / 2; beak.position.set(0, 0.5, 0.48); g.add(beak);
-  const tail = box(0.18, 0.04, 0.34, blk); tail.position.set(0, 0.32, -0.42); g.add(tail);
+  // long tail feathers: the root stays tucked under the body's back end, so the extra
+  // length all runs out behind — the folded wingtips come to rest partway along it
+  const tail = box(0.18, 0.04, 0.5, blk); tail.position.set(0, 0.32, -0.5); g.add(tail);
   // skinny legs filling the gap the floating body leaves: a shaft down to a foot of three
   // toes fanned forward and one hind toe back — along the bird, not across it. The whole
   // leg swings back under the tail once the wings open (see crowPose).
@@ -5579,7 +5581,12 @@ function buildCrow(x, y, z, roost) {
 // against its sides with the tips over the tail, instead of holding them out like a shelf.
 // Legs swing back under the tail as it opens up, and the breast puffs out at rest.
 function crowPose(c, a, fold) {
-  c.rollL.rotation.x = fold * 1.45; c.rollR.rotation.x = -fold * 1.45;
+  // Mirroring a pose across the body negates the turns about Y and Z but NOT the one about
+  // X — X is the axis being mirrored through. So the roll runs the same sign on both wings
+  // (exactly as the legs below do) while only the sweep and the flap flip. Negating the roll
+  // too turns that wing inside out: it stands up over the bird's back instead of tucking
+  // down its flank.
+  c.rollL.rotation.x = c.rollR.rotation.x = -fold * 1.45;
   c.wingL.rotation.set(0, fold * 1.5, a - fold * 0.12);
   c.wingR.rotation.set(0, -fold * 1.5, -a + fold * 0.12);
   c.tipL.rotation.z = a * 0.55; c.tipR.rotation.z = -a * 0.55;
