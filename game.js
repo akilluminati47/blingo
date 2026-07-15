@@ -2949,8 +2949,9 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const droopy = !purple && !red && Math.random() < 0.3;
   const brain = Math.random() < 0.12;
   const blind = !purple && !red && Math.random() < 0.16;
-  // extra-gore mode makes fresh zombies spawn already mangled and bloody
-  const wounded = extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5;
+  // extra-gore mode makes fresh zombies spawn already mangled and bloody; a corpse always
+  // spawns wounded — it's already dead, a carcass for the crows to pick over
+  const wounded = mode === 'corpse' || (extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5);
   const color = red ? 0xd43a3a : purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
   const blob = buildBlob({ color, zombie: true, scale, droopy, brain, blind, wounded });
   blob.root.position.set(x, groundHeight(x, z), z);
@@ -2971,14 +2972,14 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     glob.position.y -= 0.15;
     blob.wob.add(glob);
   }
-  if (mode === 'sleeper') blob.root.rotation.x = -1.45; // sprawled on its back
+  if (mode === 'sleeper' || mode === 'corpse') blob.root.rotation.x = -1.45; // sprawled on its back — a sleeper, or a carcass that never gets up
   scene.add(blob.root);
   zombies.push({
     blob, pos: new THREE.Vector3(x, 0, z),
-    hp: (9 + Math.random() * 6) * scale * powerScale * (purple || red ? 1.2 : 1),
+    hp: mode === 'corpse' ? (3 + Math.random() * 3) * scale : (9 + Math.random() * 6) * scale * powerScale * (purple || red ? 1.2 : 1),
     speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1) * (purple ? 1.33 : red ? 1.25 : 1) * (mode === 'runner' ? 1.5 : 1),
     yaw: Math.random() * TAU,
-    state: mode === 'grave' ? 'emerge' : mode === 'sleeper' ? 'sleep' : 'chase',
+    state: mode === 'grave' ? 'emerge' : mode === 'sleeper' ? 'sleep' : mode === 'corpse' ? 'corpse' : 'chase',
     attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
     brainExposed: brain, blind, stepT: Math.random(),
@@ -3949,6 +3950,18 @@ function meleeTarget(w) {
   }
   return null;
 }
+// a sprawled zombie (asleep, or an already-dead carcass) lies flat, head and torso low and
+// off along the sprawl axis rather than stacked upright. Two fat low spheres down the body
+// catch a shot aimed at what you actually see. Returns nearest t (Infinity on a miss); sets
+// out.isHead when the head sphere won so a corpse can still take a headshot.
+function lyingHitT(ox, oy, oz, dx, dy, dz, z, out) {
+  const s = z.scale, gy = z.blob.root.position.y;
+  const ry = z.blob.root.rotation.y, ax = -Math.sin(ry), az = -Math.cos(ry), yb = gy + 0.3 * s;
+  const bt = raySphere(ox, oy, oz, dx, dy, dz, z.pos.x + ax * 0.55 * s, yb, z.pos.z + az * 0.55 * s, 0.66 * s);
+  const ht = raySphere(ox, oy, oz, dx, dy, dz, z.pos.x + ax * 1.3 * s, yb, z.pos.z + az * 1.3 * s, 0.46 * s);
+  if (out) out.isHead = ht < bt;
+  return Math.min(bt, ht);
+}
 function fireWeapon() {
   if (squadCmd.mode === 'lineup') squadCmd.mode = null; // gunfire breaks up the trade line
   const w = player.weapon;
@@ -4031,6 +4044,13 @@ function fireWeapon() {
     for (const z of zombies) {
       if (z.state === 'dying') continue;
       const gy = z.blob.root.position.y, s = z.scale;
+      // sleepers and carcasses lie flat — hit them where they actually are, not standing up
+      if (z.state === 'sleep' || z.state === 'corpse') {
+        const o = {};
+        const lt = lyingHitT(_from.x, _from.y, _from.z, rdx, rdy, rdz, z, o);
+        if (lt < bestT) { bestT = lt; best = { z, isHead: o.isHead, limb: null }; }
+        continue;
+      }
       const ht = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 1.3 * s, z.pos.z, 0.42 * s);
       if (ht < bestT) { bestT = ht; best = { z, isHead: true, limb: null }; }
       const bt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 0.7 * s, z.pos.z, 0.55 * s);
@@ -5098,6 +5118,16 @@ function updateZombies(dt) {
       if (pDist < 24) { z.state = 'wake'; z.emergeT = 0; }
       continue;
     }
+    // an already-dead carcass: lies where it fell and never gets up. Crows feed on it and
+    // shots dismember it (and still count as kills). Being static, a pecker can finish its
+    // full turn on one — which is the whole point of them.
+    if (z.state === 'corpse') {
+      const gy = groundHeight(z.pos.x, z.pos.z);
+      b.root.position.set(z.pos.x, gy + 0.05, z.pos.z);
+      b.root.rotation.x = -1.45;
+      placeShadow(b, z.pos.x, z.pos.z);
+      continue;
+    }
     if (z.state === 'wake') {
       z.emergeT += dt;
       const t = Math.min(z.emergeT / 0.9, 1);
@@ -5279,13 +5309,28 @@ function updateSpawner(dt) {
     // during cleanup everything actively hunts, so the last stragglers come find you
     const mode = runner ? 'runner'
       : game.cleanup ? 'grave'
-      : (onRoad(x, z, 0.5) || Math.random() < 0.35) ? 'sleeper' : 'grave';
+      : (!bossPhase() && (onRoad(x, z, 0.5) || Math.random() < 0.35)) ? 'sleeper' : 'grave';
     spawnZombie(x, z, power, { mode });
+    // laying zombies come doubled now: beside each sleeper, one already dead — a carcass the
+    // crows can pick that never gets up. Capped so they don't crowd the block, and the boss
+    // fight ends the practice entirely (sleepers stop spawning too, so this never fires then).
+    if (mode === 'sleeper' && zombies.reduce((n, zz) => n + (zz.state === 'corpse'), 0) < 6) {
+      // set the carcass a body-length off the sleeper on a random bearing, and only if the
+      // spot is clear of every other body — so nothing spawns stacked and a woken sleeper
+      // never peels straight up out of a corpse it was sitting inside
+      const ca = Math.random() * TAU, cd = 1.5 + Math.random() * 1.4;
+      const [cxx, czz] = resolveCollision(x + Math.sin(ca) * cd, z + Math.cos(ca) * cd, 0.5);
+      const clear = !zombies.some(zz => zz.state !== 'dying' && Math.hypot(zz.pos.x - cxx, zz.pos.z - czz) < 1.1);
+      if (clear && !insideBuilding(cxx, czz)) spawnZombie(cxx, czz, power, { mode: 'corpse' });
+    }
   }
 }
 
 // ---------- boss: the Two Horned One ----------
 const bossState = { boss: null, beam: null, spawned: false, defeated: false, spawned2: false, defeated2: false };
+// once a boss is in play the streets change character: no more laying zombies (sleepers or
+// carcasses) get spawned — the block has bigger problems than crows picking at the dead
+function bossPhase() { return bossState.spawned || bossState.spawned2; }
 const bossBarEl = document.getElementById('bossbar');
 const bossHpEl = document.getElementById('bosshp');
 const bossLabelEl = document.getElementById('bosslabel');
@@ -5710,11 +5755,14 @@ function crowFliesIn(roost) {
   if (Math.random() < 0.6) crowCaw(c.g.position.x, c.g.position.z, 'idle'); // announces itself inbound
   return c;
 }
-// drop 1-2 crows straight onto the ground beside a sleeping zombie to pick at it
+// what a pecker will drop onto: a sleeper or an already-dead carcass, still on the block.
+// The carcass is the prize — it never wakes, so the bird can feed all the way to its turn.
+function peckable(z) { return !!z && (z.state === 'sleep' || z.state === 'corpse') && zombies.includes(z); }
+// drop 1-2 crows straight onto the ground beside a laying zombie to pick at it
 function spawnPeckers() {
   const cands = [];
   for (const z of zombies) {
-    if (z.state !== 'sleep') continue;
+    if (z.state !== 'sleep' && z.state !== 'corpse') continue;
     const d = Math.hypot(z.pos.x - player.pos.x, z.pos.z - player.pos.z);
     if (d < 26 || d > 72) continue; // close enough to see, far enough not to wake it
     if (crows.filter(c => c.target === z).length >= 2) continue;
@@ -5764,6 +5812,8 @@ function crowTakeoff(c) {
   // a bloodied pecker sheds a droplet as it lifts off its meal
   if (c.state === 'peck' && c.dropsBlood && goreAmt() > 0.02)
     spawnParticles(p.x, p.y + 0.45, p.z, BLOOD, 1, 1.2, 0.55);
+  // every red-beak carries off a scrap and drops it as it goes
+  if (c.redBeak) crowDropGib(p.x, p.z, c.purple);
   c.state = 'fly'; c.target = null; c.hopP = 1;
   c.cx = p.x + (Math.random() - 0.5) * 12; c.cz = p.z + (Math.random() - 0.5) * 12;
   c.ra = 13 + Math.random() * 8; c.rb = 10 + Math.random() * 7;
@@ -5803,6 +5853,22 @@ function crowLandBleed(x, y, z) {
   if (goreAmt() <= 0.02) return;
   groundSplat(x, z, 0.22 + Math.random() * 0.16);
   spawnParticles(x, y + 0.2, z, BLOOD, 2, 1.4, 0.5);
+}
+// a red-beak tears off a scrap of the carcass and lets it fall as it leaves — usually a
+// near-instant drop right by the meal, but if it holds on climbing it can let go from up
+// around roof height. A wet gib that sprays blood the whole way down (purple birds spill purple).
+function crowDropGib(x, z, purple) {
+  if (goreAmt() <= 0.02 || gibs.length > 60) return;
+  const h = 0.35 + Math.pow(Math.random(), 3) * 5.2; // weighted low, a small tail up to the roof
+  const y = groundHeight(x, z) + h;
+  const col = purple ? CROW_PURPLE_BLOOD : BLOOD;
+  const m = new THREE.Mesh(gibGeo, mat(col));
+  m.position.set(x, y, z); m.scale.setScalar(0.55 + Math.random() * 0.6);
+  scene.add(m);
+  gibs.push({ mesh: m, life: 3 + Math.random() * 2, bled: false,
+    vx: (Math.random() - 0.5) * 1.6, vy: -1 - Math.random() * 1.5, vz: (Math.random() - 0.5) * 1.6,
+    spin: (Math.random() - 0.5) * 12 });
+  spawnParticles(x, y, z, col, 3, 2, 0.5); // the spray as it lets go
 }
 // a red-beak that's fed long enough turns: eyes glow purple and from this moment its
 // blood and gib spill purple crow (killCrow keys off c.purple), and it gives up no loot.
@@ -5901,7 +5967,7 @@ function updateCrows(dt) {
           // claim a gap on the rail nobody's already standing in or gliding down to
           const s = crowSpot(() => roostSlot(c.roost), c, true);
           c.lx = s.x; c.ly = s.y; c.lz = s.z; c.state = 'descend';
-        } else if (c.target && c.target.state === 'sleep' && zombies.includes(c.target)) {
+        } else if (peckable(c.target)) {
           const s = crowSpot(() => {
             const ang = Math.random() * TAU, d = 0.8 + Math.random() * 0.9;
             const x = c.target.pos.x + Math.sin(ang) * d, z = c.target.pos.z + Math.cos(ang) * d;
@@ -5940,13 +6006,13 @@ function updateCrows(dt) {
       crowPose(c, Math.sin(c.t * 15) * 0.9, c.fold);
       if (Math.hypot(g.position.x - player.pos.x, g.position.z - player.pos.z) > 150) removeCrow(c);
     } else if (c.state === 'peck') {
-      // meal stood up / got dragged into the fight / despawned → flush
-      if (!c.target || c.target.state !== 'sleep' || !zombies.includes(c.target)) { crowTakeoff(c); continue; }
-      // a red-beak that stays on the meal 45s straight turns: purple eyes + blood, then
-      // it lifts off sated (a soft timer — leave the bloodied ones and they corrupt)
-      if (c.redBeak) {
+      // meal woke / got dragged into the fight / despawned → flush (a carcass never wakes)
+      if (!peckable(c.target)) { crowTakeoff(c); continue; }
+      // a pecker that feeds uninterrupted turns purple and lifts off sated — a red-beak
+      // holds out 45s, a plain bird only 20s. The static carcasses let them finish.
+      if (!c.purple) {
         c.peckT += dt;
-        if (c.peckT >= 45 && !c.purple) { crowGoPurple(c); crowTakeoff(c); continue; }
+        if (c.peckT >= (c.redBeak ? 45 : 20)) { crowGoPurple(c); crowTakeoff(c); continue; }
       }
       c.fold = Math.min(1, c.fold + dt * 2.5);
       crowPose(c, 0, c.fold);
@@ -6282,6 +6348,10 @@ function updateFx(dt) {
     for (const z of zombies) {
       if (z.state === 'dying') continue;
       const gy2 = z.blob.root.position.y;
+      if (z.state === 'sleep' || z.state === 'corpse') {
+        if (lyingHitT(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z, null) !== Infinity) { hot = true; break; }
+        continue;
+      }
       if (raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale) !== Infinity ||
           raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale) !== Infinity) { hot = true; break; }
     }
@@ -6533,7 +6603,7 @@ function netHostTick(dt) {
   for (const z of zombies) {
     if (!z.nid) z.nid = ++net.zid;
     zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
-      st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' ? 2 : 0),
+      st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' || z.state === 'corpse' ? 2 : 0),
       sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, ho: z.hornWave ? 1 : 0,
       bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0 });
   }
