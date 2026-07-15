@@ -108,7 +108,9 @@
   #controls { pointer-events:auto; cursor:pointer; }
 
   /* ---------- touch controls (Roblox style) ---------- */
-  #touchlayer { position:fixed; inset:0; z-index:9; display:none; }
+  /* above #scope (11) and #ebubs (12): the scope overlay is decoration, but the buttons
+     are how you actually play — they must never end up underneath it */
+  #touchlayer { position:fixed; inset:0; z-index:13; display:none; }
   body.touchmode #touchlayer { display:block; }
   /* the stick idles at a faded home zone; when released it glides back there and dims */
   #joyBase { position:absolute; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.10); border:2px solid rgba(255,255,255,.35);
@@ -211,6 +213,17 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:13px; font-weight:700;
     text-shadow:0 1px 3px #000; transition:font-size .12s, color .12s; }
   .ewseg.hot { color:var(--hero); font-size:17px; text-shadow:0 0 10px var(--hero), 0 1px 3px #000; }
+  /* player + boss tags: a chevron aimed down at the blob with P{N} (or the boss name) above
+     it, in the blob font. Sized in JS from distance, so no transitions here or every frame
+     would fight them. Flex-column + centered items keeps the arrow locked under the name
+     regardless of which one is wider, instead of relying on block width matching up. */
+  #ptags { position:fixed; inset:0; pointer-events:none; z-index:9; overflow:hidden; }
+  .ptag { position:absolute; transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center;
+    line-height:1; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-weight:700; white-space:nowrap; will-change:transform,opacity; }
+  .ptag b { color:#fff; font-size:15px; letter-spacing:1px; text-shadow:0 2px 5px rgba(0,0,0,.85), 0 0 3px rgba(0,0,0,.6); }
+  .ptag i { font-size:13px; font-style:normal; margin-top:-2px; filter:drop-shadow(0 2px 3px rgba(0,0,0,.85)); }
+  .ptag.down b { text-decoration:line-through; }
   #ebubs { position:fixed; inset:0; pointer-events:none; z-index:12; overflow:hidden; }
   .ebub { position:absolute; transform:translate(-50%,-115%); background:#fff; color:#181a20; padding:12px 24px; border-radius:26px;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:28px; font-weight:700; white-space:nowrap; }
@@ -396,8 +409,7 @@
     <div class="stat" id="crates"><b>0</b><span>Crates</span></div>
     <div class="stat" id="cousins"><b>0/5</b><span>Cousins</span></div>
   </div>
-
-  <div id="controls" class="">
+  <div id="controls" class=""
     <div class="devname" id="devname">KEYBOARD &amp; MOUSE</div>
   </div>
 
@@ -417,6 +429,7 @@
   <div id="toast"></div>
 </div>
 <div id="dmgnums"></div>
+<div id="ptags"></div>
 <div id="ebubs"></div>
 <div id="ewheel"><div id="ewring"></div></div>
 <div id="fade"></div>

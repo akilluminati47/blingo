@@ -118,6 +118,12 @@ function mat(color, opts = {}) {
   if (!MAT[key]) MAT[key] = new THREE.MeshLambertMaterial({ color, ...opts });
   return MAT[key];
 }
+// knock a colour down a shade — the knuckle block always sits just under its mitt
+// (green 8aa85a/789748, skin ffd7a8/f0c898), so an overridden hand needs the same pairing
+function darken(hex, f = 0.86) {
+  const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+  return (((r * f) | 0) << 16) | (((g * f) | 0) << 8) | ((b * f) | 0);
+}
 // A private copy of a cached material, so one mesh can fade without dragging every other
 // user of mat()'s cache with it. Flagged so its chunk disposes it on unload.
 function ownMat(mesh) {
@@ -779,7 +785,9 @@ function buildMeleeMesh(g, id, c) {
 }
 
 // ---------- blob character builder ----------
-function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'right', droopy = false, brain = false, blind = false, wounded = false }) {
+// hands: override the mitt colour. The Crimson One wears his own dark red rather than
+// the standard rot-green, so his swing reads as his.
+function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'right', droopy = false, brain = false, blind = false, wounded = false, hands = 0 }) {
   const root = new THREE.Group();
   const wob = new THREE.Group();
   root.add(wob);
@@ -860,10 +868,10 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
     arm.position.y = -0.26;
     shoulder.add(arm);
     // boxy mitt fist + knuckle block
-    const hand = box(0.28, 0.26, 0.28, zombie ? 0x8aa85a : 0xffd7a8);
+    const hand = box(0.28, 0.26, 0.28, hands || (zombie ? 0x8aa85a : 0xffd7a8));
     hand.position.y = -0.56;
     shoulder.add(hand);
-    const knuck = box(0.3, 0.09, 0.14, zombie ? 0x789748 : 0xf0c898);
+    const knuck = box(0.3, 0.09, 0.14, hands ? darken(hands) : (zombie ? 0x789748 : 0xf0c898));
     knuck.position.set(0, -0.52, 0.13);
     shoulder.add(knuck);
     arms.push(shoulder);
@@ -2533,6 +2541,17 @@ function hurtCompanion(c, dmg) {
 }
 // haul a downed cousin back onto their feet at half health
 function reviveCousin(c) {
+  // a player-controlled cousin lives on someone else's screen: they own the state, so
+  // ask them to stand up rather than pretending we did it here
+  if (c.netP) {
+    if (c.netConn) { try { c.netConn.send({ t: 'revive' }); } catch (e) {} }
+    c.downed = false;
+    netSyncCousinBeacon(c);
+    SFX.recruit();
+    rumble(140, 0.5, 0.6);
+    toast(`PLAYER ${c.netP} IS BACK UP`);
+    return;
+  }
   c.downed = false;
   c.hp = c.maxHp * 0.5;
   c.blob.wob.rotation.x = 0;
@@ -2541,6 +2560,17 @@ function reviveCousin(c) {
   SFX.recruit();
   rumble(140, 0.5, 0.6);
   toast(`${c.data.name.toUpperCase()} IS BACK UP`);
+}
+// host-side: a downed player's rescue beacon, driven off their streamed state
+function netSyncCousinBeacon(c) {
+  if (c.downed && !c.beacon) {
+    c.beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.5, 34, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+    );
+    scene.add(c.beacon);
+  } else if (!c.downed && c.beacon) { scene.remove(c.beacon); c.beacon = null; }
+  if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 17, c.pos.z);
 }
 
 // ---------- player ----------
@@ -2564,6 +2594,9 @@ const player = {
   swingT: 0, swingDur: 0.999,           // drives the melee swing arc
   dropKick: false, dropKickHard: false, // committed air move: rides out until you land
   dropKickHits: null, dkX: 0, dkZ: 0,   // the locked-in line of the dive
+  // downed: with another human in the run you drop to a crawl instead of dying, and
+  // bleed back up on your own so nobody gets dumped out of the session
+  downed: false, downT: 0, beacon: null, dripT: 0,
   slideT: 0, slideDX: 0, slideDZ: 0, hopT: 0,
   dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1, jumpMult: 1,
   owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=hip .. 1=aiming down / zoomed
@@ -2572,8 +2605,51 @@ const player = {
 const reserves = {};
 
 // take damage: stumble away from the hit, still able to fight; heavy gore paints the screen
+// ---------- going down ----------
+// Another human in the run means a bite puts you on your belly instead of out of the
+// game: they can haul you up, and even if nobody comes, you bleed back up on your own.
+// Alone — or with only AI cousins, who can't revive you — death still means death.
+const DOWN_BLEED = 15;
+function hasHumanAlly() {
+  if (net.role === 'client') return true;                  // the host is a person
+  if (net.role === 'host') return companions.some(c => c.netP);
+  return false;
+}
+function goDown() {
+  if (player.downed || player.dead) return;
+  player.downed = true;
+  player.downT = DOWN_BLEED;
+  player.hp = 0;
+  // everything committed gets dropped — you are not drop-kicking from the floor
+  player.slideT = 0; player.hopT = 0; player.swingT = 0;
+  player.dropKick = false; player.dropKickHits = null;
+  if (!player.beacon) {
+    player.beacon = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.5, 34, 8, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+    );
+    scene.add(player.beacon);
+  }
+  SFX.hurt();
+  rumble(400, 1, 0.8);
+  shakeAmp = Math.max(shakeAmp, 0.14);
+  toast(`DOWN .ᐟ CRAWL FOR IT — YOU BLEED BACK UP IN ${DOWN_BLEED}s`, true);
+}
+function playerGetUp(byRescue) {
+  if (!player.downed) return;
+  player.downed = false; player.downT = 0;
+  player.hp = Math.max(1, Math.round(player.maxHp * (byRescue ? 0.5 : 0.35)));
+  if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
+  playerBlob.wob.rotation.x = 0;
+  SFX.recruit();
+  rumble(140, 0.5, 0.6);
+  toast(byRescue ? 'BACK ON YOUR FEET .ᐟ' : 'YOU DRAGGED YOURSELF BACK UP .ᐟ');
+}
+
 function hurtPlayer(dmg, awayX, awayZ) {
-  if (player.dead) return;
+  // already on the floor: being chewed on can't finish you, that's the whole promise of
+  // the bleed-out timer
+  if (player.dead || player.downed) return;
   player.hp -= dmg;
   player.lastHurtT = game.time;
   spawnDamageNumber(player.pos.x, player.pos.y + 1.8, player.pos.z, dmg, player.colorHex);
@@ -2589,7 +2665,7 @@ function hurtPlayer(dmg, awayX, awayZ) {
     spawnBlood(player.pos.x, player.pos.y + 1, player.pos.z, player.stumbleX, player.stumbleZ, 1.4);
     bloodSplat();
   }
-  if (player.hp <= 0 && !player.dead) die();
+  if (player.hp <= 0 && !player.dead) { if (hasHumanAlly()) goDown(); else die(); }
 }
 
 function applyCousin(id) {
@@ -2758,6 +2834,9 @@ const decals = [];
 const MAX_DECALS = 200; // higher cap so bleeding trails stay visible for a while
 const decalGeo = new THREE.CircleGeometry(1, 12);
 const BLOOD = 0x7a0f0f;
+// the two bosses' liveries, shared by the local spawn and the client-side ghost so a
+// joiner sees the same monster the host does
+const BOSS_PURPLE = 0x8a2be2, BOSS_CRIMSON = 0xc22626, CRIMSON_HANDS = 0x6e1414;
 // how much blood to throw: base gore slider, boosted by the unlocked extra-gore slider
 function goreAmt() { return settings.gore + settings.extraGore * 1.4; }
 function extraGoreOn() { return settings.gore >= 0.999 && settings.extraGore > 0; }
@@ -2999,6 +3078,112 @@ function clearBubbles() {
   bubbles.length = 0;
   ewClose();
 }
+
+// ---------- player + boss tags ----------
+// Every other human wears a chevron with their player number, floating over their head.
+// Bosses now wear the same chevron instead of a separate top-bar pill — just with the
+// arrow underneath tinted to their boss color (purple / crimson) so it stays readable
+// without a busy label.
+const ptagsEl = document.getElementById('ptags');
+const ptags = new Map();
+const _tagv = new THREE.Vector3();
+let tagOccT = 0;
+
+// Who deserves a marker. The host owns other players as netP companions; a client only
+// knows them as actor ghosts. Bosses come out of the zombie list either way, so they
+// show up in single player too.
+function trackedActors() {
+  const out = [];
+  if (net.role === 'host') {
+    for (const c of companions) if (c.netP) {
+      out.push({ key: 'p' + c.netP, label: 'P' + c.netP, color: c.data.color,
+        x: c.pos.x, y: c.y || 0, z: c.pos.z, downed: !!c.downed, boss: false });
+    }
+  } else if (net.role === 'client') {
+    for (const [, g] of net.actors) if (g.p) {
+      const p = g.blob.root.position;
+      out.push({ key: 'p' + g.p, label: 'P' + g.p, color: g.data.color,
+        x: p.x, y: p.y, z: p.z, downed: !!g.dn, boss: false });
+    }
+  }
+  for (const z of zombies) {
+    if (!z.isBoss || z.state === 'dying') continue;
+    out.push({ key: z.isBoss2 ? 'b2' : 'b1', label: z.isBoss2 ? 'CRIMSON' : 'TWO HORNED',
+      color: z.isBoss2 ? BOSS_CRIMSON : BOSS_PURPLE,
+      x: z.pos.x, y: z.blob.root.position.y, z: z.pos.z, downed: false, boss: true, scale: z.scale });
+  }
+  return out;
+}
+// is the line from the eye to this point blocked by terrain or a solid? Rebuilding the
+// collider list is chunky, so this runs on a timer and the result eases in.
+function tagOccluded(x, y, z) {
+  const o = camera.position;
+  const dx = x - o.x, dy = y - o.y, dz = z - o.z;
+  const dist = Math.hypot(dx, dy, dz);
+  if (dist < 0.01) return false;
+  const nx = dx / dist, ny = dy / dist, nz = dz / dist;
+  if (rayGround(o.x, o.y, o.z, nx, ny, nz, dist) < dist) return true;
+  for (const c of nearbyColliders(x, z)) if (rayAABB(o.x, o.y, o.z, nx, ny, nz, c) < dist) return true;
+  return false;
+}
+function tagEl(key) {
+  let t = ptags.get(key);
+  if (!t) {
+    const el = document.createElement('div');
+    el.className = 'ptag';
+    el.innerHTML = '<b></b><i>▼</i>';
+    ptagsEl.appendChild(el);
+    t = { el, b: el.querySelector('b'), i: el.querySelector('i'), op: 0, occ: false };
+    ptags.set(key, t);
+  }
+  return t;
+}
+function clearTags() {
+  for (const [, t] of ptags) t.el.remove();
+  ptags.clear();
+}
+function updatePlayerTags(dt) {
+  if (game.state !== 'playing') { if (ptags.size) clearTags(); return; }
+  const live = trackedActors();
+  tagOccT -= dt;
+  const doOcc = tagOccT <= 0;
+  if (doOcc) tagOccT = 0.12;         // 8Hz is plenty to drive a fade
+  const k = 1 - Math.exp(-10 * dt);
+  const seen = new Set();
+  for (const a of live) {
+    seen.add(a.key);
+    const t = tagEl(a.key);
+    const hy = a.y + 2.35 * (a.scale || 1);   // floats just over the blob's head (taller for bosses)
+    const o = camera.position;
+    const dist = Math.hypot(a.x - o.x, hy - o.y, a.z - o.z);
+    _tagv.set(a.x, hy, a.z).project(camera);
+    if (_tagv.z > 1) { t.el.style.display = 'none'; continue; }   // behind the camera
+    t.el.style.display = '';
+    if (t.label !== a.label) { t.label = a.label; t.b.textContent = a.label; }
+    const hex = '#' + a.color.toString(16).padStart(6, '0');
+    if (t.hex !== hex) {
+      t.hex = hex;
+      t.i.style.color = hex;                       // arrow always tinted
+      t.b.style.color = a.boss ? '' : hex;          // bosses keep a plain name, just a colored arrow
+    }
+    t.el.classList.toggle('boss', !!a.boss);
+    t.el.classList.toggle('down', a.downed);
+    t.el.style.left = ((_tagv.x * 0.5 + 0.5) * innerWidth) + 'px';
+    t.el.style.top = ((-_tagv.y * 0.5 + 0.5) * innerHeight) + 'px';
+    // solid only in the band where a tag earns its keep: ghosty when they're in your
+    // face, lost in the distance, or standing behind something
+    const near = clamp((dist - 3) / 4, 0, 1);
+    const far = clamp((55 - dist) / 18, 0, 1);
+    let want = Math.min(near, far);
+    if (doOcc) t.occ = tagOccluded(a.x, hy, a.z);
+    if (t.occ) want *= 0.32;
+    t.op = lerp(t.op, want, k);
+    t.el.style.opacity = t.op.toFixed(3);
+    const scale = clamp(26 / Math.max(dist, 1), 0.55, 1.5);   // perspective, roughly
+    t.el.style.transform = `translate(-50%,-100%) scale(${scale.toFixed(3)})`;
+  }
+  for (const [key, t] of ptags) if (!seen.has(key)) { t.el.remove(); ptags.delete(key); }
+}
 // limb hitboxes in the zombie's facing frame: [kind, idx, localX, localY, localZ, radius].
 // a bullet that strikes one of these severs that exact limb (dismemberment local to the shot).
 const LIMB_SPEC = [
@@ -3160,6 +3345,8 @@ function resetGame() {
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
   player.comboN = 0; player.lastPunchT = -9; player.swingT = 0;
   player.dropKick = false; player.dropKickHard = false; player.dropKickHits = null;
+  player.downed = false; player.downT = 0; player.dripT = 0;
+  if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
   player.slideT = 0; player.hopT = 0;
   // the hero starts with bare fists plus their own signature melee; recruits keep theirs
   player.owned = ['fists', COUSINS.find(c => c.id === selectedCousin).melee];
@@ -3988,6 +4175,7 @@ function animate() {
   }
   updateCamera(dt);
   updateHousePeek(dt); // after the camera: the sightline test needs its settled position
+  updatePlayerTags(dt);
   updateFx(dt);
   updateDamageNumbers(dt);
   updateEmoteFx(dt);
@@ -4012,10 +4200,16 @@ function updatePlayer(dt) {
   const ml = Math.hypot(mx, my);
   if (ml > 1) { mx /= ml; my /= ml; }
 
-  const sprinting = (keys['ShiftLeft'] || keys['ShiftRight'] || sprintToggle || input.sprintGamepad) && ml > 0.1;
+  // bleeding out: nobody came, so you haul yourself back up rather than drop out
+  if (player.downed) {
+    player.downT -= dt;
+    if (player.downT <= 0) playerGetUp(false);
+  }
+  const sprinting = (keys['ShiftLeft'] || keys['ShiftRight'] || sprintToggle || input.sprintGamepad) && ml > 0.1 && !player.downed;
   // bare fists keep you light on your feet: 5% quicker stride, 10% springier jumps
   const fists = player.weapon.id === 'fists';
-  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73) * (fists ? 1.05 : 1);
+  // downed you can still move, but only at a drag
+  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73) * (fists ? 1.05 : 1) * (player.downed ? 0.24 : 1);
 
   // camera-relative: forward = away from camera
   const sin = Math.sin(player.camYaw), cos = Math.cos(player.camYaw);
@@ -4023,7 +4217,7 @@ function updatePlayer(dt) {
   const vz = (my * cos - mx * sin) * speed;
 
   // slide: quick low dash along current motion; jump out of it for a slide-hop boost
-  if (input.slide && player.grounded && player.slideT <= 0 && ml > 0.1) {
+  if (input.slide && player.grounded && player.slideT <= 0 && ml > 0.1 && !player.downed) {
     player.slideT = 0.55;
     const l = Math.hypot(vx, vz) || 1;
     player.slideDX = vx / l; player.slideDZ = vz / l;
@@ -4063,7 +4257,7 @@ function updatePlayer(dt) {
 
   // ground = terrain or any standable top under us (crates, cars, rocks, awnings, roofs)
   const groundY = supportTop(player.pos.x, player.pos.z, player.pos.y);
-  if (input.jump && player.grounded) {
+  if (input.jump && player.grounded && !player.downed) {
     const hop = player.slideT > 0;   // slide-hop: bigger jump, momentum kept
     player.vy = (hop ? 8.6 : 7.4) * (fists ? 1.1 : 1) * player.jumpMult;
     if (hop) { player.hopT = 0.5; player.slideT = 0; }
@@ -4088,6 +4282,17 @@ function updatePlayer(dt) {
     }
   }
 
+  // the rescue beacon drags along with you, and you leave a smear behind
+  if (player.downed) {
+    if (player.beacon) player.beacon.position.set(player.pos.x, groundHeight(player.pos.x, player.pos.z) + 17, player.pos.z);
+    if (goreAmt() > 0.02 && ml > 0.1) {
+      player.dripT -= dt;
+      if (player.dripT <= 0) {
+        player.dripT = 0.1 + Math.random() * 0.1;
+        groundSplat(player.pos.x + (Math.random() - 0.5) * 0.3, player.pos.z + (Math.random() - 0.5) * 0.3, 0.16 + Math.random() * 0.18);
+      }
+    }
+  }
   player.shootCd -= dt;
   player.swingT = Math.max(0, player.swingT - dt);
   updateDropKick(dt);   // resolves the boots, and frees you the moment you land
@@ -4095,7 +4300,7 @@ function updatePlayer(dt) {
   const w = player.weapon;
   // hold the trigger to keep firing; every weapon — full-auto, semi-auto & melee — cycles at its own rpm.
   // A live drop kick locks everything out until it lands.
-  if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0 && !player.dropKick) {
+  if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0 && !player.dropKick && !player.downed) {
     fireWeapon();
     player.shootCd = 60 / w.rpm;
   }
@@ -4256,6 +4461,18 @@ function updatePlayer(dt) {
     b.wob.rotation.x = -0.75;
     b.legs[0].rotation.x = -1.5; b.legs[1].rotation.x = -1.2;
     b.arms[0].rotation.x = -2.7; b.arms[1].rotation.x = -2.7;
+  }
+  if (player.downed) {
+    // face-down crawl: chest on the dirt, hauling yourself forward one arm at a time
+    // (last word on the pose, so nothing above can stand you back up)
+    b.wob.rotation.x = 1.2;
+    b.wob.rotation.z = 0;
+    const claw = Math.sin(player.walkPhase * 1.5);
+    b.arms[0].rotation.x = -2.25 + claw * 0.55;
+    b.arms[1].rotation.x = -2.25 - claw * 0.55;
+    b.legs[0].rotation.x = 0.3 + claw * 0.18;
+    b.legs[1].rotation.x = 0.3 - claw * 0.18;
+    b.head.rotation.x = -0.55;   // chin up, still looking where you're dragging to
   }
 
   updateChunks(player.pos.x, player.pos.z);
@@ -4718,7 +4935,7 @@ function maybeSpawnBoss() {
 function spawnBoss() {
   bossState.spawned = true;
   const bx = 0, bz = -33.5;                   // the open ground between the fountain and the bank steps
-  const blob = buildBlob({ color: 0x8a2be2, zombie: true, scale: 2.7 });
+  const blob = buildBlob({ color: BOSS_PURPLE, zombie: true, scale: 2.7 });
   for (const s of [-1, 1]) {                  // horns
     const horn = cyl(0.02, 0.15, 0.55, 0x2a1a3a, 6);
     horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
@@ -4753,7 +4970,7 @@ function spawnBoss() {
 function spawnBoss2() {
   bossState.spawned2 = true;
   const bx = 35, bz = 81;                     // the strip between the church side door and the graveyard gate
-  const blob = buildBlob({ color: 0xc22626, zombie: true, scale: 2.7 });
+  const blob = buildBlob({ color: BOSS_CRIMSON, zombie: true, scale: 2.7, hands: CRIMSON_HANDS });
   for (const s of [-1, 1]) {                  // the same crown of horns, rust-dark
     const horn = cyl(0.02, 0.15, 0.55, 0x3a1414, 6);
     horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
@@ -5713,7 +5930,13 @@ function wireHostConn(conn) {
       rebuildSquadBars();
     } else if (m.t === 'p') {
       const c = cousinByConn(conn);
-      if (c) { c.netPose = m; c.hp = m.hp; }
+      if (c) {
+        c.netPose = m; c.hp = m.hp;
+        // a player-controlled cousin owns its own downed state (hurtCompanion bails out
+        // for them), so mirror it here and run their rescue beacon from it
+        const dn = !!m.dn;
+        if (dn !== !!c.downed) { c.downed = dn; netSyncCousinBeacon(c); rebuildSquadBars(); }
+      }
     } else if (m.t === 'shot') {
       const z = zombies.find(zz => zz.nid === m.id);
       if (z) damageZombie(z, m.d, m.kx, m.kz, 2, { weapon: WEAPONS[m.wid], dist: m.ds, isHead: m.hd });
@@ -5760,7 +5983,8 @@ function netHostTick(dt) {
     if (!z.nid) z.nid = ++net.zid;
     zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
       st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' ? 2 : 0),
-      sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, ho: z.hornWave ? 1 : 0, bo: z.isBoss ? 1 : 0 });
+      sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, ho: z.hornWave ? 1 : 0,
+      bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0 });
   }
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ac, zb,
@@ -5820,6 +6044,8 @@ function netClientData(m, conn, peer, code) {
     netApplySnapshot(m);
   } else if (m.t === 'hurt') {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
+  } else if (m.t === 'revive') {
+    playerGetUp(true);       // someone walked over and hauled us up
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
@@ -5881,8 +6107,11 @@ function netApplySnapshot(m) {
     seenZ.add(zs.i);
     let g = net.ghosts.get(zs.i);
     if (!g) {
-      const color = zs.re ? 0xd43a3a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
-      const blob = buildBlob({ color, zombie: true, scale: zs.sc });
+      // bosses wear their own livery: without this they fell through to a random
+      // zombie colour, so a joiner met a differently-coloured monster than the host
+      const color = zs.bo ? (zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
+        : zs.re ? 0xd43a3a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
+      const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b2 ? CRIMSON_HANDS : 0 });
       if (zs.ho || zs.bo) for (const s of [-1, 1]) {
         const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
         horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
@@ -5890,7 +6119,7 @@ function netApplySnapshot(m) {
         blob.head.add(horn);
       }
       scene.add(blob.root);
-      g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo,
+      g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2,
         state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false, purple: !!zs.pu };
       net.ghosts.set(zs.i, g);
       zombies.push(g);              // lives in the same list so shots + crosshair see it
@@ -5928,7 +6157,15 @@ function netClientTick(dt) {
       : (WEAPONS[g.wp] && WEAPONS[g.wp].melee
         ? meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8)
         : -Math.PI / 2);
-    b.wob.rotation.x = g.dn ? 0.55 : 0;
+    if (g.dn) {
+      // downed players crawl on their belly, same read as the host's own view of them
+      b.wob.rotation.x = 1.2;
+      const claw = Math.sin(g.walk * 1.5);
+      b.arms[0].rotation.x = -2.25 + claw * 0.55;
+      b.arms[1].rotation.x = -2.25 - claw * 0.55;
+      b.legs[0].rotation.x = 0.3 + claw * 0.18;
+      b.legs[1].rotation.x = 0.3 - claw * 0.18;
+    } else b.wob.rotation.x = 0;
     placeShadow(b, b.root.position.x, b.root.position.z, b.root.position.y);
     updateFlash(b, dt);
   }
@@ -5976,7 +6213,8 @@ function netClientTick(dt) {
     }
     try {
       net.conns[0].send({ t: 'p', x: player.pos.x, z: player.pos.z, y: player.pos.y,
-        yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp), th });
+        yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp), th,
+        dn: player.downed ? 1 : 0 });
     } catch (e) {}
   }
   // the host's fill level drives our ring; it hides when updates stop coming
@@ -6070,6 +6308,16 @@ function netPoseCompanion(c, dt) {
   b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
     ? meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8)
     : -Math.PI / 2;
+  // downed: mirror their crawl, and drag their beacon along as they haul themselves off
+  if (c.downed) {
+    b.wob.rotation.x = 1.2;
+    const claw = Math.sin(c.walkPhase * 1.5);
+    b.arms[0].rotation.x = -2.25 + claw * 0.55;
+    b.arms[1].rotation.x = -2.25 - claw * 0.55;
+    b.legs[0].rotation.x = 0.3 + claw * 0.18;
+    b.legs[1].rotation.x = 0.3 - claw * 0.18;
+    if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 17, c.pos.z);
+  } else if (b.wob.rotation.x) b.wob.rotation.x = 0;
   placeShadow(b, c.pos.x, c.pos.z, c.y);
   updateFlash(b, dt);
 }
@@ -6085,6 +6333,7 @@ applyEnvironment(); // morning sky behind the menus too
 updateChunks(0, 0);
 player.pos.y = groundHeight(0, 0);
 playerBlob.root.position.copy(player.pos);
+window.__tagDbg = { updatePlayerTags, trackedActors, tagOccluded, spawnBoss2, darken, CRIMSON_HANDS };
 window.__dbg = {
   player, game, zombies, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop, net,
   openNearest: () => { const c = findNearCrate(); if (c) openCrate(c); },
