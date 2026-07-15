@@ -21,9 +21,10 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 
 - Move: WASD / left stick / left-side touch joystick
 - Aim: mouse / right stick / right-side touch drag
-- Shoot: left mouse / RT / on-screen buttons
+- Melee and Shoot: left mouse / RT / on-screen button(s)
 - Reload: R / B / on-screen button
-- Loot and recruit: E / X / on-screen button
+- Loot and Recruit: E / X / on-screen button
+- Slide: C or ctrl / R3 / on-screen button
 - Jump: Space / A / on-screen button
 - Sprint: Shift / L3 / on-screen button
 - Pause: Esc or P / Start / on-screen pause button
