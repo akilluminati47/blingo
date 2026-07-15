@@ -5514,12 +5514,16 @@ function updateBossFx() {
 // sleeping zombies and flush the moment the meal stands up, circle in to perch on
 // house roof ridges, and roost on the civic rooftops — a chattering row along the
 // bank's portico edge, solos or pairs on the town hall and courthouse. Gunfire close
-// to them flushes them, a direct hit pops them like a headshot, 10% bleed purple,
-// half the peckers wear a bloodied beak (and half of those drip blood on takeoff),
-// and once the Two Horned One falls every crow leaves the block for good.
+// flushes them wide; on foot you can steal in until you cross a bird's personal ring
+// (red-beaks hold their nerve in the tightest ring, so you can get closest). A direct
+// hit pops them like a headshot. The odd bird glares purple from spawn (no loot, purple
+// blood); half of those — plus half the peckers — wear a pecker's bloodied beak and drip
+// a stain wherever they set down. A red-beak that feeds 45s straight turns purple and
+// lifts off sated. Once the Two Horned One falls every crow leaves the block for good.
 const crows = [];
 const CROW_FEATHER = 0x1b1b20;
 const CROW_PURPLE_BLOOD = 0x9a2be0;
+const CROW_EYE_NORMAL = 0xffd24a, CROW_EYE_PURPLE = 0xb04aff;
 const CROW_GREY = 0x44444d;  // beak + legs: dark grey, a shade up from the feathers so they read
 const CROW_GAP = 0.55;       // closest two crows ever stand: a row, never one inside another
 let crowSpawnT = 2;
@@ -5528,7 +5532,6 @@ let crowTargets = { bank: 4, hall: 2, court: 1 };
 
 function buildCrow(x, y, z, roost) {
   const g = new THREE.Group();
-  const purple = Math.random() < 0.1; // the odd one bleeds (and glares) purple
   const blk = 0x15151a;
   const body = ball(1, blk); body.scale.set(0.21, 0.18, 0.33); body.position.y = 0.32; g.add(body);
   // charcoal breast puff: swells when the bird settles, tucks flat in flight
@@ -5580,22 +5583,27 @@ function buildCrow(x, y, z, roost) {
   };
   const wl = mkWing(1), wr = mkWing(-1);
   const wingL = wl.piv, wingR = wr.piv;
-  const eyeC = purple ? 0xb04aff : 0xffd24a;
+  // most birds are born normal-eyed; the odd purple one (a veteran of the carcasses)
+  // glares from spawn — and half of those still wear the pecker's bloodied beak
+  const purple = Math.random() < 0.12;
+  const eyeC = purple ? CROW_EYE_PURPLE : CROW_EYE_NORMAL;
+  const eyes = [];
   for (const sx of [-0.07, 0.07]) {
     const e = ball(0.03, eyeC, { emissive: eyeC, emissiveIntensity: 0.6 });
-    e.position.set(sx, 0.56, 0.4); g.add(e);
+    e.position.set(sx, 0.56, 0.4); g.add(e); eyes.push(e);
   }
   g.scale.setScalar(1 + Math.random() * 0.35);
   g.position.set(x, y, z);
   g.rotation.y = Math.random() * TAU;
   scene.add(g);
   const c = { g, wingL, wingR, rollL: wl.roll, rollR: wr.roll, tipL: wl.tip, tipR: wr.tip,
-    legL, legR, breast, beak, purple,
+    legL, legR, breast, beak, eyes, purple, peckT: 0,
     fold: 1, redBeak: false, dropsBlood: false, roost: roost || null, target: null,
     state: 'perch', t: Math.random() * 5, headBob: Math.random() * TAU, flap: Math.random() * TAU,
     hopT: 0.6 + Math.random() * 2, hopFrom: null, hopTo: null, hopP: 1, flutterT: 0,
     ang: Math.random() * TAU, angSpd: 0.6, cx: x, cz: z, ra: 12, rb: 10,
     cruiseY: y + 12, flyT: 0, lx: x, ly: y, lz: z, leaveDir: 0 };
+  if (purple && Math.random() < 0.5) crowRedBeak(c); // half the purples kept a pecker's beak
   crows.push(c);
   return c;
 }
@@ -5727,8 +5735,7 @@ function spawnPeckers() {
     c.state = 'peck'; c.target = zz; c.ly = c.g.position.y;
     c.g.rotation.y = Math.atan2(zz.pos.x - x, zz.pos.z - z2); // face the meal
     if (Math.random() < 0.5) { // half the peckers have been at it a while: bloodied beak
-      c.redBeak = true;
-      c.beak.material = mat(0x9c1414);
+      crowRedBeak(c);
       c.dropsBlood = Math.random() < 0.5; // and half of those carry a drip off with them
     }
   }
@@ -5786,6 +5793,24 @@ function crowRayT(ox, oy, oz, dx, dy, dz, cw) {
   const airborne = cw.state === 'fly' || cw.state === 'leave' || cw.state === 'descend';
   const r = (airborne ? 0.85 : 0.7) * cs; // wings-out flight silhouette is a touch wider
   return raySphere(ox, oy, oz, dx, dy, dz, cw.g.position.x, cw.g.position.y + 0.4 * cs, cw.g.position.z, r);
+}
+// the bloodied beak of a bird that's been at a carcass — worn by half the peckers and
+// half the purples (they were peckers once)
+function crowRedBeak(c) { c.redBeak = true; c.beak.material = mat(0x9c1414); }
+// a red-beak drips where it sets down: a small ground stain and a fleck or two, so it
+// reads as having just stepped off a kill. Honours the gore setting (nothing on a clean run).
+function crowLandBleed(x, y, z) {
+  if (goreAmt() <= 0.02) return;
+  groundSplat(x, z, 0.22 + Math.random() * 0.16);
+  spawnParticles(x, y + 0.2, z, BLOOD, 2, 1.4, 0.5);
+}
+// a red-beak that's fed long enough turns: eyes glow purple and from this moment its
+// blood and gib spill purple crow (killCrow keys off c.purple), and it gives up no loot.
+// The caller lifts it off right after — sated, it abandons the meal.
+function crowGoPurple(c) {
+  if (c.purple) return;
+  c.purple = true;
+  for (const e of c.eyes) e.material = mat(CROW_EYE_PURPLE, { emissive: CROW_EYE_PURPLE, emissiveIntensity: 0.6 });
 }
 // a clean hit pops a crow like a headshot: burst, feathers, one tumbling scrap
 function killCrow(c, kx, kz, dmg) {
@@ -5852,6 +5877,14 @@ function updateCrows(dt) {
     c.t += dt;
     // house roost's chunk streamed out: the roof is gone and so is the player — vanish quietly
     if (c.roost && c.roost.key && !chunks.has(c.roost.key)) { removeCrow(c); continue; }
+    // an on-foot approach spooks a settled bird once the player crosses its personal
+    // space — red-beaks hold their nerve in a tighter ring, so you can steal right up on
+    // one before it bolts (gunfire still flushes everything wide through scareCrows)
+    if ((c.state === 'perch' || c.state === 'peck') && !player.dead) {
+      const fr = c.redBeak ? 3.5 : 7.5;
+      const dx = g.position.x - player.pos.x, dy = g.position.y - player.pos.y, dz = g.position.z - player.pos.z;
+      if (dx * dx + dy * dy + dz * dz < fr * fr) { crowTakeoff(c); continue; }
+    }
     if (c.state === 'fly') {
       c.flyT -= dt; c.ang += c.angSpd * dt;
       const tx = c.cx + Math.cos(c.ang) * c.ra, tz = c.cz + Math.sin(c.ang) * c.rb;
@@ -5892,6 +5925,7 @@ function updateCrows(dt) {
       crowPose(c, Math.sin(c.t * 10) * 0.7, c.fold);
       if (Math.hypot(dx, dz) < 0.35 && Math.abs(g.position.y - c.ly) < 0.14) {
         c.state = c.roost ? 'perch' : 'peck';
+        if (c.redBeak) crowLandBleed(c.lx, c.ly, c.lz); // a bloodied bird drips as it sets down
         if (Math.random() < 0.5) crowCaw(c.lx, c.lz, 'land'); // low double as it settles
         c.hopT = 1 + Math.random() * 3; c.hopP = 1;
         g.rotation.set(0, c.roost && c.roost.face != null ? c.roost.face + (Math.random() - 0.5) * 0.5 : g.rotation.y, 0);
@@ -5908,6 +5942,12 @@ function updateCrows(dt) {
     } else if (c.state === 'peck') {
       // meal stood up / got dragged into the fight / despawned → flush
       if (!c.target || c.target.state !== 'sleep' || !zombies.includes(c.target)) { crowTakeoff(c); continue; }
+      // a red-beak that stays on the meal 45s straight turns: purple eyes + blood, then
+      // it lifts off sated (a soft timer — leave the bloodied ones and they corrupt)
+      if (c.redBeak) {
+        c.peckT += dt;
+        if (c.peckT >= 45 && !c.purple) { crowGoPurple(c); crowTakeoff(c); continue; }
+      }
       c.fold = Math.min(1, c.fold + dt * 2.5);
       crowPose(c, 0, c.fold);
       if (c.hopP < 1) {
