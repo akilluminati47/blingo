@@ -2098,14 +2098,26 @@ function buildTown() {
   // pavilion and the boss arena between them.
   grandBuilding(0, -50.2, 24, 16, 8.6, 0x7d8a96, 'BANK', rng, 1);
 
-  // fountain pavilion — sat back into the lawn with the bank so its 4.8-radius paved
-  // apron just touches the main-street tarmac at its front edge (road south edge z=-23.4)
-  // rather than spilling onto the road. Open lawn runs from the apron back to the bank
-  // steps — the Two Horned One still wakes on it between the fountain and the bank.
+  // fountain pavilion — the apron is a U opening onto the street: two straight arms run up
+  // either side of the basin to the main-street kerb, closed off behind by a semicircle round
+  // its back. The arms meet the tarmac flush along their full width, so the pavement joins the
+  // road on one straight edge — a plain circle only ever kissed the kerb at a single point and
+  // left a thin lip of lawn curving away either side of it. The arms stop dead on the kerb and
+  // never spill onto the road. Open lawn still runs from the back of the U to the bank steps —
+  // the Two Horned One wakes on it between the fountain and the bank.
   const fz = -28.2;
   {
     const fy = groundHeight(0, fz);
-    const pave = new THREE.Mesh(new THREE.CircleGeometry(4.8, 26), lotMat);
+    const R = 4.8, KERB_Z = -23.4;        // apron radius; main street's south edge
+    // the mesh is built flat in XY and then tipped over, so shape y maps to world z as fz - y
+    const armY = fz - KERB_Z;             // where the arms stop: the kerb
+    const shape = new THREE.Shape();
+    shape.moveTo(R, armY);                // right arm, standing on the kerb
+    shape.lineTo(R, 0);                   // down it to the basin's centre line
+    shape.absarc(0, 0, R, 0, Math.PI, false);  // round the back of the basin (arms sit tangent
+    shape.lineTo(-R, armY);               // to the arc, so the U has no corner to catch the eye)
+    shape.closePath();                    // and straight back across the frontage
+    const pave = new THREE.Mesh(new THREE.ShapeGeometry(shape, 20), lotMat);
     pave.rotation.x = -Math.PI / 2;
     pave.position.set(0, fy + 0.06, fz);
     townGroup.add(pave);
