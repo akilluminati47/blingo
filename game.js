@@ -198,7 +198,8 @@ const PHASES = [
   { name: 'NIGHT', top: '#0a0e22', mid: '#1c2440', hor: '#2b3350', sun: '#dfe8ff', sunV: 0.30, sunR: 22, stars: true, cloudC: '#2b3352', cloudB: '#20263f',
     hemiSky: 0x8fa3d0, hemiGnd: 0x2e2a22, hemiI: 0.75, dirC: 0xaebfff, dirI: 0.7, dirPos: [-30, 50, -20], ambC: 0x64513a, ambI: 0.32, fog: '#232a45' },
 ];
-function rollWeather() { const r = Math.random(); return r < 0.4 ? 'sunny' : r < 0.8 ? 'cloudy' : 'rain'; }
+// weather rolls live in the wx machine (50/50 sunny/cloudy, rain can intercept a cloudy
+// spell at its halfway mark) — see updateDayNight below
 function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
 const skyCanvas = document.createElement('canvas');
 skyCanvas.width = 1024; skyCanvas.height = 512;
@@ -212,41 +213,45 @@ const skyDome = new THREE.Mesh(
 skyDome.renderOrder = -10;
 scene.add(skyDome);
 const moonOff = new THREE.Vector3(-30, 50, -20); // key-light offset, follows the player
-function drawSky(p, weather) {
+const _skyMoodC = new THREE.Color('#9aa2b0'), _skyMoodR = new THREE.Color('#59606e');
+// p is a blended phase palette (see phaseMixAt) and W the live weather weights
+// { sunny, cloudy, rain } summing to 1 — mid-transition skies mix both moods.
+function drawSky(p, W) {
   const ctx = skyCanvas.getContext('2d');
-  const W = skyCanvas.width, H = skyCanvas.height;
-  // weather tints the palette itself instead of flat-washing the finished sky,
-  // so the gradient keeps its depth in any mood
-  const mood = weather === 'cloudy' ? ['#9aa2b0', 0.42] : weather === 'rain' ? ['#59606e', 0.62] : null;
-  const tint = hex => mood ? '#' + new THREE.Color(hex).lerp(new THREE.Color(mood[0]), mood[1]).getHexString() : hex;
+  const CW = skyCanvas.width, H = skyCanvas.height;
+  // weather tints the palette itself (scaled by its blend weight) instead of
+  // flat-washing the finished sky, so the gradient keeps its depth in any mood
+  const tint = hex => '#' + new THREE.Color(hex)
+    .lerp(_skyMoodC, 0.42 * W.cloudy).lerp(_skyMoodR, 0.62 * W.rain).getHexString();
   // one clean sweep from zenith to horizon. The top stop is held flat for the first
   // stretch so the sphere's pole pinch lands inside a single tone — no more grey
   // circle stamped overhead — and no haze band muddying the horizon line.
   const g = ctx.createLinearGradient(0, 0, 0, H * 0.54);
   g.addColorStop(0, tint(p.top)); g.addColorStop(0.14, tint(p.top));
   g.addColorStop(0.6, tint(p.mid)); g.addColorStop(1, tint(p.hor));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H * 0.54);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, H * 0.54);
   // below the horizon a single quiet floor tone — terrain and fog own that half anyway
   ctx.fillStyle = '#' + new THREE.Color(tint(p.hor)).multiplyScalar(0.34).getHexString();
-  ctx.fillRect(0, H * 0.53, W, H * 0.47);
-  if (p.stars && weather === 'sunny') {
+  ctx.fillRect(0, H * 0.53, CW, H * 0.47);
+  const starA = (p.starA || 0) * W.sunny; // stars need clear night: fade with dawn AND cover
+  if (starA > 0.05) {
     const srng = mulberry32(42);
     ctx.fillStyle = '#fff';
     for (let i = 0; i < 170; i++) {
-      ctx.globalAlpha = 0.25 + srng() * 0.75;
-      ctx.fillRect(srng() * W, H * (0.04 + srng() * 0.44), srng() < 0.12 ? 2 : 1, 1);
+      ctx.globalAlpha = (0.25 + srng() * 0.75) * starA;
+      ctx.fillRect(srng() * CW, H * (0.04 + srng() * 0.44), srng() < 0.12 ? 2 : 1, 1);
     }
     ctx.globalAlpha = 1;
   }
-  if (weather !== 'rain') {
-    // sun (moon at night) with a soft halo
-    const sx = W * 0.72, sy = H * p.sunV, r = p.sunR;
+  if (W.rain < 0.65) {
+    // sun (moon at night) with a soft halo, waning behind heavier weather
+    const sx = CW * 0.72, sy = H * p.sunV, r = p.sunR;
     const halo = ctx.createRadialGradient(sx, sy, 1, sx, sy, r * 3.2);
     halo.addColorStop(0, hexA(p.sun, 0.9)); halo.addColorStop(0.3, hexA(p.sun, 0.35)); halo.addColorStop(1, hexA(p.sun, 0));
     ctx.fillStyle = halo;
     ctx.fillRect(sx - r * 3.2, sy - r * 3.2, r * 6.4, r * 6.4);
     ctx.fillStyle = p.sun;
-    ctx.beginPath(); ctx.arc(sx, sy, r * (weather === 'cloudy' ? 0.75 : 1), 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx, sy, r * (1 - 0.25 * W.cloudy - 0.45 * W.rain), 0, TAU); ctx.fill();
   }
   skyTex.needsUpdate = true;
 }
@@ -284,25 +289,29 @@ function drawPuff(ctx, x, y, s, fill, belly, rng) {
   ctx.beginPath(); ctx.ellipse(x, y - h * 0.1, w * 0.34, h * 0.16, 0, 0, TAU); ctx.fill(); // shaded underside
   ctx.restore();
 }
-function drawClouds(p, weather) {
+function drawClouds(p, W) {
   const ctx = cloudCanvas.getContext('2d');
-  const W = cloudCanvas.width, H = cloudCanvas.height;
-  ctx.clearRect(0, 0, W, H);
-  const night = !!p.stars;
-  // each phase dresses its clouds from its palette; weather greys them down with intent
-  let fill = p.cloudC, belly = p.cloudB;
-  if (weather === 'cloudy') { fill = night ? '#272e46' : '#c6ccd8'; belly = night ? '#1d2338' : '#a9b0bf'; }
-  if (weather === 'rain')   { fill = night ? '#1a1f30' : '#6d7484'; belly = night ? '#141827' : '#565e6c'; }
-  const crng = mulberry32(7 + game.cycle * 31 + game.phase);
-  const nC = weather === 'sunny' ? 6 : weather === 'cloudy' ? 13 : 9;
+  const CW = cloudCanvas.width, H = cloudCanvas.height;
+  ctx.clearRect(0, 0, CW, H);
+  const night = p.nightW > 0.4;
+  // each phase dresses its clouds from its (blended) palette; weather greys them down
+  // by its blend weight, so a rolling-in front darkens the puffs gradually
+  const gf = night ? '#272e46' : '#c6ccd8', gb = night ? '#1d2338' : '#a9b0bf';
+  const rf = night ? '#1a1f30' : '#6d7484', rb = night ? '#141827' : '#565e6c';
+  const fill = lerpHex(lerpHex(p.cloudC, gf, W.cloudy), rf, W.rain);
+  const belly = lerpHex(lerpHex(p.cloudB, gb, W.cloudy), rb, W.rain);
+  // fixed seed per run: the layout holds steady all day; weather only adds/removes
+  // puffs off the end of the same sequence and re-dresses the ones already up there
+  const crng = mulberry32(7 + game.cycle * 31);
+  const nC = Math.round(6 * W.sunny + 13 * W.cloudy + 9 * W.rain);
   for (let i = 0; i < nC; i++) {
-    const cx2 = crng() * W;
+    const cx2 = crng() * CW;
     const cy2 = (0.15 + crng() * 0.21) * H; // the mid band
     const s = 0.55 + crng() * 0.85;
     const seed = (crng() * 1e9) | 0;        // same seed twice = identical twin across the seam
     drawPuff(ctx, cx2, cy2, s, fill, belly, mulberry32(seed));
-    if (cx2 < 180) drawPuff(ctx, cx2 + W, cy2, s, fill, belly, mulberry32(seed));
-    else if (cx2 > W - 180) drawPuff(ctx, cx2 - W, cy2, s, fill, belly, mulberry32(seed));
+    if (cx2 < 180) drawPuff(ctx, cx2 + CW, cy2, s, fill, belly, mulberry32(seed));
+    else if (cx2 > CW - 180) drawPuff(ctx, cx2 - CW, cy2, s, fill, belly, mulberry32(seed));
   }
   cloudTex.needsUpdate = true;
 }
@@ -367,26 +376,83 @@ function updateRain(dt) {
   }
   a.needsUpdate = true;
 }
-function applyEnvironment() {
-  const p = PHASES[game.phase] || PHASES[0];
-  const w = game.weather || 'sunny';
-  drawSky(p, w);
-  drawClouds(p, w);
-  const dimD = w === 'sunny' ? 1 : w === 'cloudy' ? 0.55 : 0.35;
-  const dimH = w === 'sunny' ? 1 : w === 'cloudy' ? 0.85 : 0.7;
+// ---------- the living clock ----------
+// 1s of play = 1min of world time: a whole day wheels past in 24 minutes, and the sky
+// blends smoothly through the phase palettes instead of jumping. Night holds solid
+// 22:00-05:00, dawn breaks 05:00-07:00, then morning -> noon -> sunset -> dusk.
+const PHASE_ANCHORS = [[1, 3], [5, 3], [7, 0], [13, 1], [18.5, 2], [22, 3], [25, 3]]; // [hour, PHASES idx]
+function lerpHex(a, b, u) { return '#' + new THREE.Color(a).lerp(new THREE.Color(b), u).getHexString(); }
+const _pmix = {};
+function phaseMixAt(t) {
+  if (t < PHASE_ANCHORS[0][0]) t += 24;
+  let i = 0;
+  while (i < PHASE_ANCHORS.length - 2 && t >= PHASE_ANCHORS[i + 1][0]) i++;
+  let u = (t - PHASE_ANCHORS[i][0]) / (PHASE_ANCHORS[i + 1][0] - PHASE_ANCHORS[i][0]);
+  u = u * u * (3 - 2 * u); // dwell at each anchor, glide between
+  const A = PHASES[PHASE_ANCHORS[i][1]], B = PHASES[PHASE_ANCHORS[i + 1][1]];
+  for (const k of ['top', 'mid', 'hor', 'sun', 'cloudC', 'cloudB', 'fog', 'hemiSky', 'hemiGnd', 'dirC', 'ambC']) _pmix[k] = lerpHex(A[k], B[k], u);
+  for (const k of ['sunV', 'sunR', 'hemiI', 'dirI', 'ambI']) _pmix[k] = lerp(A[k], B[k], u);
+  _pmix.dirPos = [lerp(A.dirPos[0], B.dirPos[0], u), lerp(A.dirPos[1], B.dirPos[1], u), lerp(A.dirPos[2], B.dirPos[2], u)];
+  _pmix.nightW = (A.stars ? 1 - u : 0) + (B.stars ? u : 0);
+  _pmix.starA = _pmix.nightW;
+  return _pmix;
+}
+// the coarse phase 0-3 that gameplay systems key off (crickets, seeds, net compat)
+function coarsePhase(t) { return t < 5 ? 3 : t < 10 ? 0 : t < 16 ? 1 : t < 20 ? 2 : 3; }
+// ---------- the weather machine ----------
+// rerolls every 5 minutes of play, 50% sunny / 50% cloudy — and when a cloudy spell
+// reaches its halfway mark, rain has a 50% chance to muscle in for the back half.
+// States crossfade over ~20s instead of snapping.
+const wx = { from: 'sunny', to: 'sunny', u: 1, T: 300, half: false };
+function wxWeights() {
+  const w = { sunny: 0, cloudy: 0, rain: 0 };
+  w[wx.from] += 1 - wx.u; w[wx.to] += wx.u;
+  return w;
+}
+function wxSet(kind) { wx.from = wx.to = kind; wx.u = 1; game.weather = kind; }
+function wxReset() { wxSet(Math.random() < 0.5 ? 'sunny' : 'cloudy'); wx.T = 300; wx.half = false; }
+let skyRedrawT = 0;
+function updateDayNight(dt) {
+  game.clock = ((game.clock ?? 13) + dt / 60) % 24;
+  game.phase = coarsePhase(game.clock);
+  if (net.role !== 'client') { // the host owns the weather dice; clients follow snapshots
+    wx.T -= dt;
+    if (!wx.half && wx.T <= 150) {
+      wx.half = true;
+      if (wx.to === 'cloudy' && wx.u >= 1 && Math.random() < 0.5) { wx.from = 'cloudy'; wx.to = 'rain'; wx.u = 0; }
+    }
+    if (wx.T <= 0) {
+      wx.T = 300; wx.half = false;
+      const next = Math.random() < 0.5 ? 'sunny' : 'cloudy';
+      if (next !== wx.to) { wx.from = wx.to; wx.to = next; wx.u = 0; }
+    }
+  }
+  if (wx.u < 1) wx.u = Math.min(1, wx.u + dt / 20);
+  game.weather = wx.u < 0.5 ? wx.from : wx.to;
+  skyRedrawT -= dt;
+  applyEnvironment(skyRedrawT <= 0);
+}
+// lights and fog blend every frame (cheap); the sky/cloud canvases repaint at 1Hz,
+// which is plenty for a day that moves a minute per second
+function applyEnvironment(redraw = true) {
+  const p = phaseMixAt(game.clock ?? 13);
+  const W = wxWeights();
+  if (redraw) { drawSky(p, W); drawClouds(p, W); skyRedrawT = 1; syncWeatherAmbience(); }
+  const dimD = W.sunny + W.cloudy * 0.55 + W.rain * 0.35;
+  const dimH = W.sunny + W.cloudy * 0.85 + W.rain * 0.7;
   hemi.color.set(p.hemiSky); hemi.groundColor.set(p.hemiGnd); hemi.intensity = p.hemiI * dimH;
   moon.color.set(p.dirC); moon.intensity = p.dirI * dimD;
   moonOff.set(p.dirPos[0], p.dirPos[1], p.dirPos[2]);
   warm.color.set(p.ambC); warm.intensity = p.ambI;
   const fogC = new THREE.Color(p.fog);
-  if (w === 'cloudy') fogC.lerp(new THREE.Color(0x9aa0aa), 0.4);
-  if (w === 'rain') fogC.lerp(new THREE.Color(0x5c636e), 0.6);
+  fogC.lerp(new THREE.Color(0x9aa0aa), 0.4 * W.cloudy);
+  fogC.lerp(new THREE.Color(0x5c636e), 0.6 * W.rain);
   scene.fog.color.copy(fogC);
-  scene.fog.near = w === 'rain' ? 16 : w === 'cloudy' ? 24 : 28;
-  scene.fog.far = w === 'rain' ? 70 : w === 'cloudy' ? 92 : 105;
-  scene.background = fogC.clone();
-  rainOn(w === 'rain');
-  syncWeatherAmbience();
+  scene.fog.near = 28 * W.sunny + 24 * W.cloudy + 16 * W.rain;
+  scene.fog.far = 105 * W.sunny + 92 * W.cloudy + 70 * W.rain;
+  scene.background.copy(fogC);
+  rainOn(W.rain > 0.45);
+  if (rainMesh) rainMesh.material.opacity = 0.4 * Math.min(1, W.rain * 1.6);
 }
 
 // fake blob shadow
@@ -3438,8 +3504,12 @@ function resetGame() {
   const vb = document.getElementById('btnView'); if (vb) vb.classList.remove('pressed');
   const ab = document.getElementById('btnAim'); if (ab) ab.classList.remove('pressed'); // aim toggle resets off
   game.time = 0; game.kills = 0; game.cratesOpened = 0; game.spawnT = 2; game.lastShotT = -99;
-  // every run starts on a fresh morning; the sky rolls forward as blocks are cleared
-  game.phase = 0; game.cycle = 0; game.weather = rollWeather(); game.cleanup = false; game.clearTarget = 0;
+  // the clock starts at 8am, 11am or 1pm — one roll per lobby/campaign — and the weather
+  // starts random; from there the day wheels on its own (1s of play = 1min of world)
+  game.clock = [8, 11, 13][(Math.random() * 3) | 0];
+  game.phase = coarsePhase(game.clock);
+  wxReset();
+  game.cycle = 0; game.cleanup = false; game.clearTarget = 0;
   game.celebrateT = 0;
   applyEnvironment();
   // clear ground gore from the last run
@@ -4241,6 +4311,7 @@ function animate() {
 
   if (game.state === 'playing') {
     game.time += dt;
+    updateDayNight(dt);
     updatePlayer(dt);
     if (net.role === 'client') {
       // the host owns the squad, zombies and spawner; we animate their ghosts
@@ -6049,7 +6120,7 @@ function wireHostConn(conn) {
       else toast(`PLAYER ${num} TOOK OVER ${c.data.name.toUpperCase()} .ᐟ`);
       net.conns.push(conn);
       conn.send({ t: 'welcome', n: num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
-        w: game.weather, ph: game.phase, tm: game.time, k: game.kills });
+        w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills });
       rebuildSquadBars();
     } else if (m.t === 'p') {
       const c = cousinByConn(conn);
@@ -6110,7 +6181,7 @@ function netHostTick(dt) {
       bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0 });
   }
   const boss = bossState.boss;
-  netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ac, zb,
+  netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1 });
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
@@ -6159,7 +6230,8 @@ function netClientData(m, conn, peer, code) {
     companions.length = 0;
     for (const z of zombies) { scene.remove(z.blob.root); if (z.blob.shadow) scene.remove(z.blob.shadow); }
     zombies.length = 0;
-    game.weather = m.w; game.phase = m.ph; applyEnvironment();
+    if (m.ck != null) game.clock = m.ck;
+    game.phase = m.ph; wxSet(m.w); applyEnvironment();
     game.time = m.tm; game.kills = m.k; hud.kills.textContent = m.k;
     player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
     toast(`JOINED ${code.toUpperCase()} .ᐟ YOU ARE PLAYER ${m.n}`, true);
@@ -6201,7 +6273,10 @@ function netSendEmote(i) {
 function netApplySnapshot(m) {
   if (Math.abs(m.tm - game.time) > 1) game.time = m.tm;
   if (m.k !== game.kills) { game.kills = m.k; hud.kills.textContent = m.k; }
-  if (m.w !== game.weather || m.ph !== game.phase) { game.weather = m.w; game.phase = m.ph; applyEnvironment(); }
+  // the host owns the clock and the weather dice; we tick locally and correct on drift,
+  // and glide into the host's weather through the same 20s crossfade it used
+  if (m.ck != null && Math.abs(m.ck - (game.clock ?? 0)) > 0.15) game.clock = m.ck;
+  if (m.w && m.w !== wx.to) { wx.from = game.weather; wx.to = m.w; wx.u = 0; }
   bossBarEl.classList.toggle('show', m.bb >= 0);
   if (m.bb >= 0) bossHpEl.style.width = m.bb * 100 + '%';
   const seenA = new Set();
@@ -6451,7 +6526,7 @@ refreshControlsBar();
 renderPrestige();
 equipWeapon('fists');
 buildTown();
-game.weather = rollWeather();
+game.clock = 9; wxReset(); applyEnvironment(); // a gentle mid-morning behind the menus
 applyEnvironment(); // morning sky behind the menus too
 updateChunks(0, 0);
 player.pos.y = groundHeight(0, 0);
@@ -6472,7 +6547,8 @@ window.__dbg = {
   fire: () => fireWeapon(),
   hurt: (dmg, ax, az) => hurtPlayer(dmg, ax, az),
   toggleFPV, bossState, spawnBoss, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
-  setSky: (phase, weather) => { game.phase = phase; if (weather) game.weather = weather; applyEnvironment(); },
+  setSky: (phase, weather) => { game.clock = [8, 13, 18.7, 23][phase] ?? 13; if (weather) wxSet(weather); applyEnvironment(); },
+  setClock: (h) => { game.clock = h % 24; applyEnvironment(); },
   recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateCelebration(dt); updateFx(dt); },
 };
