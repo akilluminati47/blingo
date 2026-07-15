@@ -1871,6 +1871,9 @@ function parkingLot(x, z, w, d, rows, rng) {
 const graveSpots = [];
 const CHURCH = { x: 25, z: 81 };                       // nave runs N-S; main door faces the road (south), graveyard on the east flank
 const GRAVEYARD = { x0: 40, z0: 70, x1: 58, z1: 92 };  // spike-fenced plot east of the church
+// the strip between the church side door and the graveyard gate: where the Crimson One lies
+// once the block is scoured, and the patch of ground this whole town's infection leaks from
+const CHURCHYARD = { x: 35, z: 81 };
 function buildChurchyard(rng) {
   const ironMat = mat(0x23262c);
   // nave runs north-south: w is the (narrow) east-west width, d the long axis toward the road
@@ -5034,7 +5037,7 @@ function updateZombies(dt) {
 
     // boss: sleeps by the bank until approached, then sends waves at damage thresholds
     if (z.isBoss) {
-      updateBossState(z, pDist);
+      updateBossState(z);
       if (z.state === 'dormant') {
         b.root.position.set(z.pos.x, groundHeight(z.pos.x, z.pos.z), z.pos.z);
         b.root.rotation.y = z.yaw;
@@ -5184,6 +5187,22 @@ function updateZombies(dt) {
   }
 }
 
+// how far the closest person actually playing is: the local hero, or a cousin somebody else
+// is driving. AI cousins never count — they only ever trail the hero, so they'd report his
+// position back and let him wake things he's nowhere near.
+function nearestPlayerDist(x, z) {
+  let best = Math.hypot(player.pos.x - x, player.pos.z - z);
+  for (const c of companions) if (c.netP) best = Math.min(best, Math.hypot(c.pos.x - x, c.pos.z - z));
+  return best;
+}
+// step inside this of the churchyard and its ground starts giving up its dead (he wakes at 18)
+const CHURCHYARD_NEAR = 42;
+// The Crimson One asleep at the church, block already scoured: his ground is the only thing
+// left in town still turning. Nothing spawns anywhere while nobody's near it.
+function churchyardVigil() {
+  const b = bossState.boss;
+  return bossState.spawned2 && !bossState.defeated2 && !!b && b.isBoss2 && b.state === 'dormant';
+}
 function updateSpawner(dt) {
   if (game.time < 15 || settings.zombieSpawn <= 0 || game.celebrateT > 0) return;
   game.spawnT -= dt;
@@ -5193,19 +5212,29 @@ function updateSpawner(dt) {
     const alive = zombies.reduce((n, zz) => n + (zz.state !== 'dying' ? 1 : 0), 0);
     if (game.kills + alive >= game.clearTarget) return;
   }
+  // Scoured block, Crimson One still sleeping: the streets stay empty. Walk up on his
+  // churchyard and it starts handing them back — out of the mounds, never out of the town,
+  // so it reads as the one wound the infection was always leaking from. Walk away and the
+  // block is clean again. Wake him and the whole map floods as before, until he falls.
+  const vigil = churchyardVigil();
+  if (vigil && nearestPlayerDist(CHURCHYARD.x, CHURCHYARD.z) > CHURCHYARD_NEAR) return;
   const maxZ = Math.round(Math.min(26, 4 + Math.floor(game.time / 22) + Math.floor(game.kills / 7)) * settings.zombieSpawn);
   const interval = Math.max(0.35, (3.6 - game.time / 80) / settings.zombieSpawn);
   if (game.spawnT <= 0 && zombies.length < maxZ) {
     game.spawnT = interval;
-    // the graveyard breathes: near the churchyard, some spawns claw up out of the mounds
-    if (graveSpots.length && Math.random() < 0.3) {
+    // the graveyard breathes: near the churchyard, some spawns claw up out of the mounds.
+    // During the vigil it's the only door left open — every one of them comes up out of it.
+    if (graveSpots.length && (vigil || Math.random() < 0.3)) {
       const gs = graveSpots[(Math.random() * graveSpots.length) | 0];
-      const d = Math.hypot(gs.x - player.pos.x, gs.z - player.pos.z);
+      const d = nearestPlayerDist(gs.x, gs.z);
       if (d > 14 && d < 60) {
         spawnZombie(gs.x, gs.z, 1 + game.time / 240, { mode: 'grave' });
         return;
       }
     }
+    // the mound we drew came up under their feet, or too far off to matter. Normally the
+    // street takes over from here — during the vigil there is no street left to take over.
+    if (vigil) return;
     const runner = Math.random() < 0.22; // far spawns already running our way
     let x = 0, z = 0, ok = false;
     for (let tries = 0; tries < 8 && !ok; tries++) {
@@ -5274,7 +5303,7 @@ function spawnBoss() {
 // the church doors (red horned guards + purple fodder) and up out of the graves.
 function spawnBoss2() {
   bossState.spawned2 = true;
-  const bx = 35, bz = 81;                     // the strip between the church side door and the graveyard gate
+  const bx = CHURCHYARD.x, bz = CHURCHYARD.z; // the strip between the church side door and the graveyard gate
   const blob = buildBlob({ color: BOSS_CRIMSON, zombie: true, scale: 2.7, hands: CRIMSON_HANDS });
   for (const s of [-1, 1]) {                  // the same crown of horns, rust-dark
     const horn = cyl(0.02, 0.15, 0.55, 0x3a1414, 6);
@@ -5321,10 +5350,12 @@ function bossDash(z) {
   shakeAmp = Math.max(shakeAmp, 0.15);
   play3d(z.pos.x, z.pos.z, () => tone(95, 0.45, 0.45, 'sawtooth', 38));
 }
-function updateBossState(z, pDist) {
+function updateBossState(z) {
   if (z.state === 'dormant') {
-    // sleeps until the player draws near, then aggros
-    if (!player.dead && pDist < 18) wakeBoss(z);
+    // sleeps until someone draws near, then aggros — and anyone playing will do. The vigil
+    // outside answers whoever walks up on the churchyard, so he has to answer them too, or
+    // they'd stand on his doorstep prising the graves open forever and never wake him.
+    if (!player.dead && nearestPlayerDist(z.pos.x, z.pos.z) < 18) wakeBoss(z);
     return;
   }
   // damage-taken thresholds send bigger swarms boiling out of the bank
