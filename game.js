@@ -6441,7 +6441,7 @@ function wakeBoss(z) {
   z.state = 'chase';
   dressBossBar(z);
   bossBarEl.classList.add('show');
-  toast(z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS .ᐟ', true);
+  toast(z.isBoss3 ? 'THE INFECTED ONE DISTURBS THE LOT .ᐟ' : z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS .ᐟ', true);
   shakeAmp = Math.max(shakeAmp, 0.4);
   rumble(400, 1, 1);
   play3d(z.pos.x, z.pos.z, () => { noiseBurst(0.5, 200, 0.9); tone(60, 0.6, 0.5, 'sawtooth', 30); });
