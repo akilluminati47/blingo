@@ -175,14 +175,45 @@ const glowTex = canvasTex(64, 64, ctx => {
   g.addColorStop(1, 'rgba(255,220,120,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
 });
-function textPlate(txt, w, h, bg = '#3a3128', fg = '#ffe9c0') {
-  const t = canvasTex(256, 64, ctx => {
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, 256, 64);
-    ctx.strokeStyle = fg; ctx.lineWidth = 3; ctx.strokeRect(4, 4, 248, 56);
-    ctx.fillStyle = fg; ctx.font = 'bold 30px Georgia'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(txt, 128, 34);
-  });
+// ---------- shop + civic signage ----------
+// The town's signs are the blob font in caps, same face the blobs' own menus wear, on a
+// clean plate: one hairline rule inset off the edge instead of the old heavy frame, and the
+// name fitted to the width so a long one shrinks to sit inside the rule rather than running
+// out through it. Rendered at 512x128 — the plates are all ~4:1, and the old 256x64 was
+// soft enough to read as a smudge from across the street.
+const SIGN_FONT = "'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive";
+const SIGN_W = 512, SIGN_H = 128;
+const textPlates = [];
+function drawPlate(ctx, txt, bg, fg) {
+  ctx.clearRect(0, 0, SIGN_W, SIGN_H);
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, SIGN_W, SIGN_H);
+  ctx.strokeStyle = fg; ctx.lineWidth = 3; ctx.globalAlpha = 0.6;
+  ctx.strokeRect(11, 11, SIGN_W - 22, SIGN_H - 22);
+  ctx.globalAlpha = 1;
+  const caps = txt.toUpperCase();
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '3px';   // ignored where unsupported
+  // shrink until it clears the rule with room either side
+  let size = 66;
+  const fit = SIGN_W - 60;
+  ctx.font = `bold ${size}px ${SIGN_FONT}`;
+  while (ctx.measureText(caps).width > fit && size > 14) { size -= 2; ctx.font = `bold ${size}px ${SIGN_FONT}`; }
+  ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(caps, SIGN_W / 2, SIGN_H / 2 + 2);
+}
+function textPlate(txt, w, h, bg = '#241f1a', fg = '#ffe9c0') {
+  const t = canvasTex(SIGN_W, SIGN_H, ctx => drawPlate(ctx, txt, bg, fg));
+  textPlates.push({ txt, bg, fg, tex: t });
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: t }));
+}
+// Canvas text bakes in whatever font is loaded the instant you draw it, and the whole town
+// is built long before a webfont crosses the wire — so every sign would silently bake the
+// fallback. Ask for the face, then re-render the signage once it actually lands.
+if (document.fonts && document.fonts.load) {
+  Promise.all([document.fonts.load(`bold 66px ${SIGN_FONT}`), document.fonts.ready])
+    .then(() => {
+      for (const p of textPlates) { drawPlate(p.tex.image.getContext('2d'), p.txt, p.bg, p.fg); p.tex.needsUpdate = true; }
+    })
+    .catch(() => {});   // no webfont: the fallback face already baked in is fine
 }
 
 // ---------- sky, time-of-day & weather ----------
