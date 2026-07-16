@@ -222,8 +222,11 @@
      font. Sized in JS from distance, so no transitions here or every frame would fight
      them. Flex-column + centered items keeps the arrow locked under the name regardless
      of which one is wider, instead of relying on block width matching up. Bosses drop the
-     name entirely — just a bigger chevron with its own idle bounce (see .ptag.boss below). */
-  #ptags { position:fixed; inset:0; pointer-events:none; z-index:9; overflow:hidden; }
+     name entirely — just a bigger chevron with its own idle bounce (see .ptag.boss below).
+     The tags are the wayfinding layer: they ride ABOVE every in-game surface (HUD, scope,
+     bubbles, touch controls, emote wheel) so a far-off player or boss marker is never
+     buried — only full-screen menus (30) and the fade (40) still outrank them. */
+  #ptags { position:fixed; inset:0; pointer-events:none; z-index:25; overflow:hidden; }
   .ptag { position:absolute; transform:translate(-50%,-100%); display:flex; flex-direction:column; align-items:center;
     line-height:1; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     font-weight:700; white-space:nowrap; will-change:transform,opacity; }
@@ -307,9 +310,13 @@
   }
 
   /* ---------- pause button + settings menu ---------- */
+  /* the PC pause squircle sits in the same top rank as the stats badge and the controls
+     menu: same 10px drop from the top, same 12px in from its screen edge, and its box is
+     the stats badge's own rendered height (41px: 6px pads + 18px b + 2px + 9px span + borders),
+     wearing the same radius, fill and border so the three read as one family */
   #btnPauseHud { position:absolute; top:calc(10px + env(safe-area-inset-top)); right:calc(12px + env(safe-area-inset-right));
-    width:38px; height:38px; border-radius:10px; background:rgba(8,10,14,.55); border:1px solid rgba(255,255,255,.18);
-    color:#eee; font-size:15px; display:none; align-items:center; justify-content:center; pointer-events:auto; cursor:pointer; backdrop-filter:blur(6px); }
+    width:41px; height:41px; box-sizing:border-box; border-radius:12px; background:rgba(8,10,14,.55); border:1px solid rgba(255,255,255,.12);
+    color:#eee; font-size:16px; display:none; align-items:center; justify-content:center; pointer-events:auto; cursor:pointer; backdrop-filter:blur(6px); }
   body.playing #btnPauseHud { display:flex; }
   #btnPauseHud:active { background:rgba(255,255,255,.22); }
   /* touch keeps both top corners clear: pause is the circle crowning the left button

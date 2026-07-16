@@ -18,9 +18,13 @@ renderer.setSize(innerWidth, innerHeight);
 const scene = new THREE.Scene();
 const SKY = 0x2b3350;
 scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 28, 105);
+// placeholder until applyEnvironment takes over: it drives fog off the draw-distance
+// setting every frame (far end always inside the chunk stream radius — see syncDerived)
+scene.fog = new THREE.Fog(SKY, 29, 108);
 
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 300);
+// the far plane runs way past the fog so the fog-exempt landmarks — the town skyline
+// silhouettes and the clipmap ground they stand on — never get frustum-chopped
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 6000);
 
 const hemi = new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 0.9);
 scene.add(hemi);
@@ -480,9 +484,21 @@ function applyEnvironment(redraw = true) {
   fogC.lerp(new THREE.Color(0x9aa0aa), 0.4 * W.cloudy);
   fogC.lerp(new THREE.Color(0x5c636e), 0.6 * W.rain);
   scene.fog.color.copy(fogC);
-  scene.fog.near = 28 * W.sunny + 24 * W.cloudy + 16 * W.rain;
-  scene.fog.far = 105 * W.sunny + 92 * W.cloudy + 70 * W.rain;
+  // the draw-distance notch owns the fog reach (settings.fogFar); weather keeps its old
+  // character as fractions of it (the same 105:92:70 and 28:24:16 ratios as before).
+  // Because fogFar never exceeds the guaranteed streamed-ground radius, chunks and
+  // everything standing on them are always born fully fogged — nothing pops in.
+  const F = settings.fogFar;
+  scene.fog.near = F * (0.267 * W.sunny + 0.229 * W.cloudy + 0.152 * W.rain);
+  scene.fog.far = F * (W.sunny + 0.876 * W.cloudy + 0.667 * W.rain);
   scene.background.copy(fogC);
+  // the town skyline wears a shade under the sky, and only fades in once the real
+  // (fogged) town has melted away — a fog-free silhouette landmark at any distance
+  skylineMat.color.copy(fogC).multiplyScalar(0.78);
+  const camd = rectDist(camera.position.x, camera.position.z, TOWN_SKY_RECT);
+  const skyT = clamp((camd - scene.fog.far * 0.55) / (scene.fog.far * 0.45), 0, 1);
+  skylineMat.opacity = skyT * 0.85;
+  skylineGroup.visible = skyT > 0.01;
   rainOn(W.rain > 0.45);
   if (rainMesh) rainMesh.material.opacity = 0.4 * Math.min(1, W.rain * 1.6);
   setLampGlow(lampLitFor(game.clock ?? 13, W)); // the street lamps take over as the sky goes down
@@ -498,9 +514,12 @@ function makeShadow(r) {
 }
 
 // ---------- settings (5-notch bars in the pause menu, persisted) ----------
+// coarse-pointer touch device? decided once, up here, because the default draw distance
+// leans on it (phones start at the lightest notch) — the input code reuses it as isTouch
+const IS_TOUCH = ('ontouchstart' in window) && matchMedia('(pointer: coarse)').matches;
 // notches: integer 0..5 per setting. `settings` holds the derived engine values.
-const NOTCH_KEYS = ['master', 'sfx', 'music', 'ambience', 'mouseSens', 'padSens', 'zombieSpawn', 'lootSpawn', 'gore', 'extraGore'];
-const notches = { master: 3, sfx: 5, music: 3, ambience: 2, mouseSens: 3, padSens: 3, zombieSpawn: 2, lootSpawn: 2, gore: 3, extraGore: 0 };
+const NOTCH_KEYS = ['master', 'sfx', 'music', 'mouseSens', 'padSens', 'drawDist', 'zombieSpawn', 'lootSpawn', 'gore', 'extraGore'];
+const notches = { master: 3, sfx: 5, music: 3, mouseSens: 3, padSens: 3, drawDist: IS_TOUCH ? 0 : 2, zombieSpawn: 2, lootSpawn: 2, gore: 3, extraGore: 0 };
 try {
   const saved = JSON.parse(localStorage.getItem('blingo-notches') || '{}');
   for (const k of NOTCH_KEYS) if (Number.isInteger(saved[k]) && saved[k] >= 0 && saved[k] <= 5) notches[k] = saved[k];
@@ -512,13 +531,22 @@ function syncDerived() {
   settings.master = notches.master / 5;
   settings.sfx = notches.sfx / 5;
   settings.music = notches.music / 5;
-  settings.ambience = notches.ambience / 5;
+  // ambience rides the SFX notch now (its old default mix was 0.4 against sfx's 1.0, so the
+  // scale keeps the balance) — the freed settings row went to draw distance
+  settings.ambience = settings.sfx * 0.4;
   settings.mouseSens = SENS_MULT[notches.mouseSens];
   settings.padSens = SENS_MULT[notches.padSens];
   settings.zombieSpawn = SPAWN_MULT[notches.zombieSpawn];
   settings.lootSpawn = SPAWN_MULT[notches.lootSpawn];
   settings.gore = notches.gore / 5;
   settings.extraGore = notches.extraGore / 5;
+  // draw distance: how many chunk rings stay live, and how far the fog lets you see.
+  // fogFar (the sunny-weather cap) never exceeds the guaranteed streamed-ground radius
+  // (viewR chunks = viewR*40 units in the worst standing spot), so the world is always
+  // born behind the fog line, never in front of it. Phones default to the lightest
+  // notch — same live-chunk cost as ever, minus the pop-in.
+  settings.viewR = [2, 3, 3, 3, 4, 4][notches.drawDist];
+  settings.fogFar = [76, 96, 108, 116, 136, 156][notches.drawDist];
 }
 syncDerived();
 
@@ -1145,7 +1173,7 @@ function updateFlash(blob, dt) {
 
 // ---------- world generation ----------
 const CHUNK = 40;
-const VIEW_R = 2;
+// how many chunk rings stay live comes off the Draw Distance notch now (settings.viewR)
 const chunks = new Map();
 const allCrates = [];
 const townColliders = [];
@@ -1722,55 +1750,89 @@ function insideBuilding(x, z) { return !!buildingAt(x, z); }
 
 function chunkKey(cx, cz) { return cx + ',' + cz; }
 
-// ---------- ground silhouettes ----------
-// covered ground never falls into the void: every chunk we've walked leaves its key in
-// visitedChunks, and once it streams out a cheap dark low-res terrain quad stands in,
-// so looking back from far afield there is never a floor gap between us and town.
-// Scope stays intelligent: silhouettes only live inside the padded corridor rectangle
-// spanning the player and the town footprint — circle wide around the bank and the
-// ones swinging out of that corridor melt away (and re-form if it sweeps back over
-// ground we'd covered, since visited keys are kept forever — keys are nearly free).
-const visitedChunks = new Set();
-const silhouettes = new Map(); // chunk key -> mesh
-const silMat = new THREE.MeshLambertMaterial({ color: 0x171a20 });
-// the persistent town apron in chunk coords (apron is 208 wide centred on 47,2)
-const TOWN_RECT = { x0: -1, x1: 3, z0: -2, z1: 2 };
-function updateSilhouettes(ccx, ccz) {
-  const x0 = Math.min(ccx, TOWN_RECT.x0) - 1, x1 = Math.max(ccx, TOWN_RECT.x1) + 1;
-  const z0 = Math.min(ccz, TOWN_RECT.z0) - 1, z1 = Math.max(ccz, TOWN_RECT.z1) + 1;
-  for (const key of visitedChunks) {
-    if (chunks.has(key) || silhouettes.has(key)) continue;
-    const [cx, cz] = key.split(',').map(Number);
-    if (cx < x0 || cx > x1 || cz < z0 || cz > z1) continue;
-    // sunk a touch lower than live terrain so a returning chunk always draws over it
-    const m = terrainPlane(CHUNK, CHUNK, 6, 6, cx * CHUNK, cz * CHUNK, silMat, -0.3);
-    scene.add(m);
-    silhouettes.set(key, m);
-  }
-  for (const [key, m] of silhouettes) {
-    const [cx, cz] = key.split(',').map(Number);
-    if (chunks.has(key) || cx < x0 || cx > x1 || cz < z0 || cz > z1) {
-      scene.remove(m);
-      m.geometry.dispose();
-      silhouettes.delete(key);
+// ---------- geometry clipmap ground ----------
+// The world only STREAMS near the player (live chunks carry the buildings, loot and
+// colliders), but the ground itself now runs to the horizon on a stable geometry
+// clipmap: a dense core under the live chunks, then concentric LOD rings that double
+// their cell size with every step out, so vertex density lives near the camera and
+// the far field costs almost nothing. Each level snaps to its own fixed world lattice
+// (twice its cell), so a vertex only ever samples groundHeight at points it has
+// sampled before — heights never swim as the player moves, they just extend. Live
+// chunks draw their detailed terrain over the top; past the stream radius the clipmap
+// IS the ground, and the fog line owns the far end of it. This replaces the old
+// visited-chunk corridor silhouettes — every direction keeps a floor now, not just
+// the ground already walked.
+const CLIP_LEVELS = [
+  { cell: 5, half: 80 },    // solid core: live-chunk territory, hidden under real terrain
+  { cell: 10, half: 160 },  // rings: each level doubles the reach of the one inside it
+  { cell: 20, half: 320 },
+  { cell: 40, half: 640 },
+  { cell: 80, half: 1280 },
+];
+// one quiet wasteland tone, the average of the live grass mats — by the time the
+// clipmap is the visible ground it's mostly fog anyway, so the seam never reads
+const clipMat = new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(0.285, 0.3, 0.26) });
+const clipLevels = []; // {panels, group, cell, sink, ox, oz}
+{
+  CLIP_LEVELS.forEach((L, i) => {
+    // every level rides a little lower than the one inside it, and ring holes are cut
+    // one cell smaller than the level they frame — that tuck-under overlap is what
+    // seals the seams (no T-junction stitching, nothing to flicker through)
+    const sink = 0.22 + 0.2 * i;
+    const group = new THREE.Group();
+    const panels = [];
+    const rects = []; // plan rects [x0,z0,x1,z1] local to the level origin
+    if (i === 0) rects.push([-L.half, -L.half, L.half, L.half]);
+    else {
+      const hx = CLIP_LEVELS[i - 1].half - L.cell;
+      rects.push([-L.half, -L.half, L.half, -hx], [-L.half, hx, L.half, L.half],
+                 [-L.half, -hx, -hx, hx], [hx, -hx, L.half, hx]);
     }
+    for (const [x0, z0, x1, z1] of rects) {
+      const w = x1 - x0, d = z1 - z0;
+      const geo = new THREE.PlaneGeometry(w, d, w / L.cell, d / L.cell);
+      geo.rotateX(-Math.PI / 2);
+      geo.translate((x0 + x1) / 2, 0, (z0 + z1) / 2);
+      const mesh = new THREE.Mesh(geo, clipMat);
+      group.add(mesh);
+      panels.push(mesh);
+    }
+    scene.add(group);
+    clipLevels.push({ group, panels, cell: L.cell, sink, ox: null, oz: null });
+  });
+}
+function clipDisplace(lv) {
+  for (const mesh of lv.panels) {
+    const pos = mesh.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, groundHeight(lv.ox + pos.getX(i), lv.oz + pos.getZ(i)) - lv.sink);
+    }
+    pos.needsUpdate = true;
+    mesh.geometry.computeVertexNormals();
+    mesh.geometry.computeBoundingSphere();
   }
 }
-function resetSilhouettes() {
-  for (const m of silhouettes.values()) { scene.remove(m); m.geometry.dispose(); }
-  silhouettes.clear();
-  visitedChunks.clear();
+function updateClipmap(px, pz) {
+  for (const lv of clipLevels) {
+    // snap to twice the cell so vertices keep landing on the same world lattice
+    const s = lv.cell * 2;
+    const ox = Math.round(px / s) * s, oz = Math.round(pz / s) * s;
+    if (ox === lv.ox && oz === lv.oz) continue;
+    lv.ox = ox; lv.oz = oz;
+    lv.group.position.set(ox, 0, oz);
+    clipDisplace(lv); // only the level that actually snapped re-samples its heights
+  }
 }
 
 function updateChunks(px, pz) {
+  const R = settings.viewR; // live-chunk rings off the Draw Distance notch
   const ccx = Math.round(px / CHUNK), ccz = Math.round(pz / CHUNK);
-  for (let dx = -VIEW_R; dx <= VIEW_R; dx++) for (let dz = -VIEW_R; dz <= VIEW_R; dz++) {
+  for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
     const key = chunkKey(ccx + dx, ccz + dz);
     if (!chunks.has(key)) chunks.set(key, buildChunk(ccx + dx, ccz + dz));
-    visitedChunks.add(key);
   }
   for (const [key, ch] of chunks) {
-    if (Math.abs(ch.cx - ccx) > VIEW_R + 1 || Math.abs(ch.cz - ccz) > VIEW_R + 1) {
+    if (Math.abs(ch.cx - ccx) > R + 1 || Math.abs(ch.cz - ccz) > R + 1) {
       scene.remove(ch.group);
       ch.group.traverse(o => {
         if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose();
@@ -1785,7 +1847,7 @@ function updateChunks(px, pz) {
       chunks.delete(key);
     }
   }
-  updateSilhouettes(ccx, ccz);
+  updateClipmap(px, pz);
 }
 function nearbyColliders(x, z) {
   const out = [];
@@ -1922,6 +1984,31 @@ function rayGround(ox, oy, oz, dx, dy, dz, maxT) {
 const townGroup = new THREE.Group();
 const townCrates = [];
 let fountainFx = null; // animated water on the plaza fountain — filled in buildTown, run by updateFountain
+
+// ---------- town skyline silhouettes ----------
+// The civic skyline is the landmark you navigate home by, so it never fogs out: each
+// tall town-centre structure registers a silhouette box here as it's built, drawn
+// FOG-FREE in a shade just under the sky, and faded in only once the real (fogged)
+// town has melted away. Boxes sit slightly proud of the real walls so they win the
+// depth test against fully-fogged faces instead of hiding behind them — up close
+// they're at zero opacity and the real town owns the view.
+const TOWN_SKY_RECT = [-16, -60, 110, 94]; // spans bank .. town hall .. church
+const skylineSpecs = []; // {x, z, hw, hd, y0, y1}
+const skylineGroup = new THREE.Group();
+const skylineMat = new THREE.MeshBasicMaterial({ color: 0x1a1e2a, fog: false, transparent: true, opacity: 0 });
+function skylineAdd(x, z, hw, hd, y0, y1) { skylineSpecs.push({ x, z, hw, hd, y0, y1 }); }
+function buildSkyline() {
+  for (const s of skylineSpecs) {
+    // +0.4 out and +0.15 up beyond the real faces; the base is buried well under the
+    // terrain so no undulation ever slips daylight beneath a silhouette
+    const w = (s.hw + 0.4) * 2, d = (s.hd + 0.4) * 2, h = (s.y1 + 0.15) - (s.y0 - 2);
+    const m = new THREE.Mesh(BOX, skylineMat);
+    m.scale.set(w, h, d);
+    m.position.set(s.x, s.y0 - 2 + h / 2, s.z);
+    skylineGroup.add(m);
+  }
+  scene.add(skylineGroup);
+}
 scene.add(townGroup);
 
 // civic building: colonnaded facade on the faceDir side (+1 = faces +z, -1 = faces -z)
@@ -1931,6 +2018,8 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   body.position.set(x, y0 + h / 2, z);
   townGroup.add(body);
   townColliders.push(aabb(x, z, w / 2, d / 2, h, y0));
+  // the civic mass (body + portico slab) joins the far skyline
+  skylineAdd(x, z, (w + 1) / 2, (d + 2.6) / 2, y0, y0 + h + 0.45);
   const fz = z + faceDir * d / 2; // facade plane, turned toward the road
   // full-height columns whose capitals meet the portico slab above
   for (let i = 0; i < 4; i++) {
@@ -2120,6 +2209,11 @@ function buildChurchyard(rng) {
   spire.position.set(cx, ridgeY + 4, steepleZ);
   spire.rotation.y = Math.PI / 4; // 4-sided cone's corners default to the box's face centers; twist to cap the tower's faces instead
   townGroup.add(spire);
+  // nave, tower and spire all register on the far skyline — the graveyard block's
+  // landmark, and the tallest silhouette the town throws
+  skylineAdd(cx, cz, w / 2, d / 2, y0, ridgeY);
+  skylineAdd(cx, steepleZ, 1.3, 1.3, y0, ridgeY + 2.6);
+  skylineAdd(cx, steepleZ, 0.42, 0.42, y0, ridgeY + 5.95);
   const crossV = box(0.08, 0.95, 0.08, 0x14121a);
   crossV.position.set(cx, ridgeY + 5.75, steepleZ); crossV.rotation.z = 0.09; // slightly askew
   townGroup.add(crossV);
@@ -2702,7 +2796,7 @@ addEventListener('wheel', e => {
 addEventListener('contextmenu', e => e.preventDefault());
 
 // --- touch (Roblox mobile style) ---
-const isTouch = ('ontouchstart' in window) && matchMedia('(pointer: coarse)').matches;
+const isTouch = IS_TOUCH; // decided up in the settings block (draw distance defaults lean on it)
 const touchLayer = document.getElementById('touchlayer');
 const joyBase = document.getElementById('joyBase');
 const joyKnob = document.getElementById('joyKnob');
@@ -3102,6 +3196,17 @@ function renderPrestige() {
 }
 const companions = []; // {data, blob, beacon, pos, recruited, shootCd, walkPhase, yaw}
 
+// one shared beacon shaft for cousins, rescues and the player's own down-marker:
+// wide enough to stand clear of a blob's belly instead of slicing through it, and
+// tall enough to run into the sky — with the deep draw distance it reads from
+// anywhere the fog allows, dissolving upward where the beam outruns the fog line
+const BEACON_GEO = new THREE.CylinderGeometry(0.85, 0.85, 120, 10, 1, true);
+const BEACON_Y = 60; // centre height: base on the dirt, crown in the clouds
+function makeBeacon(color, opacity) {
+  return new THREE.Mesh(BEACON_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
+}
+
 // true when nothing solid overlaps a character-sized circle at (x,z): keeps spawns out
 // of cars, rocks, shelf-filled corners and the sealed town facades (which sit in town)
 function spawnSpotClear(x, z) {
@@ -3136,11 +3241,8 @@ function scatterCousins() {
     const blob = buildBlob({ color: data.color, gunHand: data.id === 'blondie' ? 'left' : 'right' });
     blob.root.position.set(x, groundHeight(x, z), z);
     scene.add(blob.root);
-    const beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.5, 34, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color: data.color, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
-    );
-    beacon.position.set(x, groundHeight(x, z) + 17, z);
+    const beacon = makeBeacon(data.color, 0.28);
+    beacon.position.set(x, groundHeight(x, z) + BEACON_Y, z);
     scene.add(beacon);
     // every cousin carries their signature melee weapon until you trade them something else
     const gun = buildGunMesh(data.melee);
@@ -3203,11 +3305,8 @@ function hurtCompanion(c, dmg) {
     c.hp = 0; c.downed = true;
     play3d(c.pos.x, c.pos.z, () => SFX.hurt());
     // red rescue beacon marks where they fell
-    c.beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.5, 34, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
-    );
-    c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 17, c.pos.z);
+    c.beacon = makeBeacon(0xff3b3b, 0.3);
+    c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
     scene.add(c.beacon);
     toast(`${c.data.name.toUpperCase()} IS DOWN .ᐟ`);
   }
@@ -3237,13 +3336,10 @@ function reviveCousin(c) {
 // host-side: a downed player's rescue beacon, driven off their streamed state
 function netSyncCousinBeacon(c) {
   if (c.downed && !c.beacon) {
-    c.beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.5, 34, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
-    );
+    c.beacon = makeBeacon(0xff3b3b, 0.3);
     scene.add(c.beacon);
   } else if (!c.downed && c.beacon) { scene.remove(c.beacon); c.beacon = null; }
-  if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 17, c.pos.z);
+  if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
 }
 
 // ---------- player ----------
@@ -3299,10 +3395,7 @@ function goDown() {
   player.slideT = 0; player.hopT = 0; player.swingT = 0;
   player.dropKick = false; player.dropKickHits = null;
   if (!player.beacon) {
-    player.beacon = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.5, 0.5, 34, 8, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
-    );
+    player.beacon = makeBeacon(0xff3b3b, 0.3);
     scene.add(player.beacon);
   }
   SFX.hurt();
@@ -3465,7 +3558,8 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     brainExposed: brain, blind, stepT: Math.random(),
     bleeding: wounded, dripT: 0, purple, red, green, biteMult: (red || green) ? 1.35 : 1,
     mode, emergeT: 0, hornWave: !!opts.horns,
-    despawnR: mode === 'runner' ? 140 : 85,
+    farBorn: mode === 'runner', // runners live on a longer leash — they were born out past the fog
+
     wanderT: 0, wanderYaw: Math.random() * TAU, shotIgnoreT: -99,
   });
 }
@@ -3828,7 +3922,6 @@ function clearBubbles() {
 const ptagsEl = document.getElementById('ptags');
 const ptags = new Map();
 const _tagv = new THREE.Vector3();
-let tagOccT = 0;
 
 // Who deserves a marker. The host owns other players as netP companions; a client only
 // knows them as actor ghosts. Bosses come out of the zombie list either way, so they
@@ -3875,7 +3968,7 @@ function tagEl(key) {
     el.className = 'ptag';
     el.innerHTML = '<b></b><i>▼</i>';
     ptagsEl.appendChild(el);
-    t = { el, b: el.querySelector('b'), i: el.querySelector('i'), op: 0, occ: false };
+    t = { el, b: el.querySelector('b'), i: el.querySelector('i'), op: 0 };
     ptags.set(key, t);
   }
   return t;
@@ -3887,9 +3980,6 @@ function clearTags() {
 function updatePlayerTags(dt) {
   if (game.state !== 'playing') { if (ptags.size) clearTags(); return; }
   const live = trackedActors();
-  tagOccT -= dt;
-  const doOcc = tagOccT <= 0;
-  if (doOcc) tagOccT = 0.12;         // 8Hz is plenty to drive a fade
   const k = 1 - Math.exp(-10 * dt);
   const seen = new Set();
   for (const a of live) {
@@ -3912,14 +4002,12 @@ function updatePlayerTags(dt) {
     t.el.classList.toggle('down', a.downed);
     t.el.style.left = ((_tagv.x * 0.5 + 0.5) * innerWidth) + 'px';
     t.el.style.top = ((-_tagv.y * 0.5 + 0.5) * innerHeight) + 'px';
-    // solid only in the band where a tag earns its keep: ghosty when they're in your
-    // face, lost in the distance, or standing behind something
+    // the tag is the wayfinding layer now: never lost to distance (a kiting player or
+    // a boss arena has to read from right across the map) and never blocked by world
+    // geometry — it punches through everything. Up close it only steps halfway back,
+    // so it stops shouting over the blob it names without ever letting go of it.
     const near = clamp((dist - 3) / 4, 0, 1);
-    const far = clamp((55 - dist) / 18, 0, 1);
-    let want = Math.min(near, far);
-    if (doOcc) t.occ = tagOccluded(a.x, hy, a.z);
-    if (t.occ) want *= 0.32;
-    t.op = lerp(t.op, want, k);
+    t.op = lerp(t.op, 0.35 + 0.65 * near, k);
     t.el.style.opacity = t.op.toFixed(3);
     const scale = clamp(26 / Math.max(dist, 1), 0.55, 1.5);   // perspective, roughly
     t.el.style.transform = `translate(-50%,-100%) scale(${scale.toFixed(3)})`;
@@ -4126,7 +4214,6 @@ function resetGame() {
   bossState.spawned2 = false; bossState.defeated2 = false;
   bossBarEl.classList.remove('show');
   resetCrows();
-  resetSilhouettes(); // fresh run, fresh covered-ground record
   for (const p of pickups) scene.remove(p.mesh);
   pickups.length = 0;
   clearDamageNumbers();
@@ -4273,11 +4360,13 @@ document.addEventListener('visibilitychange', () => document.hidden ? onWindowBl
 
 // ---------- settings UI: snappy 5-notch bars, two columns, gamepad navigable ----------
 const SETTING_DEFS = [
-  ['master', 'Master'], ['sfx', 'SFX'], ['music', 'Music'], ['ambience', 'Ambience'],
+  // ambience folded into SFX (it rides that notch at its old 0.4 mix) — the row it used to
+  // hold belongs to draw distance now, keeping the grid at ten rows / two clean columns
+  ['master', 'Master'], ['sfx', 'SFX'], ['music', 'Music'],
   // one look-sensitivity notch serves mouse and thumb both; a phone has no mouse to tune,
   // so it takes the name of the thing they actually have in their hands
   ['mouseSens', isTouch ? 'Swipe Sens' : 'Mouse Sens'], ['padSens', 'Pad Sens'],
-  ['zombieSpawn', 'Zombies'], ['lootSpawn', 'Loot'],
+  ['drawDist', 'Draw Dist'], ['zombieSpawn', 'Zombies'], ['lootSpawn', 'Loot'],
   ['gore', 'Gore'], ['extraGore', 'Extra Gore'],
 ];
 const settingsGrid = document.getElementById('settingsGrid');
@@ -5257,7 +5346,13 @@ let nearCrate = null, nearRecruit = null;
 
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
+  stepFrame(Math.min(clock.getDelta(), 0.05));
+}
+// one simulated+rendered frame. Split out of animate so a frozen tab (hidden panes
+// stop rAF dead) can still be driven by hand: window.__step(n) pumps n fixed-dt
+// frames — the same hook the solo-multiplayer __dbg workflow leans on.
+window.__step = (n = 1, fdt = 1 / 60) => { for (let i = 0; i < n; i++) stepFrame(fdt); };
+function stepFrame(dt) {
   pollGamepad(dt);
 
   if (game.state === 'playing') {
@@ -5401,7 +5496,7 @@ function updatePlayer(dt) {
 
   // the rescue beacon drags along with you, and you leave a smear behind
   if (player.downed) {
-    if (player.beacon) player.beacon.position.set(player.pos.x, groundHeight(player.pos.x, player.pos.z) + 17, player.pos.z);
+    if (player.beacon) player.beacon.position.set(player.pos.x, groundHeight(player.pos.x, player.pos.z) + BEACON_Y, player.pos.z);
     if (goreAmt() > 0.02 && ml > 0.1) {
       player.dripT -= dt;
       if (player.dripT <= 0) {
@@ -5657,7 +5752,7 @@ function updateCompanions(dt) {
         const [nx, nz] = resolveCollision(c.pos.x, c.pos.z, 0.6, c.y);
         if (nx !== c.pos.x || nz !== c.pos.z) {
           c.pos.x = nx; c.pos.z = nz;
-          if (c.beacon) c.beacon.position.set(nx, groundHeight(nx, nz) + 17, nz);
+          if (c.beacon) c.beacon.position.set(nx, groundHeight(nx, nz) + BEACON_Y, nz);
         }
       }
       b.root.position.set(c.pos.x, gy, c.pos.z);
@@ -5874,7 +5969,9 @@ function updateZombies(dt) {
       continue;
     }
     const pDist = Math.hypot(player.pos.x - z.pos.x, player.pos.z - z.pos.z);
-    if (pDist > (z.despawnR || 85) && !z.isBoss) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
+    // the leash scales with the live fog line, so a zombie only ever winks out well
+    // inside the haze — never in front of you on a clear long-draw day
+    if (pDist > scene.fog.far + (z.farBorn ? 46 : 26) && !z.isBoss) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
 
     // boss: sleeps by the bank until approached, then sends waves at damage thresholds
     if (z.isBoss) {
@@ -6090,7 +6187,10 @@ function updateSpawner(dt) {
     let x = 0, z = 0, ok = false;
     for (let tries = 0; tries < 8 && !ok; tries++) {
       const ang = Math.random() * TAU;
-      const d = runner ? 80 + Math.random() * 34 : 32 + Math.random() * 22;
+      // runners are born just past the CURRENT fog line, whatever the draw-distance
+      // notch and weather have set it to — so they always arrive out of the haze,
+      // never pop into a clear sky
+      const d = runner ? scene.fog.far + 6 + Math.random() * 28 : 32 + Math.random() * 22;
       x = player.pos.x + Math.sin(ang) * d;
       z = player.pos.z + Math.cos(ang) * d;
       [x, z] = resolveCollision(x, z, 0.5);
@@ -6612,7 +6712,8 @@ function roostSlot(r) { return { x: r.x + (Math.random() * 2 - 1) * r.hw, y: r.y
 function pickHouseRoost() {
   const ccx = Math.round(player.pos.x / CHUNK), ccz = Math.round(player.pos.z / CHUNK);
   const cands = [];
-  for (let dx = -VIEW_R; dx <= VIEW_R; dx++) for (let dz = -VIEW_R; dz <= VIEW_R; dz++) {
+  const R = settings.viewR;
+  for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
     const key = chunkKey(ccx + dx, ccz + dz);
     const ch = chunks.get(key);
     if (!ch || !ch.buildings) continue;
@@ -7928,7 +8029,7 @@ function netPoseCompanion(c, dt) {
     b.arms[1].rotation.x = -2.25 - claw * 0.55;
     b.legs[0].rotation.x = 0.3 + claw * 0.18;
     b.legs[1].rotation.x = 0.3 - claw * 0.18;
-    if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 17, c.pos.z);
+    if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
   } else if (b.wob.rotation.x) b.wob.rotation.x = 0;
   placeShadow(b, c.pos.x, c.pos.z, c.y);
   updateFlash(b, dt);
@@ -7940,6 +8041,7 @@ refreshControlsBar();
 renderPrestige();
 equipWeapon('fists');
 buildTown();
+buildSkyline(); // every tall structure has registered by now — raise the far-off silhouette
 game.clock = 9; wxReset(); applyEnvironment(); // a gentle mid-morning behind the menus
 applyEnvironment(); // morning sky behind the menus too
 updateChunks(0, 0);
