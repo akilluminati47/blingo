@@ -2124,11 +2124,12 @@ function buildChurchyard(rng) {
   const door = box(2.2, 2.6, 0.12, 0x241a12);
   door.position.set(cx, y0 + 1.3, northZ + 0.06);
   townGroup.add(door);
-  // low wide step out front, taller one tucked in against the door — climbs up toward the
-  // threshold, same pattern as the courthouse/town hall/bank steps (it used to run backwards)
-  for (const s of [1.35, 0.7]) {
-    const step = box(3, 0.2, s, 0x55524a);
-    step.position.set(cx, y0 + (s > 1 ? 0.3 : 0.1), northZ + (1.5 - s * 0.5));
+  // two SOLID stone steps up to the threshold — each a block sitting flat on the ground, no
+  // floating slab with a gap beneath it. The tall (thick) riser sits hard against the door,
+  // the short (thin) one out front, so you climb up toward the threshold like proper steps.
+  for (const [sh, so] of [[0.42, 0.5], [0.2, 1.15]]) {   // [riser height, distance out from door]
+    const step = box(3, sh, 0.72, 0x55524a);
+    step.position.set(cx, y0 + sh / 2, northZ + so);
     townGroup.add(step);
   }
   const plate = textPlate('CHAPEL', 3.6, 0.9, '#2a2422', '#9a8f7a'); // faded sign over the door
@@ -2140,9 +2141,9 @@ function buildChurchyard(rng) {
   const sideDoor = box(0.12, 2.4, 1.8, 0x241a12);
   sideDoor.position.set(eastX + 0.06, y0 + 1.2, cz);
   townGroup.add(sideDoor);
-  for (const s of [1.2, 0.6]) {
-    const step = box(s, 0.2, 2.4, 0x55524a);
-    step.position.set(eastX + (1.3 - s * 0.5), y0 + (s > 1 ? 0.3 : 0.1), cz);
+  for (const [sh, so] of [[0.42, 0.5], [0.2, 1.15]]) {   // solid: thick riser to the door, thin one out
+    const step = box(0.72, sh, 2.4, 0x55524a);
+    step.position.set(eastX + so, y0 + sh / 2, cz);
     townGroup.add(step);
   }
 
@@ -2360,8 +2361,8 @@ function buildTown() {
   }
   // town hall & courthouse face each other across the east end of main street,
   // pulled west to sit clear of the x=100 cross road (which slid 3 west with its grid)
-  grandBuilding(85, -2, 18, 12, 6.5, 0x8a7f6a, 'TOWN HALL', rng, -1);
-  grandBuilding(85, -34, 18, 12, 6, 0x9a9aa2, 'COURTHOUSE', rng, 1);
+  grandBuilding(85, -2, 19.5, 13, 7, 0x8a7f6a, 'TOWN HALL', rng, -1);       // grown a touch over the courthouse
+  grandBuilding(85, -34, 18, 12, 6.5, 0x9a9aa2, 'COURTHOUSE', rng, 1);      // now the old town-hall footprint
   // the bank anchors the west end of the shop road, a third grander than town hall.
   // The western cross road was slid 3 west (off its left flank), so the bank sits on
   // the lawn now, not the tarmac. Set well back to leave room for the fountain
@@ -3225,6 +3226,7 @@ const player = {
   // 6,7,6,7 while the chain holds and resets to a 6 opener once COMBO_WINDOW lapses.
   comboN: 0, lastPunchT: -9,
   swingT: 0, swingDur: 0.999,           // drives the melee swing arc
+  meleeChopT: 0, meleeChopHop: false,   // the follow-through down swing lands mid-arc
   dropKick: false, dropKickHard: false, // committed air move: rides out until you land
   dropKickHits: null, dkX: 0, dkZ: 0,   // the locked-in line of the dive
   // downed: with another human in the run you drop to a crawl instead of dying, and
@@ -4047,7 +4049,7 @@ function resetGame() {
   player.reloading = 0;
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
-  player.comboN = 0; player.lastPunchT = -9; player.swingT = 0;
+  player.comboN = 0; player.lastPunchT = -9; player.swingT = 0; player.meleeChopT = 0;
   player.dropKick = false; player.dropKickHard = false; player.dropKickHits = null;
   player.downed = false; player.downT = 0; player.dripT = 0;
   if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
@@ -4459,7 +4461,7 @@ function startDropKick() {
   player.dropKickHard = player.hopT > 0;   // launched out of a slide hop: the hard version
   player.dropKickHits = new Set();         // one boot per zombie, not one per frame
   player.comboN = 0;                       // the kick is not a punch — it breaks the chain
-  player.swingT = 0;
+  player.swingT = 0; player.meleeChopT = 0;
   player.lastShotT = game.time;
   // lock the line of the dive along the aim and kill any remaining climb, so it reads as
   // a committed fall rather than a float
@@ -4525,6 +4527,20 @@ function lyingHitT(ox, oy, oz, dx, dy, dz, z, out) {
   if (out) out.isHead = ht < bt;
   return Math.min(bt, ht);
 }
+// the down swing: an armed melee follows its opening swing through with a second strike that
+// lands as the weapon comes down, so a single attack press connects twice
+function meleeChopHit() {
+  if (player.dead || player.downed) return;
+  const w = player.weapon;
+  if (!w.melee || w.id === 'fists') return;
+  const hit = meleeTarget(w);
+  if (!hit) return;
+  const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z, d = Math.hypot(dx, dz) || 1;
+  const hop = player.meleeChopHop;
+  const knock = 3.5 * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
+  damageZombie(hit, w.dmg * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock, { weapon: w, dist: d, isHead: false });
+  SFX.shoot(w); rumble(...w.rmb);
+}
 function fireWeapon() {
   if (squadCmd.mode === 'lineup') squadCmd.mode = null; // gunfire breaks up the trade line
   const w = player.weapon;
@@ -4563,6 +4579,9 @@ function fireWeapon() {
         { weapon: w, dist: d, isHead: false });
       rumble(...w.rmb);
     }
+    // armed weapons chop through: schedule the down swing to land mid-arc (fists keep their
+    // own alternating 6,7 chain, one hit per press)
+    if (w.id !== 'fists') { player.meleeChopT = player.swingDur * 0.4; player.meleeChopHop = hop; }
     return;
   }
   if (player.reloading > 0) return;
@@ -5205,6 +5224,7 @@ function updatePlayer(dt) {
   }
   player.shootCd -= dt;
   player.swingT = Math.max(0, player.swingT - dt);
+  if (player.meleeChopT > 0 && (player.meleeChopT -= dt) <= 0) meleeChopHit(); // the follow-through down swing
   updateDropKick(dt);   // resolves the boots, and frees you the moment you land
   const w = player.weapon;
   // touch gave up its trigger circles to auto-fire: the crosshair flaring on a target IS
@@ -6387,8 +6407,8 @@ function removeCrow(c) {
 function townRoosts() {
   if (!townRoosts.list) townRoosts.list = [
     { tag: 'bank',  x: 0,  y: groundHeight(0, -50.2) + 8.6 + 0.3, z: -40.1, hw: 9, face: 0 },
-    { tag: 'hall',  x: 85, y: groundHeight(85, -2) + 6.5 + 0.3, z: -10.1, hw: 7, face: Math.PI },
-    { tag: 'court', x: 85, y: groundHeight(85, -34) + 6 + 0.3,  z: -25.9, hw: 7, face: 0 },
+    { tag: 'hall',  x: 85, y: groundHeight(85, -2) + 7 + 0.3, z: -10.6, hw: 7, face: Math.PI },
+    { tag: 'court', x: 85, y: groundHeight(85, -34) + 6.5 + 0.3,  z: -25.9, hw: 7, face: 0 },
   ];
   return townRoosts.list;
 }
