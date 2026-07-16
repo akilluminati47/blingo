@@ -4223,6 +4223,13 @@ function refreshRow(key) {
     if (on && !p.classList.contains('on')) { p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop'); }
     p.classList.toggle('on', on);
   });
+  // Two of these rows have a live state their pips can't show. Extra Gore does nothing at
+  // all unless Gore is maxed under it, and the hero themes only play during a run at a full
+  // 5/5 — below that they're menu music only. Both light their name only while the thing
+  // they name is actually running, and both read it off the same test the game itself uses
+  // rather than a second opinion here that could quietly drift out of step with it.
+  if (key === 'extraGore') row.classList.toggle('live', extraGoreOn());
+  if (key === 'music') row.classList.toggle('live', notches.music >= 5);
 }
 function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); }
 syncSettingsUI();
