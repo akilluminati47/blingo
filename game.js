@@ -92,7 +92,8 @@ function roadAxisDistX(v) {         // x axis — vertical roads, shifted 3 west
 const TOWN_RECTS = [
   [-16, -60, 110, 6],  // main street, shops, bank + fountain pavilion, town hall, courthouse
   [8, 12, 78, 64],     // shopping plaza + parking
-  [36, -16, 46, 18],   // plaza driveway
+  [69, 32, 96, 40],     // east lot connector, out to the x=100 road
+  [-15, 18, 10, 26],    // west lot connector, out to the x=-20 road
   [16, 68, 62, 94],    // old church + spiked graveyard, just north of the plaza
 ];
 function rectDist(x, z, r) {
@@ -2472,15 +2473,16 @@ function buildTown() {
   // Paved plain, no lines or parked cars, it reads as the throat of a driveway instead —
   // which is exactly what it needs to be once the west connector below runs through it.
   townGroup.add(terrainPlane(14, 10, 4, 3, 16, 22, lotMat, 0.05));
-  // east connector: lot's east edge to the x=100 road, the nearest road to the lot by a
-  // clear margin, with open ground the whole way across. roadJoinMat (not plain roadMat)
-  // is what actually buries the seam — two separately-tessellated planes at the same grey
-  // and the same lift still don't agree along their shared edge, so this one takes the
-  // offset bias and noses 0.6m past the road's own kerb, same trick as the fountain apron.
-  townGroup.add(terrainPlane(24.7, 6.4, 6, 2, 81.85, LOT.z, roadJoinMat, 0.04));
-  // west connector: the SW corner pocket is 22m shy of the x=-20 road — one straight
-  // roadJoinMat piece closes the gap, same kerb-lap trick on the road end
-  townGroup.add(terrainPlane(24.2, 6.4, 6, 2, -2.1, 22, roadJoinMat, 0.04));
+  // east connector: starts flush at the lot's own east edge (x=71, zero overlap into the
+  // lot's tarmac so its colour goes right up to the border cleanly) and runs to the x=100
+  // road, noseing 0.6m past its kerb — roadJoinMat is what actually buries that far seam;
+  // two separately-tessellated planes at the same grey and lift still don't agree along a
+  // shared edge otherwise. The TOWN_RECTS entry above grades the ground flat under the
+  // whole span so the road doesn't have to ride raw terrain noise and clip against it.
+  townGroup.add(terrainPlane(23.2, 6.4, 6, 2, 82.6, LOT.z, roadJoinMat, 0.04));
+  // west connector: same deal in reverse — flush at the pocket's west edge (x=9, no overlap
+  // into its tarmac either) out to the x=-20 road with the same kerb-lap on that end
+  townGroup.add(terrainPlane(23.2, 6.4, 6, 2, -2.6, 22, roadJoinMat, 0.04));
 
   // the old church and its spiked graveyard brood just north of the plaza
   buildChurchyard(rng);
