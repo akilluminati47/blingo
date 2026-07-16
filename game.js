@@ -2694,6 +2694,8 @@ function zoomAnalog(d) {    // d > 0 = out, d < 0 = in (continuous, from wheel/p
     while (zoomAcc <= -0.35) { zoomAcc += 0.35; zoomStep(-1); }
   } else { zoomAcc = 0; camDist = clamp(camDist + d, 2.6, 9.5); }
 }
+// how fast a held d-pad glides the zoom (camDist units / second) — a ~1.6s sweep across the range
+const ZOOM_PAD_RATE = 4.2;
 addEventListener('wheel', e => {
   if (game.state === 'playing') zoomAnalog(e.deltaY * 0.004);
 }, { passive: true });
@@ -2708,6 +2710,11 @@ let joyTouchId = null, camTouchId = null;
 // second finger in the aim area pinches to zoom — track it + both fingers' last positions
 let pinchTouchId = null, pinchDist = 0;
 const aimPos = {}; // identifier -> {x, y} for the (up to two) aim-area fingers
+// the weapon+ammo squircle lives in the HUD (z-index 10) beneath this touch layer (z-index 13),
+// so its own taps never land — we hit-test its box in the touchstart handler and hold the finger
+// here so it can't also swing the camera
+let weaponTouchId = null;
+const weaponPanel = document.getElementById('bottomright');
 let joyOrigin = { x: 0, y: 0 };
 const JOY_R = 48;
 let sprintToggle = false;
@@ -2731,12 +2738,12 @@ bindBtn('btnAim', () => { input.aimTouch = !input.aimTouch; },
   () => { document.getElementById('btnAim').classList.toggle('pressed', input.aimTouch); });
 bindBtn('btnView', () => { toggleFPV(); });
 bindBtn('btnReload', () => { input.reload = true; });
-// the weapon + ammo squircle at bottom-right IS the swap button on touch
-if (isTouch) {
-  const wpanel = document.getElementById('bottomright');
-  wpanel.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); initAudio(); wpanel.classList.add('pressed'); cycleWeapon(1); }, { passive: false });
-  wpanel.addEventListener('touchend', e => { e.preventDefault(); wpanel.classList.remove('pressed'); }, { passive: false });
-  wpanel.addEventListener('touchcancel', () => wpanel.classList.remove('pressed'), { passive: true });
+// the weapon + ammo squircle at bottom-right IS the swap button on touch. It sits in the HUD,
+// under the full-screen touch layer, so a tap on it never reaches the panel — the touchstart
+// handler below hit-tests this box and cycles the weapon (holding the finger so it won't aim).
+function inWeaponPanel(t) {
+  const r = weaponPanel.getBoundingClientRect();
+  return r.width > 0 && t.clientX >= r.left && t.clientX <= r.right && t.clientY >= r.top && t.clientY <= r.bottom;
 }
 bindBtn('btnInteract', () => { input.interact = true; input.interactHeld = true; }, () => { input.interactHeld = false; });
 // emote: hold the button and keep swiping to steer the wheel (ewTouchStart takes it from
@@ -2777,6 +2784,14 @@ touchLayer.addEventListener('touchstart', e => {
   input.device = 'touch'; refreshControlsBar();
   for (const t of e.changedTouches) {
     if (t.target.closest('.tbtn')) continue;
+    // tap on the weapon/ammo squircle (which lives beneath this layer): cycle the weapon, and
+    // keep the finger owned here so it can't double as a camera swing
+    if (weaponTouchId === null && inWeaponPanel(t)) {
+      weaponTouchId = t.identifier;
+      weaponPanel.classList.add('pressed');
+      cycleWeapon(1);
+      continue;
+    }
     // the stick only claims the bottom-left quadrant — the upper-left corner aims the camera
     if (t.clientX < innerWidth * 0.45 && t.clientY > innerHeight * 0.5 && joyTouchId === null) {
       joyTouchId = t.identifier;
@@ -2835,7 +2850,10 @@ touchLayer.addEventListener('touchmove', e => {
 function touchEnd(e) {
   for (const t of e.changedTouches) {
     delete aimPos[t.identifier];
-    if (t.identifier === joyTouchId) {
+    if (t.identifier === weaponTouchId) {
+      weaponTouchId = null;
+      weaponPanel.classList.remove('pressed');
+    } else if (t.identifier === joyTouchId) {
       joyTouchId = null;
       joyGoHome();   // drift back to the faded home zone
       input.moveX = 0; input.moveY = 0;
@@ -2899,8 +2917,10 @@ function pollGamepad(dt) {
     input.lookDX += lx * 2.6 * dt * padSens;
     input.lookDY += ly * 2.0 * dt * padSens;
   }
-  if (justPressed(15)) zoomStep(-1); // d-pad right: zoom in (sniper scope steps a notch tighter)
-  if (justPressed(14)) zoomStep(1);  // d-pad left: zoom out
+  // d-pad left/right glide the zoom smoothly while held (same continuous feed as the pinch),
+  // so you can slide all the way to min/max in one hold instead of tapping repeatedly
+  if (pressed(15)) zoomAnalog(-ZOOM_PAD_RATE * dt); // d-pad right: zoom in
+  if (pressed(14)) zoomAnalog(ZOOM_PAD_RATE * dt);  // d-pad left: zoom out
   if (justPressed(0)) input.jump = true;
   if (justPressed(1)) input.reload = true;
   if (justPressed(2)) input.interact = true;
