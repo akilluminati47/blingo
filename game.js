@@ -665,7 +665,8 @@ function startAmbience() {
 // fade the rain bed with the current weather (wind is driven live by updateWind)
 function syncWeatherAmbience() {
   if (!actx || !ambStarted) return;
-  rainGainNode.gain.setTargetAtTime(game.weather === 'rain' ? 0.09 : 0, actx.currentTime, 1.2);
+  // halved again: the rain is weather you notice, not weather you have to talk over
+  rainGainNode.gain.setTargetAtTime(game.weather === 'rain' ? 0.045 : 0, actx.currentTime, 1.2);
 }
 const NF = s => 220 * Math.pow(2, s / 12);
 // each cousin has a persona motif (chiptune-ish MIDI feel)
@@ -1905,6 +1906,15 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
 // the big lot north of the plaza: floodlit at its corners, and the ground the Infected One
 // rises on. One definition so the lights, the boss and his arena can't drift apart.
 const LOT = { x: 42, z: 36, hw: 29, hd: 13 };
+const LOT_MASTS = [[LOT.x - LOT.hw + 1.6, LOT.z - LOT.hd + 1.6], [LOT.x + LOT.hw - 1.6, LOT.z - LOT.hd + 1.6],
+                   [LOT.x - LOT.hw + 1.6, LOT.z + LOT.hd - 1.6], [LOT.x + LOT.hw - 1.6, LOT.z + LOT.hd - 1.6]];
+// The lot is floodlit from its own four corners now. A little lamp standing inside it — or
+// crowding the foot of a mast three times its height — is just clutter competing with a
+// light it can't compete with. The frontage lamps out along the middle still earn their keep.
+function lotIsFloodlit(x, z) {
+  if (Math.abs(x - LOT.x) < LOT.hw + 0.5 && Math.abs(z - LOT.z) < LOT.hd + 0.5) return true;
+  return LOT_MASTS.some(([mx, mz]) => Math.hypot(mx - x, mz - z) < 6);
+}
 const shopDoors = [];   // every shopfront's doorstep, filled in as the town is built
 function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
   const y0 = groundHeight(x, z);
@@ -2321,13 +2331,20 @@ function buildTown() {
     const pave = new THREE.Mesh(geo, roadJoinMat);
     pave.position.set(0, 0, fz);          // height already baked into the vertices, as terrainPlane does
     townGroup.add(pave);
-    const basin = cyl(2.8, 3.0, 0.85, 0x9a948a, 18);
-    basin.position.set(0, fy + 0.42, fz);
+    // The basin is a SOLID plinth, not a bowl you can pour into — so its top face IS the
+    // landing, and anything below that face is buried in stone rather than sitting in water.
+    // Every wet part of this fountain (pool, ripples, puddle, drain, the foot of the fall)
+    // was pitched 0.07 under it and therefore invisible. They all hang off waterY now, and
+    // waterY sits just proud of the landing, which is the only place water can actually show.
+    const BASIN_H = 0.85;
+    const waterY = fy + BASIN_H + 0.03;
+    const basin = cyl(2.8, 3.0, BASIN_H, 0x9a948a, 18);
+    basin.position.set(0, fy + BASIN_H / 2, fz);
     townGroup.add(basin);
     const water = new THREE.Mesh(new THREE.CircleGeometry(2.45, 18),
       new THREE.MeshLambertMaterial({ color: 0x3f7fae, emissive: 0x14405e, emissiveIntensity: 0.55 }));
     water.rotation.x = -Math.PI / 2;
-    water.position.set(0, fy + 0.78, fz);
+    water.position.set(0, waterY, fz);
     townGroup.add(water);
     const ped = cyl(0.42, 0.62, 1.5, 0x8b8577, 10);
     ped.position.set(0, fy + 1.5, fz);
@@ -2340,7 +2357,7 @@ function buildTown() {
     townGroup.add(spout);
     townColliders.push(aabb(0, fz, 2.9, 2.9, 0.95, fy));
     // ---- the working water feature ----
-    const waterY = fy + 0.78, bowlBot = fy + 2.29;      // pool surface / underside of the bowl
+    const bowlBot = fy + 2.29;                          // underside of the bowl: where the fall starts
     // a translucent skirt spilling off the bowl lip down to the pool — the top-to-bottom flow
     const fallH = bowlBot - waterY;
     const fall = cyl(1.02, 0.86, fallH, 0x6fb2d6, 14);
@@ -2436,9 +2453,12 @@ function buildTown() {
   for (const lx of [5.5, 18.5, 31.5, 44.5, 57.5, 70.5, 76]) {
     for (const lz of [-10.1, -23.9]) if (!onRoad(lx, lz, 0.5)) makeStreetLamp(lx, lz, townGroup);
   }
-  // up both kerbs of the plaza driveway and along the plaza frontage
-  for (const lz of [7, 19, 31, 45]) { makeStreetLamp(37.4, lz, townGroup); makeStreetLamp(44.6, lz, townGroup); }
-  for (const lx of [16, 30, 58, 70]) makeStreetLamp(lx, 50, townGroup);
+  // up both kerbs of the plaza driveway and along the plaza frontage — skipping any that
+  // would stand inside the floodlit lot or at the foot of one of its masts
+  for (const lz of [7, 19, 31, 45]) {
+    for (const lx of [37.4, 44.6]) if (!lotIsFloodlit(lx, lz)) makeStreetLamp(lx, lz, townGroup);
+  }
+  for (const lx of [16, 30, 58, 70]) if (!lotIsFloodlit(lx, 50)) makeStreetLamp(lx, 50, townGroup);
 }
 
 // ---------- input ----------
