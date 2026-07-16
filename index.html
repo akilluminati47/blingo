@@ -108,7 +108,11 @@
 
   /* ---------- controls help bar ---------- */
   #controls { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:calc(12px + env(safe-area-inset-left)); display:flex; flex-direction:column; gap:4px;
-    background:rgba(8,10,14,.55); border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:8px 12px; backdrop-filter:blur(6px); max-width:46vw; }
+    background:rgba(8,10,14,.55); border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:8px 12px; backdrop-filter:blur(6px); max-width:46vw;
+    opacity:1; transition:opacity 1s; }
+  /* PC/controller only: once you've paused once, the bar fades off a while after resuming,
+     then just flashes briefly to remind you it's there each time you pause again */
+  #controls.faded { opacity:0; }
   #controls .row { display:flex; align-items:center; gap:7px; color:#ddd; font-size:11px; }
   #controls .row img { height:22px; width:auto; }
   #controls .devname { font-size:9px; letter-spacing:2px; text-transform:uppercase; opacity:.5; margin-bottom:2px; }
@@ -326,18 +330,9 @@
   }
 
   /* ---------- pause button + settings menu ---------- */
-  /* the PC pause squircle sits in the same top rank as the stats badge and the controls
-     menu: same 10px drop from the top, same 12px in from its screen edge, and its box is
-     the stats badge's own rendered height (41px: 6px pads + 18px b + 2px + 9px span + borders),
-     wearing the same radius, fill and border so the three read as one family */
-  #btnPauseHud { position:absolute; top:calc(10px + env(safe-area-inset-top)); right:calc(12px + env(safe-area-inset-right));
-    width:41px; height:41px; box-sizing:border-box; border-radius:12px; background:rgba(8,10,14,.55); border:1px solid rgba(255,255,255,.12);
-    color:#eee; font-size:16px; display:none; align-items:center; justify-content:center; pointer-events:auto; cursor:pointer; backdrop-filter:blur(6px); }
-  body.playing #btnPauseHud { display:flex; }
-  #btnPauseHud:active { background:rgba(255,255,255,.22); }
   /* touch keeps both top corners clear: pause is the circle crowning the left button
      column, and the touch cluster is its own legend so the hint bar has nothing to say */
-  body.touchmode #btnPauseHud, body.touchmode #controls { display:none; }
+  body.touchmode #controls { display:none; }
 
   #bloodsplat { position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .55s; mix-blend-mode:multiply;
     background:
@@ -450,7 +445,6 @@
   <div id="crosshair"></div>
   <div id="hitmarker"></div>
   <div id="tradering"></div>
-  <div id="btnPauseHud" title="Pause">❚❚</div>
 
   <div id="bossbar">
     <div id="bosslabel">The Two Horned One</div>

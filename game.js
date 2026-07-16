@@ -3036,9 +3036,22 @@ function pollGamepad(dt) {
 const controlsEl = document.getElementById('controls');
 const devnameEl = document.getElementById('devname');
 if (isTouch) controlsEl.classList.add('collapsed'); // phones: start as a chip, tap to expand
-controlsEl.addEventListener('click', toggleControlsBar);
+controlsEl.addEventListener('click', () => { controlsEl.classList.remove('faded'); toggleControlsBar(); });
 controlsEl.addEventListener('touchstart', e => { e.stopPropagation(); }, { passive: true });
 function toggleControlsBar() { controlsEl.classList.toggle('collapsed'); }
+
+// PC/controller only: the bar fades off 15s after the pause menu is first closed, then
+// after that just flashes back for 5s each time pause is opened and shut again
+let controlsFadedOnce = false;
+let controlsFadeTimer = null;
+function scheduleControlsFade() {
+  if (isTouch) return; // touchmode hides the bar outright; nothing to fade here
+  clearTimeout(controlsFadeTimer);
+  controlsEl.classList.remove('faded');
+  const delay = controlsFadedOnce ? 5000 : 15000;
+  controlsFadedOnce = true;
+  controlsFadeTimer = setTimeout(() => controlsEl.classList.add('faded'), delay);
+}
 
 const ICON = {
   kbm: p => `icons/kbm/${p}.png`,
@@ -4370,6 +4383,7 @@ function resumeGame() {
   document.body.classList.add('playing');
   game.state = 'playing';
   if (input.device === 'kbm') grabPointer();
+  scheduleControlsFade();
 }
 function quitToMenu() {
   game.state = 'menu';
@@ -4387,11 +4401,6 @@ function togglePause() {
 }
 document.getElementById('resumebtn').addEventListener('click', resumeGame);
 document.getElementById('quitbtn').addEventListener('click', quitToMenu);
-{
-  const pb = document.getElementById('btnPauseHud');
-  pb.addEventListener('click', e => { e.stopPropagation(); pauseGame(); });
-  pb.addEventListener('touchstart', e => { e.preventDefault(); e.stopPropagation(); pauseGame(); }, { passive: false });
-}
 addEventListener('keydown', e => {
   if (e.code === 'Escape' || e.code === 'KeyP') {
     // pointer-lock release already paused us on this same Esc press
