@@ -285,7 +285,23 @@
     font-size:20px; font-weight:700; letter-spacing:3px; padding:13px 46px; border-radius:14px; box-shadow:0 6px 0 #14733a, 0 10px 24px rgba(0,0,0,.5); }
   .bigbtn:active { transform:translateY(4px); box-shadow:0 2px 0 #14733a; }
   #deathscreen h1 { color:#ff5b5b; text-shadow:0 0 24px rgba(255,60,60,.4); }
-  #deathstats { font-size:15px; margin-top:8px; }
+  /* the whole death screen speaks blob: lore, stats and the waiting line all wear the face */
+  #deathlore, #waitmsg, #deathstats { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
+  /* stats as hero-coloured chips, the same dressing the settings rows get: each run's
+     numbers sit in the dead hero's own colour, so every player sees their cousin here */
+  #deathstats { display:grid; grid-template-columns:repeat(2, minmax(150px, 190px)); gap:8px; margin-top:12px; }
+  .dchip { display:flex; align-items:center; gap:9px; padding:8px 12px; border-radius:10px;
+    background:rgba(255,255,255,.06); border:1px solid var(--hero); box-shadow:0 0 10px rgba(0,0,0,.35); }
+  .dchip svg { width:22px; height:22px; flex:0 0 auto; color:var(--hero); filter:drop-shadow(0 1px 2px #000); }
+  .dchip b { font-size:17px; color:#fff; line-height:1; }
+  .dchip span { font-size:9.5px; letter-spacing:2px; text-transform:uppercase; color:var(--hero); display:block; margin-top:2px; }
+  /* fades gently in and out under the respawn button while a client waits on the host */
+  #waitmsg { margin-top:10px; font-size:14px; color:var(--hero); animation:waitPulse 1.8s ease-in-out infinite; }
+  #waitmsg.hidden { display:none; }
+  @keyframes waitPulse { 0%, 100% { opacity:.15; } 50% { opacity:.95; } }
+  /* the death fade sits over the world AND the HUD (z10-13) but under the screens (z30),
+     so the black it lays down becomes the backdrop the death screen arrives on */
+  #deathfade { position:fixed; inset:0; z-index:25; background:#000; opacity:0; pointer-events:none; }
 
   /* cousin select cards */
   /* desktop: cap the row at 3 cards so the six cousins sit in two clean rows of 3 */
@@ -521,11 +537,16 @@
 </div>
 
 <div class="screen hidden" id="deathscreen">
-  <h1>YOU GOT EATEN</h1>
-  <p class="lore">The cousins will avenge you. Blob-kind remembers.</p>
+  <h1 id="deathtitle">YOU GOT EATEN</h1>
+  <p class="lore" id="deathlore">The cousins will avenge you, blob-kind remembers. .</p>
   <div id="deathstats"></div>
   <button class="bigbtn" id="respawnbtn">RESPAWN</button>
+  <p id="waitmsg" class="hidden">. . waiting for Player 1 .ᐟ</p>
 </div>
+
+<!-- the death fade: the world and every scrap of UI sink into this together, so the slow
+     motion never has to be seen reaching its full stop -->
+<div id="deathfade"></div>
 
 <div class="screen hidden" id="pausescreen">
   <div id="pausepanel">

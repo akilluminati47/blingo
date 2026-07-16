@@ -4192,7 +4192,7 @@ function resetGame() {
   input.aim = false; input.aimPad = false; input.aimTouch = false;
   const vb = document.getElementById('btnView'); if (vb) vb.classList.remove('pressed');
   const ab = document.getElementById('btnAim'); if (ab) ab.classList.remove('pressed'); // aim toggle resets off
-  game.time = 0; game.kills = 0; game.cratesOpened = 0; game.spawnT = 2; game.lastShotT = -99;
+  game.time = 0; game.kills = 0; game.cratesOpened = 0; game.shots = 0; game.spawnT = 2; game.lastShotT = -99;
   // the clock starts at 8am, 11am or 1pm — one roll per lobby/campaign — and the weather
   // starts random; from there the day wheels on its own (1s of play = 1min of world)
   game.clock = [8, 11, 13][(Math.random() * 3) | 0];
@@ -4238,13 +4238,45 @@ function startRun() {
   initAudio();
   for (const id of ['startscreen', 'deathscreen', 'lobbyscreen', 'hostclosed'])
     document.getElementById(id).classList.add('hidden');
+  deathFx.on = false; deathFadeEl.style.opacity = 0; // the fade never follows you into a fresh run
+  document.getElementById('waitmsg').classList.add('hidden');
   document.body.classList.add('playing');
   resetGame();
   game.state = 'playing';
   if (input.device === 'kbm') grabPointer();
 }
 document.getElementById('playbtn').addEventListener('click', () => { netLeave(); startRun(); });
-document.getElementById('respawnbtn').addEventListener('click', () => { netLeave(); startRun(); });
+document.getElementById('respawnbtn').addEventListener('click', () => {
+  // in a lobby, respawning is Player 1's call alone. A client's click just lights the
+  // waiting line under the button; the host's click restarts the run for everyone, with
+  // the lobby held open (no netLeave — the connections ARE the lobby).
+  if (net.role === 'client') { document.getElementById('waitmsg').classList.remove('hidden'); return; }
+  if (net.role === 'host' && net.conns.length) {
+    // remember who was riding each connection (their number and cousin), restart the run,
+    // then hand everyone the same cousin back in the fresh world and re-welcome them —
+    // 'restart' resets their end, 'welcome' re-binds it (in order, on a reliable pipe)
+    const held = net.conns.map(conn => {
+      const c = companions.find(k => k.netConn === conn);
+      return { conn, num: (c && c.netP) || 0, cousin: c && c.data.id };
+    });
+    startRun();
+    for (const h of held) {
+      if (!h.num) continue;
+      const c = companions.find(k => k.data.id === h.cousin && !k.netP) || companions.find(k => !k.netP);
+      if (!c) continue;
+      c.netP = h.num; c.netConn = h.conn; c.netPose = null;
+      if (!c.recruited) recruitCousin(c);
+      try {
+        h.conn.send({ t: 'restart' });
+        h.conn.send({ t: 'welcome', n: h.num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
+          w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills });
+      } catch (e) {}
+    }
+    rebuildSquadBars();
+    return;
+  }
+  netLeave(); startRun();
+});
 document.getElementById('mpbtn').addEventListener('click', () => { initAudio(); showLobbies(); });
 document.getElementById('hostbtn').addEventListener('click', () => hostLobby(codeEl.value));
 document.getElementById('joincodebtn').addEventListener('click', () => joinLobby(codeEl.value));
@@ -4265,17 +4297,46 @@ document.getElementById('hcmenu').addEventListener('click', () => {
   renderPrestige();
 });
 
-function die() {
+// ---------- the death transition ----------
+// the last bite doesn't cut to a menu: the world drops into slow motion — the horde still
+// chewing — while everything, HUD included, sinks to black. The fade completes while the
+// simulation is still (barely) moving, so the slow motion is never seen reaching its stop;
+// the death screen arrives on the black the fade laid down. gameOver = the multiplayer
+// everyone-is-down version: every player in the lobby rides the same transition.
+const deathFx = { on: false, t: 0, dur: 1.7, gameOver: false };
+const deathFadeEl = document.getElementById('deathfade');
+function die(gameOver) {
+  if (player.dead || deathFx.on) return;
   player.dead = true;
+  rumble(500, 1, 1);
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+  // a dead host stalls the sim for the whole lobby, so a host death IS the lobby's game over
+  if (net.role === 'host' && net.conns.length) gameOver = true;
+  deathFx.on = true; deathFx.t = 0; deathFx.gameOver = !!gameOver;
+  if (net.role === 'host' && gameOver) netBroadcast({ t: 'gameover' });
+}
+// tiny stroke-drawn icons, inked in the hero's colour via currentColor
+const DEATH_ICONS = {
+  kills: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a7 7 0 0 0-7 7c0 2.6 1.2 4.4 3 5.6V19h8v-3.4c1.8-1.2 3-3 3-5.6a7 7 0 0 0-7-7z"/><circle cx="9.2" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="14.8" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><path d="M10 19v2.2M14 19v2.2"/></svg>',
+  survived: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.8 2M9.5 3h5"/></svg>',
+  crates: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="1.2"/><path d="M4 11h16M12 7v13M4 7l2.5-3h11L20 7"/></svg>',
+  bullets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10c0-3 1.2-5.4 3-7 1.8 1.6 3 4 3 7v6H9v-6z"/><path d="M8.4 16h7.2v3H8.4z"/></svg>',
+};
+function finishDeath() {
   game.state = 'dead';
   document.body.classList.remove('playing');
-  if (document.pointerLockElement === canvas) document.exitPointerLock();
-  rumble(500, 1, 1);
   const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
-  const n = companions.filter(c => c.recruited).length;
-  document.getElementById('deathstats').innerHTML =
-    `☠️ ${game.kills} kills &nbsp;•&nbsp; ⏱️ ${mins}:${String(secs).padStart(2, '0')} survived &nbsp;•&nbsp; 📦 ${game.cratesOpened} crates &nbsp;•&nbsp; 🫂 ${n} cousins found`;
-  setTimeout(() => document.getElementById('deathscreen').classList.remove('hidden'), 900);
+  const chips = [
+    ['kills', game.kills, 'kills'],
+    ['survived', `${mins}:${String(secs).padStart(2, '0')}`, 'survived'],
+    ['crates', game.cratesOpened, 'crates'],
+    ['bullets', game.shots | 0, 'bullets'],
+  ];
+  document.getElementById('deathstats').innerHTML = chips.map(([ic, val, lab]) =>
+    `<div class="dchip">${DEATH_ICONS[ic]}<div><b>${val}</b><span>${lab}</span></div></div>`).join('');
+  document.getElementById('deathtitle').textContent = deathFx.gameOver && net.role ? 'GAME OVER' : 'YOU GOT EATEN';
+  document.getElementById('waitmsg').classList.add('hidden');
+  document.getElementById('deathscreen').classList.remove('hidden');
 }
 
 // ---------- blood splatter overlay (extra gore) ----------
@@ -4718,6 +4779,7 @@ function fireWeapon() {
   if (player.reloading > 0) return;
   if (player.clip <= 0) { SFX.dry(); tryReload(); return; }
   player.clip--;
+  game.shots = (game.shots | 0) + 1; // the death screen counts every round you spent
   player.lastShotT = game.time;
   // gunshots are loud: blind zombies home in on this spot
   game.lastShot.set(player.pos.x, 0, player.pos.z); game.lastShotT = game.time;
@@ -5354,6 +5416,16 @@ function animate() {
 window.__step = (n = 1, fdt = 1 / 60) => { for (let i = 0; i < n; i++) stepFrame(fdt); };
 function stepFrame(dt) {
   pollGamepad(dt);
+  // the death transition: fade runs on real time, the simulation runs on an ever-smaller
+  // slice of it. The floor (5%) keeps the horde chewing right up until the black lands —
+  // by the time the world would visibly stop, there's nothing left to see it stop.
+  if (deathFx.on) {
+    deathFx.t += dt;
+    const p = Math.min(deathFx.t / deathFx.dur, 1);
+    deathFadeEl.style.opacity = p;
+    dt *= Math.max(1 - smooth(p) * 1.2, 0.05);
+    if (p >= 1) { deathFx.on = false; finishDeath(); }
+  }
 
   if (game.state === 'playing') {
     game.time += dt;
@@ -5367,6 +5439,11 @@ function stepFrame(dt) {
       updateZombies(dt);
       updateSpawner(dt);
       if (net.role === 'host') { netHostTick(dt); updateHoldTrades(dt); }
+      // the lobby's last legs: host crawling, every player down, every cousin down — nobody
+      // left standing to haul anyone up. That's the game over, for every screen at once.
+      if (net.role === 'host' && net.conns.length && !deathFx.on && !player.dead
+          && player.downed
+          && companions.every(c => !c.recruited || c.downed)) die(true);
     }
     updateCrates(dt);
     updatePickups(dt);
@@ -7704,6 +7781,18 @@ function netClientData(m, conn, peer, code) {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
   } else if (m.t === 'revive') {
     playerGetUp(true);       // someone walked over and hauled us up
+  } else if (m.t === 'gameover') {
+    // the whole lobby is down: ride the same slow-motion fade the host is riding
+    if (!player.dead && !deathFx.on) {
+      player.dead = true;
+      deathFx.on = true; deathFx.t = 0; deathFx.gameOver = true;
+      if (document.pointerLockElement === canvas) document.exitPointerLock();
+      rumble(500, 1, 1);
+    }
+  } else if (m.t === 'restart') {
+    // Player 1 respawned the lobby: drop the death screen and step back into the fresh run
+    deathFx.on = false; deathFadeEl.style.opacity = 0;
+    startRun();
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
