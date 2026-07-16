@@ -2468,8 +2468,10 @@ function buildTown() {
     townColliders.push(aabb(fx, fzz, 0.3, 0.3, FLOOD_H, groundHeight(fx, fzz)));
   }
   parkingLot(16, 22, 14, 10, 1, rng);   // smaller side parking
-  // plaza driveway connects main road to parking
-  townGroup.add(terrainPlane(6.4, 32, 2, 8, 41, 2, roadMat, 0.04));
+  // driveway off the lot's east edge to the x=100 road — the nearest road to the lot by a
+  // clear margin, and the strip between them (x 71-100, z around the lot's own centre) is
+  // open ground the whole way, so the tarmac never has to cross a building to get there
+  townGroup.add(terrainPlane(28, 6.4, 7, 2, 83, LOT.z, roadMat, 0.04));
 
   // the old church and its spiked graveyard brood just north of the plaza
   buildChurchyard(rng);
@@ -2481,7 +2483,7 @@ function buildTown() {
   // parked cars near town buildings
   makeCar(rng, 84, -14, townGroup, townColliders, { broken: true, rotY: 0.3 });
   makeCar(rng, 20, -32.5, townGroup, townColliders, { broken: rng() < 0.5, rotY: Math.PI / 2 });
-  makeCar(rng, 47, -3, townGroup, townColliders, { broken: true, flipped: true });
+  makeCar(rng, 47, 8, townGroup, townColliders, { broken: true, flipped: true });
 
   // loot crates scattered through town
   const spots = [[10, -9.8], [36, -9.8], [58, -24.4], [88, -9.4], [94, -26], [30, 30], [55, 42], [18, 20], [70, 55], [41, 10]];
