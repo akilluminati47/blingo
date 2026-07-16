@@ -2467,11 +2467,20 @@ function buildTown() {
     makeFloodLamp(fx, fzz, LOT.x, LOT.z, townGroup);
     townColliders.push(aabb(fx, fzz, 0.3, 0.3, FLOOD_H, groundHeight(fx, fzz)));
   }
-  parkingLot(16, 22, 14, 10, 1, rng);   // smaller side parking
-  // driveway off the lot's east edge to the x=100 road — the nearest road to the lot by a
-  // clear margin, and the strip between them (x 71-100, z around the lot's own centre) is
-  // open ground the whole way, so the tarmac never has to cross a building to get there
-  townGroup.add(terrainPlane(28, 6.4, 7, 2, 83, LOT.z, roadMat, 0.04));
+  // the small lot's footprint overlaps the big lot's SW corner (x13-23, z23-27) — a pocket
+  // that used to carry its own stall lines duplicating ground the big lot already painted.
+  // Paved plain, no lines or parked cars, it reads as the throat of a driveway instead —
+  // which is exactly what it needs to be once the west connector below runs through it.
+  townGroup.add(terrainPlane(14, 10, 4, 3, 16, 22, lotMat, 0.05));
+  // east connector: lot's east edge to the x=100 road, the nearest road to the lot by a
+  // clear margin, with open ground the whole way across. roadJoinMat (not plain roadMat)
+  // is what actually buries the seam — two separately-tessellated planes at the same grey
+  // and the same lift still don't agree along their shared edge, so this one takes the
+  // offset bias and noses 0.6m past the road's own kerb, same trick as the fountain apron.
+  townGroup.add(terrainPlane(24.7, 6.4, 6, 2, 81.85, LOT.z, roadJoinMat, 0.04));
+  // west connector: the SW corner pocket is 22m shy of the x=-20 road — one straight
+  // roadJoinMat piece closes the gap, same kerb-lap trick on the road end
+  townGroup.add(terrainPlane(24.2, 6.4, 6, 2, -2.1, 22, roadJoinMat, 0.04));
 
   // the old church and its spiked graveyard brood just north of the plaza
   buildChurchyard(rng);
