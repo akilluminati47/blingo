@@ -453,6 +453,7 @@ function applyEnvironment(redraw = true) {
   scene.background.copy(fogC);
   rainOn(W.rain > 0.45);
   if (rainMesh) rainMesh.material.opacity = 0.4 * Math.min(1, W.rain * 1.6);
+  setLampGlow(lampLitFor(game.clock ?? 13, W)); // the street lamps take over as the sky goes down
 }
 
 // fake blob shadow
@@ -765,28 +766,53 @@ function rangeFactor(w, d) {
 const LOOT_TABLE = [
   ['pistol', 20], ['smg', 16], ['shotgun', 15], ['rifle', 13], ['magnum', 9], ['sniper', 5], ['ammo', 14], ['medkit', 8],
 ];
+const LOOT_GUNS = ['pistol', 'smg', 'shotgun', 'rifle', 'magnum', 'sniper'];
+// guns nobody's handed you yet
+function unownedGuns() { return LOOT_GUNS.filter(id => !player.owned.includes(id)); }
 function rollLoot(rng) {
   let total = 0; for (const [, w] of LOOT_TABLE) total += w;
   let r = rng() * total;
   for (const [id, w] of LOOT_TABLE) { r -= w; if (r <= 0) return id; }
   return 'pistol';
 }
+// A box someone bothered to carry indoors and stash is worth going indoors for: most of the
+// time it's a gun you're still missing, picked from what you're missing rather than rolled
+// against the flat table and hoping. Once you're holding the whole armoury there's nothing
+// left to hand you, so it pays out the ammo you'll always be shortest of instead.
+const INDOOR_NEW_GUN_CHANCE = 0.7;
+function rollCrateLoot(rng, crate) {
+  if (!crate || !crate.indoor) return rollLoot(rng);
+  const missing = unownedGuns();
+  if (!missing.length) return 'sniperammo';
+  if (rng() < INDOOR_NEW_GUN_CHANCE) return missing[(rng() * missing.length) | 0];
+  return rollLoot(rng);
+}
 
+const MAGNUM_BIG = 1.3;   // how much heavier the magnum reads than the pistol it shares a frame with
 function buildGunMesh(id) {
   const g = new THREE.Group();
   const w = WEAPONS[id];
   const c = w.color || 0x444444;
   if (id === 'pistol' || id === 'magnum') {
-    const body = box(0.09, 0.13, 0.34, c); body.position.set(0, 0.05, -0.12); g.add(body);
-    const grip = box(0.08, 0.18, 0.1, 0x2a2d33); grip.position.set(0, -0.08, 0.06); grip.rotation.x = 0.25; g.add(grip);
+    // same frame both ways, but the magnum is a hand cannon — it should read heavier than
+    // the sidearm in the fist, not like the same gun with a different name
+    const s = id === 'magnum' ? MAGNUM_BIG : 1;
+    const body = box(0.09 * s, 0.13 * s, 0.34 * s, c); body.position.set(0, 0.05 * s, -0.12 * s); g.add(body);
+    const grip = box(0.08 * s, 0.18 * s, 0.1 * s, 0x2a2d33); grip.position.set(0, -0.08 * s, 0.06 * s); grip.rotation.x = 0.25; g.add(grip);
   } else if (id === 'smg') {
     const body = box(0.1, 0.14, 0.5, c); body.position.set(0, 0.04, -0.15); g.add(body);
     const magz = box(0.07, 0.22, 0.09, 0x22252b); magz.position.set(0, -0.12, -0.08); g.add(magz);
     const grip = box(0.08, 0.15, 0.09, 0x22252b); grip.position.set(0, -0.09, 0.1); g.add(grip);
   } else if (id === 'shotgun') {
-    const body = box(0.1, 0.12, 0.75, 0x3b3e45); body.position.set(0, 0.05, -0.22); g.add(body);
-    const pump = box(0.12, 0.1, 0.2, c); pump.position.set(0, -0.02, -0.32); g.add(pump);
-    const stock = box(0.09, 0.13, 0.22, c); stock.position.set(0, 0.0, 0.18); g.add(stock);
+    // AA-12: a squared full-auto receiver with a drum slung under its belly and a flat top
+    // rail — no pump under the barrel to work, because there's nothing to work
+    const body = box(0.13, 0.17, 0.6, 0x3b3e45); body.position.set(0, 0.05, -0.16); g.add(body);
+    const rail = box(0.05, 0.03, 0.42, 0x22252b); rail.position.set(0, 0.15, -0.18); g.add(rail);
+    const barrel = cyl(0.045, 0.05, 0.28, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.58); g.add(barrel);
+    const shroud = box(0.09, 0.09, 0.14, 0x2a2c30); shroud.position.set(0, 0.06, -0.5); g.add(shroud);
+    const drum = cyl(0.15, 0.15, 0.1, c, 14); drum.rotation.z = Math.PI / 2; drum.position.set(0, -0.11, -0.13); g.add(drum);
+    const grip = box(0.08, 0.16, 0.1, 0x22252b); grip.position.set(0, -0.08, 0.09); grip.rotation.x = 0.22; g.add(grip);
+    const stock = box(0.09, 0.14, 0.2, c); stock.position.set(0, 0.04, 0.22); g.add(stock);
   } else if (id === 'rifle') {
     const body = box(0.09, 0.13, 0.72, 0x3b3e45); body.position.set(0, 0.05, -0.2); g.add(body);
     const magz = box(0.07, 0.2, 0.11, c); magz.position.set(0, -0.1, -0.1); magz.rotation.x = 0.3; g.add(magz);
@@ -809,8 +835,10 @@ function buildGunMesh(id) {
     // firearms ride forward out of the fist (they sat clipped inside it), and carry a
     // muzzle anchor at the barrel tip so flashes + tracers leave the actual geometry
     g.position.z = -0.14;
-    const tip = { pistol: [0.05, -0.3], magnum: [0.05, -0.3], smg: [0.04, -0.42],
-      shotgun: [0.05, -0.61], rifle: [0.05, -0.58], sniper: [0.06, -1.14] }[id];
+    // muzzle anchors track the geometry above: the magnum's rides out with its bigger frame,
+    // the AA-12's sits at the tip of its short barrel rather than a pump's long one
+    const tip = { pistol: [0.05, -0.3], magnum: [0.05 * MAGNUM_BIG, -0.3 * MAGNUM_BIG], smg: [0.04, -0.42],
+      shotgun: [0.06, -0.72], rifle: [0.05, -0.58], sniper: [0.06, -1.14] }[id];
     if (tip) {
       const muz = new THREE.Group();
       muz.position.set(0, tip[0], tip[1]);
@@ -1051,6 +1079,7 @@ function placeShadow(blob, x, z, y) {
 }
 const FLASH_RED = new THREE.MeshBasicMaterial({ color: 0xff2525 });
 const FLASH_GREEN = new THREE.MeshBasicMaterial({ color: 0x3ae06a }); // shielded boss: no damage taken
+const FLASH_WHITE = new THREE.MeshBasicMaterial({ color: 0xffffff }); // ...but green on the green boss reads as nothing
 function flashBlob(blob, fm = FLASH_RED) {
   for (const s of blob.skinList) s.mesh.material = fm;
   blob.flashT = 0.12;
@@ -1111,7 +1140,9 @@ function terrainPlane(w, d, segW, segD, cx, cz, material, lift = 0) {
 }
 
 // ---------- crates ----------
-function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf) {
+// indoor: a box someone stashed under a roof rather than one left lying in a field. Worth
+// more when you open it — see rollLoot.
+function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf, indoor) {
   const g = new THREE.Group();
   const base = box(0.7, 0.5, 0.7, 0x8a5a2b);
   base.position.y = 0.25;
@@ -1129,7 +1160,8 @@ function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf) {
   g.position.set(x, y, z);
   g.rotation.y = rng() * TAU;
   group.add(g);
-  const crate = { mesh: g, lid, trim, glow, opened: false, shrink: 0, pos: new THREE.Vector3(x, y, z), t: rng() * 10, list: crateList };
+  // a shelf only ever stands inside a building, so anything on one is indoors by definition
+  const crate = { mesh: g, lid, trim, glow, opened: false, shrink: 0, pos: new THREE.Vector3(x, y, z), t: rng() * 10, list: crateList, indoor: !!indoor || !!onShelf };
   crateList.push(crate);
   allCrates.push(crate);
   if (!onShelf) {
@@ -1303,12 +1335,21 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
   const roofPeek = addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders); // roof sits down onto the walls, standable
   if (roofPeek) shell.push(roofPeek); // the roof clears too, or looking down at the hero shows only shingles
   if (rng() < 0.85) makeShelf(rng, bx + (rng() - 0.5) * (w - 3), bz + (rng() - 0.5) * (d - 3), (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList);
-  if (rng() < 0.7) makeCrate(rng, bx + (rng() - 0.5) * (w - 2.5), y0 + 0.08, bz + (rng() - 0.5) * (d - 2.5), group, colliders, crateList, false);
-  // parked car near the building
+  // the floor crate lands somewhere the shelf that just went in isn't standing
+  if (rng() < 0.7) {
+    for (let t = 0; t < 10; t++) {
+      const cx3 = bx + (rng() - 0.5) * (w - 2.5), cz3 = bz + (rng() - 0.5) * (d - 2.5);
+      if (!spotClearOf(cx3, cz3, 0.7, colliders)) continue;
+      makeCrate(rng, cx3, y0 + 0.08, cz3, group, colliders, crateList, false, true);
+      break;
+    }
+  }
+  // parked car (or, 40% of the time, a pickup truck) pulled up beside the house
   if (rng() < 0.45) {
     const side = rng() < 0.5 ? -1 : 1;
-    const cxr = bx + side * (w / 2 + 2.6), czr = bz + (rng() - 0.5) * d;
-    if (!onRoad(cxr, czr, 1)) makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6 });
+    const truck = rng() < 0.4;
+    const cxr = bx + side * (w / 2 + (truck ? 3.2 : 2.6)), czr = bz + (rng() - 0.5) * d;
+    if (!onRoad(cxr, czr, 1)) makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6, truck });
   }
   // barrels leaning against the outside walls
   const nBar = (rng() * 3) | 0;
@@ -1390,30 +1431,58 @@ function makeRock(rng, x, z, group, colliders, big) {
   if (big) colliders.push(aabb(x, z, r * 0.8, r * 0.8, r * 0.75, y0));
 }
 
+// front of the car faces +z: windshield, headlights and front axle all sit that way.
+// opts.truck: a bigger pickup — longer body with an open cargo bed, cab pushed forward,
+// and wheels half again as large.
 function makeCar(rng, x, z, group, colliders, opts = {}) {
   const y0 = groundHeight(x, z);
   const g = new THREE.Group();
+  const truck = !!opts.truck;
   const c = [0x7a3030, 0x30507a, 0x6a6a30, 0x555555, 0x8a6a2a, 0x3a6a5a][(rng() * 6) | 0];
-  const body = box(1.8, 0.55, 4, c);
-  body.position.y = 0.55;
+  const bodyW = truck ? 2.0 : 1.8, bodyLen = truck ? 5.4 : 4, bodyH = truck ? 0.62 : 0.55;
+  const bodyTop = bodyH + bodyH / 2;
+  const body = box(bodyW, bodyH, bodyLen, c);
+  body.position.y = bodyTop - bodyH / 2;
   g.add(body);
-  // cabin is body-coloured metal; only the window strips are glass (and only some cracked)
-  const cab = box(1.5, 0.5, 1.7, c);
-  cab.position.set(0, 1.05, -0.2);
+  // cab sits back on a car, forward over the front axle on a truck (leaving the bed behind)
+  const cabZ = truck ? 0.95 : -0.2, cabLen = truck ? 1.55 : 1.7, cabH = truck ? 0.62 : 0.5;
+  const cabY = bodyTop + cabH / 2;
+  const cab = box(bodyW - 0.3, cabH, cabLen, c);
+  cab.position.set(0, cabY, cabZ);
   g.add(cab);
-  const winGlass = () => darkGlassMat;
-  const windshield = new THREE.Mesh(new THREE.PlaneGeometry(1.32, 0.34), winGlass());
-  windshield.position.set(0, 1.08, 0.66); g.add(windshield);
-  const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(1.32, 0.34), winGlass());
-  rearWin.position.set(0, 1.08, -1.06); rearWin.rotation.y = Math.PI; g.add(rearWin);
-  for (const sx of [-1, 1]) {
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.3), winGlass());
-    side.position.set(sx * 0.76, 1.08, -0.2); side.rotation.y = sx * Math.PI / 2; g.add(side);
+  if (truck) {
+    // open cargo bed behind the cab: low walls on three sides, floor is the body top
+    for (const [px, sw, sd] of [[0, bodyW, 0.14], [-(bodyW / 2 - 0.07), 0.14, 2.5], [bodyW / 2 - 0.07, 0.14, 2.5]]) {
+      const wall = box(sw, 0.42, sd, c);
+      wall.position.set(px, bodyTop + 0.21, px === 0 ? -bodyLen / 2 + 0.1 : -1.2);
+      g.add(wall);
+    }
   }
-  for (const [wx, wz] of [[-0.85, 1.3], [0.85, 1.3], [-0.85, -1.3], [0.85, -1.3]]) {
-    const wheel = cyl(0.3, 0.3, 0.22, 0x14161a);
+  // glass strips (some cracked): the windshield is raked back a touch instead of dead vertical
+  const winGlass = () => darkGlassMat;
+  const windshield = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, truck ? 0.42 : 0.34), winGlass());
+  windshield.position.set(0, cabY + 0.05, cabZ + cabLen / 2 + 0.02);
+  windshield.rotation.x = -0.35;   // top edge pulled back toward the cabin — a windscreen rake
+  g.add(windshield);
+  const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, 0.32), winGlass());
+  rearWin.position.set(0, cabY + 0.04, cabZ - cabLen / 2 - 0.02); rearWin.rotation.y = Math.PI; rearWin.rotation.x = -0.2; g.add(rearWin);
+  for (const sx of [-1, 1]) {
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(cabLen - 0.2, 0.3), winGlass());
+    side.position.set(sx * (bodyW / 2 - 0.05), cabY + 0.02, cabZ); side.rotation.y = sx * Math.PI / 2; g.add(side);
+  }
+  // lamp details: warm headlights up front, red tails at the back
+  const frontZ = bodyLen / 2 - 0.03, rearZ = -bodyLen / 2 + 0.03, lampY = bodyTop - 0.1;
+  for (const sx of [-1, 1]) {
+    const hl = box(0.26, 0.15, 0.05, 0xfff6d8, { emissive: 0xffefb0, emissiveIntensity: 0.9 });
+    hl.position.set(sx * (bodyW / 2 - 0.3), lampY, frontZ); g.add(hl);
+    const tl = box(0.24, 0.14, 0.05, 0xff6a6a, { emissive: 0xff2626, emissiveIntensity: 0.85 });
+    tl.position.set(sx * (bodyW / 2 - 0.3), lampY, rearZ); g.add(tl);
+  }
+  const wr = truck ? 0.45 : 0.3, wA = truck ? 1.75 : 1.3, wX = truck ? 0.92 : 0.85;
+  for (const [wx, wz] of [[-wX, wA], [wX, wA], [-wX, -wA], [wX, -wA]]) {
+    const wheel = cyl(wr, wr, truck ? 0.28 : 0.22, 0x14161a);
     wheel.rotation.z = Math.PI / 2;
-    wheel.position.set(wx, 0.3, wz);
+    wheel.position.set(wx, wr, wz);
     g.add(wheel);
   }
   g.position.set(x, y0, z);
@@ -1421,19 +1490,29 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   g.rotation.y = yaw;
   if (opts.flipped) {
     g.rotation.z = Math.PI + (rng() - 0.5) * 0.3;
-    g.position.y = y0 + 1.35;
+    g.position.y = y0 + (truck ? 1.6 : 1.35);
   }
   group.add(g);
   // tight oriented boxes: low body + narrower cabin. bullets skim past the hood
   // instead of hitting an invisible wall, and you can hop trunk -> roof.
+  const hw = bodyW / 2 - 0.05, hl = bodyLen / 2 + 0.02;
   if (opts.flipped) {
-    colliders.push(aabb(x, z, 1.02, 2.02, 1.45, y0, yaw));
+    colliders.push(aabb(x, z, hw + 0.07, hl, truck ? 1.7 : 1.45, y0, yaw));
   } else {
-    colliders.push(aabb(x, z, 0.95, 2.02, 0.85, y0, yaw));
-    colliders.push(aabb(x - 0.2 * Math.sin(yaw), z - 0.2 * Math.cos(yaw), 0.78, 0.88, 1.32, y0, yaw));
+    colliders.push(aabb(x, z, hw, hl, bodyTop, y0, yaw));
+    colliders.push(aabb(x + cabZ * Math.sin(yaw), z + cabZ * Math.cos(yaw), bodyW / 2 - 0.17, cabLen / 2 + 0.06, cabY + cabH / 2, y0, yaw));
   }
 }
 // traffic pileup: cluster of wrecked cars, all broken windows, some flipped
+// nothing solid already standing within r of (x,z). Everything scattered by dice — wrecks,
+// crates — asks this first, because dice will happily roll a car through a shopfront or a
+// loot box into a door panel, and the list is whatever's been built so far.
+function spotClearOf(x, z, r, colliders) {
+  for (const c of colliders) {
+    if (Math.abs(x - c.x) < c.hw + r && Math.abs(z - c.z) < c.hd + r) return false;
+  }
+  return true;
+}
 function makePileup(rng, x, z, along, group, colliders) {
   const n = 3 + ((rng() * 3) | 0);
   for (let i = 0; i < n; i++) {
@@ -1441,6 +1520,9 @@ function makePileup(rng, x, z, along, group, colliders) {
     const jitter = (rng() - 0.5) * 5.6; // scattered across both lanes now that roads are two-way
     const px = along === 'z' ? x + jitter : x + off;
     const pz = along === 'z' ? z + off : z + jitter;
+    // a wreck half-buried in a shop wall reads as a bug, not a crash — skip that one and
+    // let the pileup be a car lighter. A car is ~4.4 long, so 2.4 covers it however it spun.
+    if (!spotClearOf(px, pz, 2.4, colliders)) continue;
     makeCar(rng, px, pz, group, colliders, {
       broken: true,
       flipped: rng() < 0.3,
@@ -1502,6 +1584,9 @@ function buildChunk(cx, cz) {
       if (cx === 0 && cz === 0 && Math.hypot(x, z) < 8) continue;
       if (onRoad(x, z, roadMargin)) continue;
       if (inTown(x, z, 4)) continue;
+      // spots only ever checked each other, so a crate could land inside a car or a rock
+      // some earlier roll had already put there. Solid things get a say now too.
+      if (!spotClearOf(x, z, 1.1, colliders)) continue;
       let ok = true;
       for (const s of spots) if (Math.hypot(s.x - x, s.z - z) < minDist + s.r) { ok = false; break; }
       if (ok) { spots.push({ x, z, r: minDist }); return { x, z }; }
@@ -1766,6 +1851,7 @@ function rayGround(ox, oy, oz, dx, dy, dz, maxT) {
 // ---------- town (built once, persistent) ----------
 const townGroup = new THREE.Group();
 const townCrates = [];
+let fountainFx = null; // animated water on the plaza fountain — filled in buildTown, run by updateFountain
 scene.add(townGroup);
 
 // civic building: colonnaded facade on the faceDir side (+1 = faces +z, -1 = faces -z)
@@ -1792,9 +1878,13 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   const ped = new THREE.Mesh(new THREE.ShapeGeometry(pedShape), new THREE.MeshLambertMaterial({ color: 0xcfc9ba, side: THREE.DoubleSide }));
   ped.position.set(x, y0 + h + 0.28, fz + faceDir * 1.1);
   townGroup.add(ped);
-  for (const s of [1.1, 0.55]) {
-    const step = box(w * 0.55, 0.22, s, 0xbab4a6);
-    step.position.set(x, y0 + (s === 1.1 ? 0.11 : 0.33), fz + faceDir * (2.4 - s * 0.5));
+  // Steps climb TOWARD the building: you meet the low wide one out front off the road, then
+  // the taller one tucked behind it against the columns. They used to run backwards — the
+  // tall one sat outermost, so you stepped up onto it and then back down to reach the door.
+  // [depth, centre y, distance out from the facade]
+  for (const [depth, yc, zd] of [[1.1, 0.11, 1.85], [0.55, 0.33, 1.575]]) {
+    const step = box(w * 0.55, 0.22, depth, 0xbab4a6);
+    step.position.set(x, y0 + yc, fz + faceDir * zd);
     townGroup.add(step);
   }
   // name plate mounted flat on the wall face, behind the columns
@@ -1812,6 +1902,10 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   }
 }
 
+// the big lot north of the plaza: floodlit at its corners, and the ground the Infected One
+// rises on. One definition so the lights, the boss and his arena can't drift apart.
+const LOT = { x: 42, z: 36, hw: 29, hd: 13 };
+const shopDoors = [];   // every shopfront's doorstep, filled in as the town is built
 function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
   const y0 = groundHeight(x, z);
   const wallC = [0x7a6a55, 0x6a707a, 0x7d6a62, 0x6d7a68][(rng() * 4) | 0];
@@ -1833,6 +1927,9 @@ function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
   const door = box(0.9, 1.8, 0.08, 0x33261a);
   door.position.set(x + w * 0.32, y0 + 0.9, fz);
   townGroup.add(door);
+  // remember the step outside every shop door: the Infected One empties the whole parade
+  // through them, and a wave has to come out of a doorway rather than through a wall
+  shopDoors.push({ x: x + w * 0.32, z: fz + faceDir * 0.9 });
   // awning
   const awn = box(w * 0.9, 0.08, 1.3, [0x8a2f2f, 0x2f5a8a, 0x8a6a2f][(rng() * 3) | 0]);
   awn.position.set(x, y0 + h * 0.62, z + faceDir * (d / 2 + 0.6));
@@ -1859,12 +1956,14 @@ function parkingLot(x, z, w, d, rows, rng) {
       line.position.set(lx, groundHeight(lx, rz) + 0.09, rz);
       townGroup.add(line);
     }
-    // abandoned cars sit properly inside the painted stalls, nose-in or backed-in
+    // abandoned cars sit properly inside the painted stalls, nose-in or backed-in — and in
+    // a big lot (deep enough rows) some are pickup trucks nosed straight into the space
     for (let i = 0; i < nLines - 1; i++) {
       if (rng() < 0.3) {
         const sx = x - w / 2 + 2.4 + i * 3.2 + 1.6;
         makeCar(rng, sx, rz, townGroup, townColliders, {
           broken: rng() < 0.7,
+          truck: w > 30 && d / rows > 7.5 && rng() < 0.3,
           rotY: (rng() < 0.5 ? 0 : Math.PI) + (rng() - 0.5) * 0.08,
         });
       }
@@ -2078,6 +2177,94 @@ function buildChurchyard(rng) {
   }
 }
 
+// ---------- street lamps ----------
+// every lamp shares three materials so the whole town's lighting is one cheap dial: the
+// bulb's glow, a soft halo around it, and a pool of light thrown on the ground. All three
+// are dark by day and swell in at dusk, through the night, and under heavy weather.
+const lampBulbMat = mat(0xffe9a8, { emissive: 0xffdd77, emissiveIntensity: 1 });
+const lampHaloMat = new THREE.MeshBasicMaterial({ color: 0xffe6a6, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+const lampPoolMat = new THREE.MeshBasicMaterial({ color: 0xffdca0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+const lampHaloGeo = new THREE.SphereGeometry(0.55, 10, 8);
+const lampPoolGeo = new THREE.CircleGeometry(2.7, 20);
+function makeStreetLamp(x, z, group, h = 4.2) {
+  const y0 = groundHeight(x, z);
+  const pole = cyl(0.07, 0.09, h, 0x3a3d42);
+  pole.position.set(x, y0 + h / 2, z); group.add(pole);
+  const head = box(0.34, 0.14, 0.34, 0x2f3236);   // a little lantern housing at the top
+  head.position.set(x, y0 + h + 0.02, z); group.add(head);
+  const bulb = new THREE.Mesh(SPHERE, lampBulbMat); bulb.scale.setScalar(0.16);
+  bulb.position.set(x, y0 + h - 0.08, z); group.add(bulb);
+  const halo = new THREE.Mesh(lampHaloGeo, lampHaloMat); halo.position.copy(bulb.position); group.add(halo);
+  const pool = new THREE.Mesh(lampPoolGeo, lampPoolMat);
+  pool.rotation.x = -Math.PI / 2; pool.position.set(x, y0 + 0.07, z); pool.renderOrder = 1; group.add(pool);
+  return bulb;
+}
+// The big lot's floods are their own dial: same three materials, same lit ramp, but a
+// separate set so the Infected One can make them stutter over his parking lot without
+// every lamp in town blinking along with him.
+const floodBulbMat = mat(0xfff4d2, { emissive: 0xffe9a0, emissiveIntensity: 1 });
+const floodHaloMat = new THREE.MeshBasicMaterial({ color: 0xfff0c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+const floodPoolMat = new THREE.MeshBasicMaterial({ color: 0xffe9b4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+const floodHaloGeo = new THREE.SphereGeometry(1.15, 10, 8);
+const floodPoolGeo = new THREE.CircleGeometry(13, 24);
+const FLOOD_H = 12.6;   // three street lamps tall: these throw light across a lot, not a path
+// corner floods: a mast, a boxed head cocked in toward the lot, and a wide pool under it
+function makeFloodLamp(x, z, aimX, aimZ, group) {
+  const y0 = groundHeight(x, z);
+  const pole = cyl(0.16, 0.24, FLOOD_H, 0x3a3d42);
+  pole.position.set(x, y0 + FLOOD_H / 2, z); group.add(pole);
+  const yaw = Math.atan2(aimX - x, aimZ - z);
+  const head = box(1.5, 0.4, 0.6, 0x2f3236);
+  head.position.set(x, y0 + FLOOD_H + 0.18, z); head.rotation.y = yaw; group.add(head);
+  for (const sx of [-0.45, 0.45]) {   // twin lamps in the housing, tipped down at the tarmac
+    const bulb = new THREE.Mesh(SPHERE, floodBulbMat); bulb.scale.setScalar(0.22);
+    bulb.position.set(x + Math.cos(yaw) * sx, y0 + FLOOD_H + 0.02, z - Math.sin(yaw) * sx);
+    group.add(bulb);
+    const halo = new THREE.Mesh(floodHaloGeo, floodHaloMat); halo.position.copy(bulb.position); group.add(halo);
+  }
+  const pool = new THREE.Mesh(floodPoolGeo, floodPoolMat);
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.set(lerp(x, aimX, 0.28), y0 + 0.08, lerp(z, aimZ, 0.28)); // thrown in toward the lot
+  pool.renderOrder = 1; group.add(pool);
+}
+// lit: 0 (broad daylight) .. 1 (deep night / heavy rain). Drives all lamps at once.
+let lampLit = 0;   // last computed — the floods re-read it every frame to flicker against
+function setLampGlow(lit) {
+  lampLit = lit;
+  lampBulbMat.emissiveIntensity = 0.55 + lit * 1.7;
+  lampHaloMat.opacity = lit * 0.5;
+  lampPoolMat.opacity = lit * 0.34;
+  setFloodGlow(lit);
+}
+function setFloodGlow(lit) {
+  floodBulbMat.emissiveIntensity = 0.5 + lit * 2.1;
+  floodHaloMat.opacity = lit * 0.42;
+  floodPoolMat.opacity = lit * 0.3;
+}
+// The Infected One is in the wiring: while he's standing, his lot's floods stutter — long
+// steady stretches broken by a short brownout, so it reads as ballasts giving out rather
+// than a strobe. Only bites when they're actually lit; at noon there's nothing to flicker.
+let floodFlickT = 0, floodFlick = 1;
+function updateFloodlights(dt) {
+  if (infectedAlive() && lampLit > 0.02) {
+    floodFlickT -= dt;
+    if (floodFlickT <= 0) {
+      const stumbling = floodFlick < 1;
+      floodFlick = stumbling ? 1 : 0.1 + Math.random() * 0.35;
+      floodFlickT = stumbling ? 0.5 + Math.random() * 2.6 : 0.04 + Math.random() * 0.14;
+    }
+  } else if (floodFlick !== 1) { floodFlick = 1; floodFlickT = 0; }
+  setFloodGlow(lampLit * floodFlick);
+}
+// how lit the lamps should be for a given hour + weather: full through the night, ramping
+// on across dusk and off across dawn, and forced up under rain (or, softly, heavy cloud)
+function lampLitFor(h, W) {
+  let d = (h >= 19 || h < 5.5) ? 1
+    : h >= 17 ? (h - 17) / 2
+    : h < 7 ? (7 - h) / 1.5 : 0;
+  return clamp(Math.max(d, W.rain * 0.7 + W.cloudy * 0.2), 0, 1);
+}
+
 function buildTown() {
   const rng = mulberry32(9001);
   // persistent low-res ground apron under the whole town footprint. Chunks only
@@ -2152,17 +2339,49 @@ function buildTown() {
     spout.position.set(0, fy + 2.72, fz);
     townGroup.add(spout);
     townColliders.push(aabb(0, fz, 2.9, 2.9, 0.95, fy));
-    // lamp ring around the pavilion
-    for (const a of [0.79, 2.36, 3.93, 5.5]) {
-      const lx = Math.cos(a) * 4.3, lz = fz + Math.sin(a) * 4.3;
-      const ly = groundHeight(lx, lz);
-      const pole = cyl(0.06, 0.08, 3.4, 0x3a3d42);
-      pole.position.set(lx, ly + 1.7, lz);
-      townGroup.add(pole);
-      const bulb = ball(0.14, 0xffe9a8, { emissive: 0xffdd77, emissiveIntensity: 1 });
-      bulb.position.set(lx, ly + 3.4, lz);
-      townGroup.add(bulb);
+    // ---- the working water feature ----
+    const waterY = fy + 0.78, bowlBot = fy + 2.29;      // pool surface / underside of the bowl
+    // a translucent skirt spilling off the bowl lip down to the pool — the top-to-bottom flow
+    const fallH = bowlBot - waterY;
+    const fall = cyl(1.02, 0.86, fallH, 0x6fb2d6, 14);
+    fall.material = new THREE.MeshLambertMaterial({ color: 0x6fb2d6, emissive: 0x1e5678, emissiveIntensity: 0.4, transparent: true, opacity: 0.42, depthWrite: false });
+    fall.position.set(0, waterY + fallH / 2, fz);
+    townGroup.add(fall);
+    // droplets that fall from the bowl rim and loop back up when they reach the pool
+    const fdrops = [];
+    for (let i = 0; i < 11; i++) {
+      const d = ball(0.05 + Math.random() * 0.03, 0x9fd4ec, { emissive: 0x2a6a88, emissiveIntensity: 0.7 });
+      const a = Math.random() * TAU, r = 0.82 + Math.random() * 0.18;
+      d.position.set(Math.cos(a) * r, waterY + Math.random() * fallH, fz + Math.sin(a) * r);
+      townGroup.add(d);
+      fdrops.push({ m: d, a, r, y: d.position.y, sp: 2.6 + Math.random() * 1.8 });
     }
+    // ripples widening across the pool, forever
+    const fripples = [];
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.5, 22),
+        new THREE.MeshBasicMaterial({ color: 0x9fd4ec, transparent: true, opacity: 0.4, side: THREE.DoubleSide, depthWrite: false }));
+      ring.rotation.x = -Math.PI / 2; ring.position.set(0, waterY + 0.015, fz);
+      townGroup.add(ring); fripples.push({ m: ring, t: i / 3 });
+    }
+    // a puddle-glint circling the pedestal base
+    const puddle = new THREE.Mesh(new THREE.RingGeometry(0.64, 1.6, 30, 1, 0, Math.PI * 1.4),
+      new THREE.MeshBasicMaterial({ color: 0x7fbcda, transparent: true, opacity: 0.26, side: THREE.DoubleSide, depthWrite: false }));
+    puddle.rotation.x = -Math.PI / 2; puddle.position.set(0, waterY + 0.01, fz);
+    townGroup.add(puddle);
+    // one drain sunk into the basin behind the pedestal — a contracting ring shows the water
+    // sliding inward into it
+    const drainZ = fz - 1.95;
+    const drain = new THREE.Mesh(new THREE.CircleGeometry(0.3, 16), new THREE.MeshLambertMaterial({ color: 0x24282d }));
+    drain.rotation.x = -Math.PI / 2; drain.position.set(0, waterY + 0.006, drainZ); townGroup.add(drain);
+    const drainRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.42, 18),
+      new THREE.MeshBasicMaterial({ color: 0x8fc6e0, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
+    drainRing.rotation.x = -Math.PI / 2; drainRing.position.set(0, waterY + 0.012, drainZ); townGroup.add(drainRing);
+    // centerpiece collider: hop the basin rim, then up onto the pedestal and bowl
+    townColliders.push(aabb(0, fz, 0.7, 0.7, 2.55, fy));
+    fountainFx = { fdrops, fripples, puddle, drainRing, waterY, top: bowlBot };
+    // lamp ring around the pavilion
+    for (const a of [0.79, 2.36, 3.93, 5.5]) makeStreetLamp(Math.cos(a) * 4.3, fz + Math.sin(a) * 4.3, townGroup, 3.4);
   }
 
   // shopping plaza: long building north edge of plaza rect, parking in front
@@ -2173,6 +2392,13 @@ function buildTown() {
     px += w + 1.5;
   }
   parkingLot(42, 36, 58, 26, 3, rng);   // large parking
+  // floodlight masts on the big lot's four corners, each cocked in at the middle of it, so
+  // after dusk (and under rain) the whole lot is lit rather than the odd pool of lamplight
+  for (const [fx, fzz] of [[LOT.x - LOT.hw + 1.6, LOT.z - LOT.hd + 1.6], [LOT.x + LOT.hw - 1.6, LOT.z - LOT.hd + 1.6],
+                           [LOT.x - LOT.hw + 1.6, LOT.z + LOT.hd - 1.6], [LOT.x + LOT.hw - 1.6, LOT.z + LOT.hd - 1.6]]) {
+    makeFloodLamp(fx, fzz, LOT.x, LOT.z, townGroup);
+    townColliders.push(aabb(fx, fzz, 0.3, 0.3, FLOOD_H, groundHeight(fx, fzz)));
+  }
   parkingLot(16, 22, 14, 10, 1, rng);   // smaller side parking
   // plaza driveway connects main road to parking
   townGroup.add(terrainPlane(6.4, 32, 2, 8, 41, 2, roadMat, 0.04));
@@ -2192,20 +2418,27 @@ function buildTown() {
   // loot crates scattered through town
   const spots = [[10, -9.8], [36, -9.8], [58, -24.4], [88, -9.4], [94, -26], [30, 30], [55, 42], [18, 20], [70, 55], [41, 10]];
   for (const [cx2, cz2] of spots) {
-    if (rng() < 0.8) makeCrate(rng, cx2 + (rng() - 0.5) * 3, groundHeight(cx2, cz2) + 0.05, cz2 + (rng() - 0.5) * 3, townGroup, townColliders, townCrates, false);
-  }
-  // street lamps tucked in the gaps between shopfronts, clear of the awnings
-  for (const lx of [5.5, 18.5, 31.5, 44.5, 57.5, 70.5]) {
-    for (const lz of [-10.1, -23.9]) {
-      const y0 = groundHeight(lx, lz);
-      const pole = cyl(0.07, 0.09, 4.2, 0x3a3d42);
-      pole.position.set(lx, y0 + 2.1, lz);
-      townGroup.add(pole);
-      const bulb = ball(0.16, 0xffe9a8, { emissive: 0xffdd77, emissiveIntensity: 1 });
-      bulb.position.set(lx, y0 + 4.2, lz);
-      townGroup.add(bulb);
+    if (rng() >= 0.8) continue;
+    // These spots are hand-placed, and a few of them sit inside a shopfront or hard against
+    // a parked car. Cast wider with each miss so a box lands near where it was meant to when
+    // it can and relocates when it can't — and if the whole neighbourhood is solid, drop it
+    // rather than bury it. A crate you can't reach is worse than no crate at all.
+    for (let t = 0; t < 16; t++) {
+      const spread = 1.5 + t * 0.35;
+      const jx = cx2 + (rng() - 0.5) * spread * 2, jz = cz2 + (rng() - 0.5) * spread * 2;
+      if (!spotClearOf(jx, jz, 0.75, townColliders)) continue;
+      makeCrate(rng, jx, groundHeight(jx, jz) + 0.05, jz, townGroup, townColliders, townCrates, false);
+      break;
     }
   }
+  // street lamps line the shopfronts, then run on down both kerbs of the main street and up
+  // toward the plaza — the whole small district lit for the dusk / night / rain shift
+  for (const lx of [5.5, 18.5, 31.5, 44.5, 57.5, 70.5, 76]) {
+    for (const lz of [-10.1, -23.9]) if (!onRoad(lx, lz, 0.5)) makeStreetLamp(lx, lz, townGroup);
+  }
+  // up both kerbs of the plaza driveway and along the plaza frontage
+  for (const lz of [7, 19, 31, 45]) { makeStreetLamp(37.4, lz, townGroup); makeStreetLamp(44.6, lz, townGroup); }
+  for (const lx of [16, 30, 58, 70]) makeStreetLamp(lx, 50, townGroup);
 }
 
 // ---------- input ----------
@@ -2289,8 +2522,30 @@ addEventListener('mouseup', e => {
   if (e.button === 0) input.shoot = false;
   if (e.button === 2) { rmbDrag = false; input.aim = false; }
 });
+// ---- zoom: one gesture, two jobs ----
+// scroll / two-finger pinch / d-pad all feed the same zoom. In third person it slides the
+// camera distance smoothly; down a sniper scope it snaps through fixed magnification notches
+// with a click, so the scope zoom is dynamic but always lands on a clean setting.
+const SNIPER_FOVS = [30, 22, 15, 10]; // wider .. tighter; index 1 (22°) is the old fixed zoom
+let sniperNotch = 1, zoomAcc = 0;
+function scopedSniper() { return player.weapon && player.weapon.id === 'sniper' && player.aiming; }
+function scopeClick() { if (actx) tone(1500, 0.03, 0.13, 'square'); }
+function zoomStep(dir) {   // dir: -1 = in / more mag, +1 = out / less
+  if (scopedSniper()) {
+    const p = sniperNotch;
+    sniperNotch = clamp(sniperNotch - dir, 0, SNIPER_FOVS.length - 1); // in -> tighter FOV -> higher index
+    if (sniperNotch !== p) scopeClick();
+  } else camDist = clamp(camDist + dir * 0.55, 2.6, 9.5);
+}
+function zoomAnalog(d) {    // d > 0 = out, d < 0 = in (continuous, from wheel/pinch)
+  if (scopedSniper()) {
+    zoomAcc += d;
+    while (zoomAcc >= 0.35) { zoomAcc -= 0.35; zoomStep(1); }
+    while (zoomAcc <= -0.35) { zoomAcc += 0.35; zoomStep(-1); }
+  } else { zoomAcc = 0; camDist = clamp(camDist + d, 2.6, 9.5); }
+}
 addEventListener('wheel', e => {
-  if (game.state === 'playing') camDist = clamp(camDist + e.deltaY * 0.004, 2.6, 9.5);
+  if (game.state === 'playing') zoomAnalog(e.deltaY * 0.004);
 }, { passive: true });
 addEventListener('contextmenu', e => e.preventDefault());
 
@@ -2300,6 +2555,9 @@ const touchLayer = document.getElementById('touchlayer');
 const joyBase = document.getElementById('joyBase');
 const joyKnob = document.getElementById('joyKnob');
 let joyTouchId = null, camTouchId = null;
+// second finger in the aim area pinches to zoom — track it + both fingers' last positions
+let pinchTouchId = null, pinchDist = 0;
+const aimPos = {}; // identifier -> {x, y} for the (up to two) aim-area fingers
 let joyOrigin = { x: 0, y: 0 };
 const JOY_R = 48;
 let sprintToggle = false;
@@ -2381,11 +2639,19 @@ touchLayer.addEventListener('touchstart', e => {
     } else if (camTouchId === null) {
       camTouchId = t.identifier;
       camLast = { x: t.clientX, y: t.clientY };
+      aimPos[t.identifier] = { x: t.clientX, y: t.clientY };
+    } else if (pinchTouchId === null) {
+      // a second finger in the aim area: it's a pinch-to-zoom, not a look
+      pinchTouchId = t.identifier;
+      aimPos[t.identifier] = { x: t.clientX, y: t.clientY };
+      const a = aimPos[camTouchId], b = aimPos[pinchTouchId];
+      pinchDist = a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
     }
   }
 }, { passive: false });
 touchLayer.addEventListener('touchmove', e => {
   e.preventDefault();
+  const pinching = pinchTouchId !== null;
   for (const t of e.changedTouches) {
     if (t.identifier === joyTouchId) {
       let dx = t.clientX - joyOrigin.x, dy = t.clientY - joyOrigin.y;
@@ -2396,21 +2662,40 @@ touchLayer.addEventListener('touchmove', e => {
       input.moveX = dx / JOY_R;
       input.moveY = dy / JOY_R;
     } else if (t.identifier === camTouchId) {
-      // the same notch that drives the mouse drives the swipe — it just wears the other name
-      const sens = settings.mouseSens || 1;
-      input.lookDX += (t.clientX - camLast.x) * 0.006 * sens;
-      input.lookDY += (t.clientY - camLast.y) * 0.006 * sens;
+      if (aimPos[camTouchId]) { aimPos[camTouchId].x = t.clientX; aimPos[camTouchId].y = t.clientY; }
+      // while two fingers are down the aim finger only pinches — it doesn't swing the camera
+      if (!pinching) {
+        const sens = settings.mouseSens || 1;
+        input.lookDX += (t.clientX - camLast.x) * 0.006 * sens;
+        input.lookDY += (t.clientY - camLast.y) * 0.006 * sens;
+      }
       camLast = { x: t.clientX, y: t.clientY };
+    } else if (t.identifier === pinchTouchId) {
+      if (aimPos[pinchTouchId]) { aimPos[pinchTouchId].x = t.clientX; aimPos[pinchTouchId].y = t.clientY; }
     }
+  }
+  // recompute the finger spread and feed the change to zoom (fingers together = zoom out)
+  if (pinching && aimPos[camTouchId] && aimPos[pinchTouchId]) {
+    const a = aimPos[camTouchId], b = aimPos[pinchTouchId];
+    const nd = Math.hypot(a.x - b.x, a.y - b.y);
+    zoomAnalog((pinchDist - nd) * 0.01);
+    pinchDist = nd;
   }
 }, { passive: false });
 function touchEnd(e) {
   for (const t of e.changedTouches) {
+    delete aimPos[t.identifier];
     if (t.identifier === joyTouchId) {
       joyTouchId = null;
       joyGoHome();   // drift back to the faded home zone
       input.moveX = 0; input.moveY = 0;
-    } else if (t.identifier === camTouchId) camTouchId = null;
+    } else if (t.identifier === pinchTouchId) {
+      pinchTouchId = null;
+    } else if (t.identifier === camTouchId) {
+      // if the aim finger lifts but the pinch finger is still down, promote it to the aim finger
+      camTouchId = pinchTouchId; pinchTouchId = null;
+      if (camTouchId !== null && aimPos[camTouchId]) camLast = { x: aimPos[camTouchId].x, y: aimPos[camTouchId].y };
+    }
   }
 }
 touchLayer.addEventListener('touchend', touchEnd);
@@ -2447,6 +2732,12 @@ function pollGamepad(dt) {
     input.shootGamepad = false; gpPrev.rt = false;
     return;
   }
+  // front-end screens (start / lobby / death / on-screen keyboard): the pad drives the UI
+  if (game.state !== 'playing') {
+    padMenuScreen(gp, dt, justPressed, mx, my);
+    input.shootGamepad = false; gpPrev.rt = false;
+    return;
+  }
   const padSens = settings.padSens || 1;
   // D-pad down holds the emote wheel open; the right stick steers it (camera pauses)
   const dpadDown = gp.buttons[13] && gp.buttons[13].pressed;
@@ -2458,6 +2749,8 @@ function pollGamepad(dt) {
     input.lookDX += lx * 2.6 * dt * padSens;
     input.lookDY += ly * 2.0 * dt * padSens;
   }
+  if (justPressed(15)) zoomStep(-1); // d-pad right: zoom in (sniper scope steps a notch tighter)
+  if (justPressed(14)) zoomStep(1);  // d-pad left: zoom out
   if (justPressed(0)) input.jump = true;
   if (justPressed(1)) input.reload = true;
   if (justPressed(2)) input.interact = true;
@@ -2594,8 +2887,14 @@ let selectedCousin = 'blingo';
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
 const prestige = { blocks: {}, bestTime: 0, bestHero: '' };
+// The block is not the block it was: the Infected One now stands between the Crimson One and
+// the street party, so every clear banked before him was banked on a shorter game and every
+// record time was set on one. Those runs don't compare, so the old save is dropped rather
+// than shown next to new ones — new key, and the old one deleted so it can't linger.
+const PRESTIGE_KEY = 'blingo-prestige-v2';
+try { localStorage.removeItem('blingo-prestige'); } catch (e) {}
 try {
-  const saved = JSON.parse(localStorage.getItem('blingo-prestige') || '{}');
+  const saved = JSON.parse(localStorage.getItem(PRESTIGE_KEY) || '{}');
   if (saved && typeof saved === 'object') {
     if (saved.blocks && typeof saved.blocks === 'object')
       for (const k in saved.blocks) if (Number.isInteger(saved.blocks[k]) && saved.blocks[k] > 0) prestige.blocks[k] = saved.blocks[k];
@@ -2606,7 +2905,7 @@ try {
 function recordPrestige() {
   prestige.blocks[selectedCousin] = (prestige.blocks[selectedCousin] | 0) + 1;
   if (!prestige.bestTime || game.time < prestige.bestTime) { prestige.bestTime = game.time; prestige.bestHero = selectedCousin; }
-  try { localStorage.setItem('blingo-prestige', JSON.stringify(prestige)); } catch (e) {}
+  try { localStorage.setItem(PRESTIGE_KEY, JSON.stringify(prestige)); } catch (e) {}
   renderPrestige();
 }
 function fmtTime(t) { return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); }
@@ -2720,6 +3019,11 @@ function hurtCompanion(c, dmg) {
   // player-controlled cousins take their damage on their own screen
   if (c.netP) { if (c.netConn) { try { c.netConn.send({ t: 'hurt', d: dmg }); } catch (e) {} } return; }
   if (c.downed || !c.recruited) return;
+  // The Infected One's plague goes through an AI cousin like paper — they fold three times
+  // as fast while he stands. This sits below the netP hand-off on purpose: a real person
+  // driving a cousin takes normal damage, so a squad of bots won't carry this fight and a
+  // lobby of people will. That gap is the whole point of him.
+  if (infectedFightOn()) dmg *= INFECTED_NPC_DMG;
   c.hp -= dmg;
   c.lastHurtT = game.time;
   flashBlob(c.blob);
@@ -2809,6 +3113,7 @@ const reserves = {};
 // game: they can haul you up, and even if nobody comes, you bleed back up on your own.
 // Alone — or with only AI cousins, who can't revive you — death still means death.
 const DOWN_BLEED = 15;
+const INFECTED_NPC_DMG = 3;   // what the Infected One does to a cousin nobody's driving
 function hasHumanAlly() {
   if (net.role === 'client') return true;                  // the host is a person
   if (net.role === 'host') return companions.some(c => c.netP);
@@ -2943,16 +3248,17 @@ const ZOMBIE_COLORS = [0x6fae4e, 0x7fb85a, 0x5f9a44, 0x8fbc6a];
 function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const purple = !!opts.purple;              // boss-swarm variant: purple & 33% faster
   const red = !!opts.red;                    // Crimson One's church swarm: red & quick
+  const green = !!opts.green;                // Infected One's lot swarm: the red brute, 10% bigger
   const mode = opts.mode || 'pop';
-  const scale = 0.85 + Math.random() * 0.5;
+  const scale = (0.85 + Math.random() * 0.5) * (green ? 1.1 : 1);
   // random rot-variants; brain-showing spawns are the rare weak-spot walkers
-  const droopy = !purple && !red && Math.random() < 0.3;
+  const droopy = !purple && !red && !green && Math.random() < 0.3;
   const brain = Math.random() < 0.12;
-  const blind = !purple && !red && Math.random() < 0.16;
+  const blind = !purple && !red && !green && Math.random() < 0.16;
   // extra-gore mode makes fresh zombies spawn already mangled and bloody; a corpse always
   // spawns wounded — it's already dead, a carcass for the crows to pick over
   const wounded = mode === 'corpse' || (extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5);
-  const color = red ? 0xd43a3a : purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
+  const color = green ? 0x39b83a : red ? 0xd43a3a : purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
   const blob = buildBlob({ color, zombie: true, scale, droopy, brain, blind, wounded });
   blob.root.position.set(x, groundHeight(x, z), z);
   if (opts.horns) {
@@ -2976,14 +3282,14 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   scene.add(blob.root);
   zombies.push({
     blob, pos: new THREE.Vector3(x, 0, z),
-    hp: mode === 'corpse' ? (3 + Math.random() * 3) * scale : (9 + Math.random() * 6) * scale * powerScale * (purple || red ? 1.2 : 1),
-    speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1) * (purple ? 1.33 : red ? 1.25 : 1) * (mode === 'runner' ? 1.5 : 1),
+    hp: mode === 'corpse' ? (3 + Math.random() * 3) * scale : (9 + Math.random() * 6) * scale * powerScale * (purple || red || green ? 1.2 : 1),
+    speed: (1.5 + Math.random() * 1.4) * (0.9 + powerScale * 0.1) * (purple ? 1.33 : (red || green) ? 1.25 : 1) * (mode === 'runner' ? 1.5 : 1),
     yaw: Math.random() * TAU,
     state: mode === 'grave' ? 'emerge' : mode === 'sleeper' ? 'sleep' : mode === 'corpse' ? 'corpse' : 'chase',
     attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
     brainExposed: brain, blind, stepT: Math.random(),
-    bleeding: wounded, dripT: 0, purple, red, biteMult: red ? 1.35 : 1,
+    bleeding: wounded, dripT: 0, purple, red, green, biteMult: (red || green) ? 1.35 : 1,
     mode, emergeT: 0, hornWave: !!opts.horns,
     despawnR: mode === 'runner' ? 140 : 85,
     wanderT: 0, wanderYaw: Math.random() * TAU, shotIgnoreT: -99,
@@ -3585,7 +3891,11 @@ function updateWeaponBtn() {
 }
 let toastT = 0;
 function toast(txt, long) {
-  hud.toast.textContent = txt;
+  // break the line after each .ᐟ so whatever follows drops onto its own centred row,
+  // sitting under the statement it belongs to. Escape first — these strings carry weapon
+  // and cousin names — then insert the only markup we add ourselves.
+  const safe = String(txt).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  hud.toast.innerHTML = safe.replace(/\.ᐟ[ ]+/g, '.ᐟ<br>').replace(/<br>\s*$/, '');
   hud.toast.style.opacity = 1;
   hud.toast.style.top = '32%';
   toastT = long ? 4.2 : 1.6;
@@ -3717,6 +4027,13 @@ function pauseGame() {
   if (game.state !== 'playing') return;
   game.state = 'paused';
   syncSettingsUI();
+  // multiplayer readout: the lobby code everyone can reference + how many slots are filled
+  const pl = document.getElementById('pauselobby');
+  if (net.role && net.lobbyCode) {
+    const n = 1 + companions.filter(c => c.netP).length;
+    pl.innerHTML = `LOBBY ${net.lobbyCode.toUpperCase()} <span class="plslots">${n}/${NET_SLOTS}</span>`;
+    pl.classList.remove('hidden');
+  } else pl.classList.add('hidden');
   pauseScreen.classList.remove('hidden');
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -3877,6 +4194,114 @@ function padMenuNav(gp, dt, justPressed, ax, ay) {
   }
   if (justPressed(1)) resumeGame();
 }
+
+// ---------- gamepad menus + on-screen keyboard ----------
+// the pad drives every front-end screen the way it drives the pause menu: a focus ring you
+// move with the d-pad/stick, A to pick, B to back out.
+let menuFocus = 0, menuNavT = 0;
+function currentScreen() {
+  if (!document.getElementById('vkeyboard').classList.contains('hidden')) return document.getElementById('vkeyboard');
+  for (const id of ['startscreen', 'lobbyscreen', 'hostclosed', 'deathscreen']) {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains('hidden')) return el;
+  }
+  return null;
+}
+function menuFocusables() {
+  const s = currentScreen();
+  if (!s) return [];
+  return [...s.querySelectorAll('button, .card, #lobbycode, .lobbyrow, .vkkey')].filter(el => el.offsetParent !== null);
+}
+function setMenuFocus(i) {
+  const els = menuFocusables();
+  if (!els.length) return;
+  menuFocus = (i + els.length) % els.length;
+  els.forEach((el, j) => el.classList.toggle('focus', j === menuFocus));
+  const el = els[menuFocus];
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+}
+function menuActivate(el) {
+  if (!el) return;
+  if (el === codeEl) openVKeyboard();   // the code field pops the on-screen keyboard
+  else el.click();
+}
+function padMenuScreen(gp, dt, justPressed, ax, ay) {
+  menuNavT -= dt;
+  const sx = Math.abs(ax) > 0.5 ? Math.sign(ax) : 0;
+  const sy = Math.abs(ay) > 0.5 ? Math.sign(ay) : 0;
+  const ready = menuNavT <= 0 && (sx || sy);
+  const els = menuFocusables();
+  if (!els.length) return;
+  if (menuFocus >= els.length) menuFocus = 0;
+  if (!els[menuFocus] || !els[menuFocus].classList.contains('focus')) setMenuFocus(menuFocus);
+  const vk = !document.getElementById('vkeyboard').classList.contains('hidden');
+  const cols = vk ? 10 : 1;   // keyboard rows are ~10 wide, so up/down steps a whole row
+  let d = 0;
+  if (justPressed(14) || (ready && sx < 0)) d = -1;
+  else if (justPressed(15) || (ready && sx > 0)) d = 1;
+  else if (justPressed(12) || (ready && sy < 0)) d = -cols;
+  else if (justPressed(13) || (ready && sy > 0)) d = cols;
+  if (d) { setMenuFocus(menuFocus + d); menuNavT = 0.16; }
+  if (justPressed(0)) menuActivate(menuFocusables()[menuFocus]);
+  if (justPressed(1)) {   // B: close the keyboard, or hit the screen's back/menu button
+    if (vk) closeVKeyboard();
+    else { const back = els.find(e => /BACK|MENU/i.test(e.textContent)); if (back) back.click(); }
+  }
+}
+// on-screen keyboard for the lobby code. Enter hosts (sends them in); Close keeps the
+// edited name and drops back to the lobby, so they can still host from the HOST A LOBBY tab.
+const vkLayout = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+function buildVKeyboard() {
+  const keys = document.getElementById('vkkeys');
+  keys.innerHTML = '';
+  for (const rowChars of vkLayout) {
+    const r = document.createElement('div'); r.className = 'vkrow';
+    for (const ch of rowChars) {
+      const b = document.createElement('button'); b.className = 'vkkey'; b.textContent = ch.toUpperCase();
+      b.addEventListener('click', () => vkPress(ch));
+      r.appendChild(b);
+    }
+    keys.appendChild(r);
+  }
+  const r = document.createElement('div'); r.className = 'vkrow';
+  for (const [label, act] of [['DEL', 'del'], ['CLOSE', 'close'], ['ENTER', 'enter']]) {
+    const b = document.createElement('button'); b.className = 'vkkey vkact'; b.textContent = label;
+    b.addEventListener('click', () => vkAction(act));
+    r.appendChild(b);
+  }
+  keys.appendChild(r);
+}
+function vkSync() {
+  const c = normCode(codeEl.value);
+  document.getElementById('vkdisplay').textContent = codeEl.value.toUpperCase() || '_';
+  document.getElementById('vkhint').textContent = !c ? 'type a code'
+    : isPublicCode(c) ? `PUBLIC · anyone can find ${c.toUpperCase()}`
+    : `PRIVATE · only players you hand ${c.toUpperCase()} can join`;
+  updateCodeHint();
+}
+function vkPress(ch) { if (normCode(codeEl.value + ch).length <= 12) codeEl.value += ch; vkSync(); }
+function vkAction(act) {
+  if (act === 'close') { closeVKeyboard(); return; }
+  if (act === 'enter') { closeVKeyboard(); hostLobby(codeEl.value); return; }
+  if (act === 'del') codeEl.value = codeEl.value.slice(0, -1);
+  vkSync();
+}
+function openVKeyboard() {
+  document.getElementById('lobbyscreen').classList.add('hidden');
+  document.getElementById('vkeyboard').classList.remove('hidden');
+  document.body.classList.add('vkopen');
+  hud.crosshair.style.left = '50%'; hud.crosshair.style.top = '50%';
+  vkSync();
+  setMenuFocus(0);
+}
+function closeVKeyboard() {
+  document.getElementById('vkeyboard').classList.add('hidden');
+  document.body.classList.remove('vkopen');
+  document.getElementById('lobbyscreen').classList.remove('hidden'); // keep the edit; the tab still hosts
+  updateCodeHint();
+  setMenuFocus(0);
+}
+buildVKeyboard();
 
 // ---------- aiming ----------
 const _aimDir = new THREE.Vector3();
@@ -4130,8 +4555,10 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   // horn-guard: while boss-wave zombies still stand, the Two Horned One shrugs everything
   // off — he flashes green instead of red because nothing got through
   if (z.isBoss && bossShielded()) {
-    flashBlob(z.blob, FLASH_GREEN);
-    spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, 0x3ae06a, 3, 2.5, 0.3);
+    // the shrug is green — except on the green one, where green on green is no signal at
+    // all, so the Infected One turns white instead
+    flashBlob(z.blob, z.isBoss3 ? FLASH_WHITE : FLASH_GREEN);
+    spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, z.isBoss3 ? 0xffffff : 0x3ae06a, 3, 2.5, 0.3);
     return;
   }
   // poking the Two Horned One is a mistake: any hit wakes him and sparks a lunge
@@ -4360,8 +4787,15 @@ function openCrate(cr) {
   cr.glow.visible = false;
   cr.trim.visible = false;
   const rng = Math.random;
-  const loot = rollLoot(rng);
-  if (loot === 'ammo') {
+  const loot = rollCrateLoot(rng, cr);
+  if (loot === 'sniperammo') {
+    // the armoury's full: the consolation is a box of the scarcest rounds in the game
+    const add = Math.ceil(WEAPONS.sniper.mag * (1.5 + rng()) * player.ammoMult);
+    reserves.sniper = (reserves.sniper | 0) + add;
+    toast(`+${add} SNIPER AMMO`);
+    SFX.pickup();
+    updateAmmoHUD();
+  } else if (loot === 'ammo') {
     if (player.weapon.melee) giveWeapon('pistol');
     else {
       const add = Math.ceil(player.weapon.mag * (1.5 + rng()) * player.ammoMult);
@@ -4493,7 +4927,9 @@ function animate() {
     updateCrates(dt);
     updatePickups(dt);
     updateBossFx();
+    updateFloodlights(dt);
     updateCrows(dt);
+    updateFountain(dt);
     updateCelebration(dt);
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
@@ -5327,10 +5763,18 @@ function updateSpawner(dt) {
 }
 
 // ---------- boss: the Two Horned One ----------
-const bossState = { boss: null, beam: null, spawned: false, defeated: false, spawned2: false, defeated2: false };
+const bossState = { boss: null, beam: null, spawned: false, defeated: false, spawned2: false, defeated2: false,
+  spawned3: false, defeated3: false };
+// the Infected One is up and awake: his lot lights stutter, and his plague makes short work
+// of anyone who isn't a real person behind a screen
+function infectedFightOn() {
+  const b = bossState.boss;
+  return bossState.spawned3 && !bossState.defeated3 && !!b && b.isBoss3 && b.state !== 'dormant' && b.state !== 'dying';
+}
+function infectedAlive() { return bossState.spawned3 && !bossState.defeated3; }
 // once a boss is in play the streets change character: no more laying zombies (sleepers or
 // carcasses) get spawned — the block has bigger problems than crows picking at the dead
-function bossPhase() { return bossState.spawned || bossState.spawned2; }
+function bossPhase() { return bossState.spawned || bossState.spawned2 || bossState.spawned3; }
 const bossBarEl = document.getElementById('bossbar');
 const bossHpEl = document.getElementById('bosshp');
 const bossLabelEl = document.getElementById('bosslabel');
@@ -5338,10 +5782,15 @@ const bossLabelEl = document.getElementById('bosslabel');
 // rather than parked beside it, so tuning one can never quietly leave the second boss the
 // softer of the two. Each cleared block then wakes tougher versions of both.
 const BOSS_HP = 650, BOSS2_HP = Math.round(BOSS_HP * 1.25);
+// the Infected One matches the Crimson One's health exactly, and spends his advantage on
+// size and speed instead — a bigger, faster thing to fight for the same number of bullets
+const BOSS3_HP = BOSS2_HP, BOSS3_BIG = 1.15;
 // each boss flies his own colours: the purple bar belongs to the Two Horned One alone
-function dressBossBar(isBoss2) {
-  bossLabelEl.textContent = isBoss2 ? 'The Crimson One' : 'The Two Horned One';
-  bossBarEl.classList.toggle('crimson', !!isBoss2);
+function dressBossBar(z) {
+  const kind = !z ? 0 : z.isBoss3 ? 3 : z.isBoss2 ? 2 : 1;
+  bossLabelEl.textContent = kind === 3 ? 'The Infected One' : kind === 2 ? 'The Crimson One' : 'The Two Horned One';
+  bossBarEl.classList.toggle('crimson', kind === 2);
+  bossBarEl.classList.toggle('infected', kind === 3);
 }
 // unlocked once every cousin has been recruited
 function maybeSpawnBoss() {
@@ -5416,10 +5865,47 @@ function spawnBoss2() {
   toast('BLOCK SCOURED . . BUT THE GRAVES SHIFT BY THE OLD CHURCH .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
 }
+// the Infected One: rises out on the floodlit parking lot once the Crimson One is down, and
+// his sickness is in the wiring — the lot's floods stutter the whole time he stands. Matches
+// the Crimson One's health exactly and spends the difference on reach: 15% bigger and 15%
+// faster. His waves come out of the shops, the whole parade at once.
+const BOSS_INFECTED = 0x2f9e34, INFECTED_HANDS = 0x145414;
+function spawnBoss3() {
+  bossState.spawned3 = true;
+  const bx = LOT.x, bz = LOT.z;
+  const scale = 2.7 * BOSS3_BIG;
+  const blob = buildBlob({ color: BOSS_INFECTED, zombie: true, scale, hands: INFECTED_HANDS });
+  for (const s of [-1, 1]) {                  // the same crown of horns, sickly dark
+    const horn = cyl(0.02, 0.15, 0.55, 0x123a12, 6);
+    horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
+    blob.head.add(horn);
+  }
+  blob.root.position.set(bx, groundHeight(bx, bz), bz);
+  scene.add(blob.root);
+  const hp = Math.round(BOSS3_HP * (1 + 0.4 * game.cycle));
+  const z = {
+    blob, pos: new THREE.Vector3(bx, 0, bz), hp, maxHp: hp, speed: 1.15 * BOSS3_BIG, yaw: Math.PI, state: 'dormant',
+    attackT: 0, deadT: 0, walkPhase: 0, groanT: 2, scale,
+    brainExposed: false, blind: false, stepT: 0, bleeding: false, dripT: 0, isBoss: true, isBoss3: true,
+    biteMult: 1.35, green: true, wavesFired: 0, dashT: 0, dashCdT: -9,
+  };
+  zombies.push(z);
+  bossState.boss = z;
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.7, 1.7, 130, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x3ae04a, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+  );
+  beam.position.set(bx, groundHeight(bx, bz) + 64, bz);
+  scene.add(beam);
+  bossState.beam = beam;
+  bossBarEl.classList.remove('show');
+  toast('THE CHURCH IS QUIET . . SOMETHING STIRS UNDER THE LOT LIGHTS .ᐟ', true);
+  initAudio(); play3d(bx, bz, () => SFX.groan());
+}
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;
   z.state = 'chase';
-  dressBossBar(z.isBoss2);
+  dressBossBar(z);
   bossBarEl.classList.add('show');
   toast(z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS!', true);
   shakeAmp = Math.max(shakeAmp, 0.4);
@@ -5452,9 +5938,38 @@ function updateBossState(z) {
 function bossShielded() {
   return zombies.some(zz => zz.hornWave && zz.state !== 'dying');
 }
+// a spot on a shop's doorstep, clear of whatever's parked against it
+function shopDoorSpot() {
+  const d = shopDoors[(Math.random() * shopDoors.length) | 0];
+  const [x, z] = resolveCollision(d.x + (Math.random() - 0.5) * 1.2, d.z + (Math.random() - 0.5) * 1.2, 0.5);
+  return [x, z];
+}
 function fireBossWave(z, n) {
   z.wavesFired = n;
-  if (z.isBoss2) {
+  if (z.isBoss3) {
+    // The Infected One empties the parade, shop by shop, and the town gets sicker each time:
+    // first his own green brutes with the ordinary dead in tow, then the Two Horned One's
+    // purple guards still with fodder behind them, and finally nothing but horns — green,
+    // purple and red together, every guard on the block at once and no filler left to soak
+    // a shot. Every one of them walks out of a doorway.
+    const count = 7 + n * 4;                   // 11 -> 15 -> 19
+    for (let k = 0; k < count; k++) {
+      const [x, zz] = shopDoorSpot();
+      const power = 1 + game.time / 240;
+      if (n === 1) {
+        // half green horned guards, half plain dead out of the same doors
+        if (k < Math.ceil(count / 2)) spawnZombie(x, zz, power, { green: true, horns: true });
+        else spawnZombie(x, zz, power, {});
+      } else if (n === 2) {
+        if (k < Math.ceil(count / 2)) spawnZombie(x, zz, power, { purple: true, horns: true });
+        else spawnZombie(x, zz, power, {});
+      } else {
+        const kind = k % 3;
+        spawnZombie(x, zz, power, kind === 0 ? { green: true, horns: true }
+          : kind === 1 ? { purple: true, horns: true } : { red: true, horns: true });
+      }
+    }
+  } else if (z.isBoss2) {
     // the Crimson One calls bigger waves. From the church side door pour purple horned
     // guards (his shield — exactly the Two Horned One's guards, horns + speed) plus red
     // brutes that are faster AND bite harder; from the graves claw plain standard dead.
@@ -5488,19 +6003,32 @@ function fireBossWave(z, n) {
   shakeAmp = Math.max(shakeAmp, 0.2);
 }
 function onBossDefeated(z) {
-  if (z.isBoss2) {
-    // the final cleanse: with the Crimson One down, every walker left drops where it
-    // stands, and THEN the block has truly earned its street party
-    bossState.defeated2 = true;
+  if (z.isBoss3) {
+    // the real end of it: with the Infected One down there is nothing left standing, and
+    // THEN the block has earned its street party
+    bossState.defeated3 = true;
     if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
     bossBarEl.classList.remove('show');
     for (const zz of [...zombies]) if (zz !== z && !zz.netGhost && zz.state !== 'dying') killZombie(zz, 0, 0, false);
-    toast('THE CRIMSON ONE FALLS . . THE BLOCK IS CLEANSED .ᐟ', true);
-    for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xff3030, 0xfff3d0][k % 3], 1, 6, 1.2);
+    toast('THE INFECTED ONE FALLS . . THE BLOCK IS CLEANSED .ᐟ', true);
+    for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0x3ae04a, 0xfff3d0][k % 3], 1, 6, 1.2);
     rumble(600, 1, 1);
     game.celebrateT = 5.5;
     recordPrestige();
     if (net.role === 'host') netBroadcast({ t: 'secured', tm: game.time }); // everyone banks the clear
+    return;
+  }
+  if (z.isBoss2) {
+    // the church goes quiet — but the sickness just moves house. Every walker left drops,
+    // and the Infected One stands up out on the lot instead of the street party starting.
+    bossState.defeated2 = true;
+    if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+    bossBarEl.classList.remove('show');
+    for (const zz of [...zombies]) if (zz !== z && !zz.netGhost && zz.state !== 'dying') killZombie(zz, 0, 0, false);
+    toast('THE CRIMSON ONE FALLS . . BUT THE LOT LIGHTS ARE STUTTERING .ᐟ', true);
+    for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xff3030, 0xfff3d0][k % 3], 1, 6, 1.2);
+    rumble(600, 1, 1);
+    spawnBoss3();
     return;
   }
   bossState.defeated = true;
@@ -6096,6 +6624,29 @@ function updateCrows(dt) {
   }
 }
 
+// the plaza fountain runs: droplets spill off the bowl and loop, ripples widen across the
+// pool, a glint circles the pedestal base, and a ring keeps contracting into the back drain
+function updateFountain(dt) {
+  const F = fountainFx;
+  if (!F) return;
+  for (const d of F.fdrops) {
+    d.y -= d.sp * dt;
+    if (d.y <= F.waterY + 0.04) d.y = F.top - Math.random() * 0.12;
+    d.m.position.y = d.y;
+  }
+  for (const r of F.fripples) {
+    r.t = (r.t + dt * 0.5) % 1;
+    r.m.scale.setScalar(0.5 + r.t * 2.1);
+    r.m.material.opacity = 0.42 * (1 - r.t);
+  }
+  F.puddle.rotation.z += dt * 0.35;
+  F.puddle.material.opacity = 0.2 + Math.sin(performance.now() * 0.0015) * 0.08;
+  // the drain ring shrinks inward, then snaps back out — water sliding in
+  F.drainRing.__t = ((F.drainRing.__t || 0) + dt * 0.8) % 1;
+  const dt2 = F.drainRing.__t;
+  F.drainRing.scale.setScalar(1.9 - dt2 * 1.5);
+  F.drainRing.material.opacity = 0.4 * dt2;
+}
 function updateCrates(dt) {
   for (let i = allCrates.length - 1; i >= 0; i--) {
     const cr = allCrates[i];
@@ -6181,7 +6732,7 @@ function updateCamera(dt) {
   // which eases the very shove that drives the flare — keep this gentle or that loop
   // gains enough to breathe.
   const gcPrev = player.groundCamT;
-  const tpDist = camDist * (1 - aimT * 0.5) * (1 - gcPrev * 0.25); // zoom closer over the shoulder while aiming
+  const tpDist = camDist * (1 - aimT * 0.5) * (1 - gcPrev * 0.42); // pull in harder as the rig meets the dirt
   const tpX = pivotX + Math.sin(cy) * Math.cos(cp) * tpDist;
   const tpY = pivotY - Math.sin(cp) * tpDist;
   const tpZ = pivotZ + Math.cos(cy) * Math.cos(cp) * tpDist;
@@ -6220,23 +6771,24 @@ function updateCamera(dt) {
   camera.lookAt(lx, ly, lz);
   // zoom focus: snipers punch in hard through the scope, guns focus modestly, melee barely
   let zoomedFov;
-  if (wz.id === 'sniper') zoomedFov = 22;
+  if (wz.id === 'sniper') zoomedFov = SNIPER_FOVS[sniperNotch]; // dynamic, notched scope zoom
   else if (wz.melee) zoomedFov = 62;
   else zoomedFov = fpv > 0.5 ? 45 : 52;
   const baseFov = lerp(70, zoomedFov, aimT);
   lookFov = baseFov;
   const fov = baseFov + gc * 24;
-  // The flare goes wide *and* squeezes the frame anamorphically, so a hero shot from
-  // the dirt stretches up against the sky. The matrix is rebuilt from scratch every
-  // frame the flare is live — scaling it in place would compound the squeeze — and the
-  // inverse is re-derived because updateProjectionMatrix's copy is stale after we poke
-  // the elements (raycasts and unproject read it).
+  // The flare goes wide *and* warps the frame — both axes stretch out (y harder than x) so
+  // a hero shot from the dirt magnifies and rears up against the sky instead of the old
+  // anamorphic pinch that left everything skinny. The matrix is rebuilt from scratch every
+  // frame the flare is live — scaling it in place would compound the warp — and the inverse
+  // is re-derived because updateProjectionMatrix's copy is stale after we poke the elements
+  // (raycasts and unproject read it).
   if (gc > 0.002 || lensStretched || Math.abs(fov - camera.fov) > 0.04) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
     if (gc > 0.002) {
-      camera.projectionMatrix.elements[0] *= 1 - gc * 0.12; // pinch x
-      camera.projectionMatrix.elements[5] *= 1 + gc * 0.15; // stretch y
+      camera.projectionMatrix.elements[0] *= 1 + gc * 0.11; // stretch x too, so nothing goes skinny
+      camera.projectionMatrix.elements[5] *= 1 + gc * 0.26; // stretch y harder for the vertical rear-up
       camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
     }
     lensStretched = gc > 0.002;
@@ -6610,7 +7162,7 @@ function netHostTick(dt) {
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
-    b2: !!(boss && boss.isBoss2) }); // which one is up: clients dress the bar in his colours
+    b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3) }); // which one is up: clients dress the bar in his colours
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
   const R = v => Math.round(v * 20) / 20;
@@ -6706,7 +7258,7 @@ function netApplySnapshot(m) {
   if (m.ck != null && Math.abs(m.ck - (game.clock ?? 0)) > 0.15) game.clock = m.ck;
   if (m.w && m.w !== wx.to) { wx.from = game.weather; wx.to = m.w; wx.u = 0; }
   bossBarEl.classList.toggle('show', m.bb >= 0);
-  if (m.bb >= 0) { dressBossBar(m.b2); bossHpEl.style.width = m.bb * 100 + '%'; }
+  if (m.bb >= 0) { dressBossBar({ isBoss2: !!m.b2, isBoss3: !!m.b3 }); bossHpEl.style.width = m.bb * 100 + '%'; }
   const seenA = new Set();
   for (const a of m.ac) {
     if (a.p === net.playerNum) continue;          // that's me

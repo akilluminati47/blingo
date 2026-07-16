@@ -86,6 +86,10 @@
   #bossbar.crimson #bosslabel { color:#ffb0b0; text-shadow:0 0 10px rgba(255,60,60,.7); }
   #bossbar.crimson #bosswrap { border-color:rgba(255,150,150,.55); box-shadow:0 0 16px rgba(255,40,40,.4); }
   #bossbar.crimson #bosshp { background:linear-gradient(90deg,#ff5a5a,#9c1414); }
+  /* and the Infected One flies green — his own, not a shade of either of theirs */
+  #bossbar.infected #bosslabel { color:#a8ffb0; text-shadow:0 0 10px rgba(50,230,80,.7); }
+  #bossbar.infected #bosswrap { border-color:rgba(140,255,150,.55); box-shadow:0 0 16px rgba(40,220,60,.4); }
+  #bossbar.infected #bosshp { background:linear-gradient(90deg,#5aff6a,#12801e); }
 
   #bottomright { position:absolute; right:calc(16px + env(safe-area-inset-right)); bottom:calc(14px + env(safe-area-inset-bottom)); text-align:right; color:#fff; }
   #weaponname { font-size:13px; letter-spacing:3px; text-transform:uppercase; opacity:.85; text-shadow:0 1px 3px #000; }
@@ -322,6 +326,24 @@
   #pausepanel { background:rgba(10,12,18,.94); border:2px solid var(--hero); border-radius:18px; padding:20px 24px 0;
     width:min(92vw,660px); box-shadow:0 0 46px rgba(0,0,0,.65); }
   #pausepanel h1 { color:var(--hero); font-size:34px; letter-spacing:6px; margin-bottom:12px; text-shadow:none; }
+  /* multiplayer readout on the pause badge: the lobby code + how many slots are filled */
+  #pauselobby { margin:-4px 0 12px; padding:8px 12px; border:1px solid var(--hero); border-radius:10px;
+    color:var(--hero); font-size:13px; font-weight:700; letter-spacing:2px; background:rgba(255,255,255,.05);
+    display:flex; justify-content:center; gap:14px; }
+  #pauselobby .plslots { color:#fff; }
+  /* on-screen keyboard for hosting on a gamepad (or a tap) */
+  #vkpanel { background:rgba(10,12,18,.96); border:2px solid var(--hero); border-radius:18px; padding:20px 22px;
+    width:min(94vw,640px); box-shadow:0 0 46px rgba(0,0,0,.7); }
+  #vktitle { color:#aaa; font-size:13px; letter-spacing:3px; }
+  #vkdisplay { color:var(--hero); font-size:30px; font-weight:800; letter-spacing:6px; margin:6px 0; min-height:38px; word-break:break-all; }
+  #vkhint { color:#9fb0c4; font-size:12px; margin-bottom:12px; letter-spacing:1px; }
+  #vkkeys { display:flex; flex-direction:column; gap:7px; }
+  .vkrow { display:flex; gap:7px; justify-content:center; }
+  .vkkey { pointer-events:auto; cursor:pointer; flex:1; max-width:52px; padding:12px 0; border-radius:9px;
+    background:rgba(255,255,255,.08); border:2px solid transparent; color:#eee; font-size:15px; font-weight:700; }
+  .vkkey.vkact { max-width:none; padding:12px 18px; letter-spacing:2px; font-size:13px; }
+  .vkkey:hover, .vkkey.focus { background:var(--hero); color:#10131a; border-color:#fff; }
+  body.vkopen #crosshair { opacity:.95 !important; }
   #settingsGrid { display:grid; grid-template-columns:1fr 1fr; grid-auto-flow:column; grid-template-rows:repeat(5,auto);
     gap:2px 28px; text-align:left; }
   .srow { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 9px; border-radius:9px;
@@ -496,11 +518,21 @@
 <div class="screen hidden" id="pausescreen">
   <div id="pausepanel">
     <h1>PAUSED</h1>
+    <div id="pauselobby" class="hidden"></div>
     <div id="settingsGrid"></div>
     <div id="pausebtns">
       <button id="resumebtn">RESUME</button>
       <button id="quitbtn">QUIT TO MENU</button>
     </div>
+  </div>
+</div>
+
+<div class="screen hidden" id="vkeyboard">
+  <div id="vkpanel">
+    <div id="vktitle">LOBBY CODE</div>
+    <div id="vkdisplay">_</div>
+    <p id="vkhint">type a code</p>
+    <div id="vkkeys"></div>
   </div>
 </div>
 
