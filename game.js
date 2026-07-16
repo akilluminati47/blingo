@@ -1491,17 +1491,20 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
       g.add(wall);
     }
   }
-  // glass strips (some cracked): the windshield is raked back a touch instead of dead vertical
+  // glass strips (some cracked): flat to the body on all four sides now — no rake on the
+  // windshield or rear glass, and the sides sit flush on the cab's own wall (bodyW-0.3)
+  // rather than out at the wider body's edge, where they used to float past the cab in open air
   const winGlass = () => darkGlassMat;
+  const EPS = 0.01;
+  const cabHalfW = (bodyW - 0.3) / 2;
   const windshield = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, truck ? 0.42 : 0.34), winGlass());
-  windshield.position.set(0, cabY + 0.05, cabZ + cabLen / 2 + 0.02);
-  windshield.rotation.x = -0.35;   // top edge pulled back toward the cabin — a windscreen rake
+  windshield.position.set(0, cabY, cabZ + cabLen / 2 + EPS);
   g.add(windshield);
   const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, 0.32), winGlass());
-  rearWin.position.set(0, cabY + 0.04, cabZ - cabLen / 2 - 0.02); rearWin.rotation.y = Math.PI; rearWin.rotation.x = -0.2; g.add(rearWin);
+  rearWin.position.set(0, cabY, cabZ - cabLen / 2 - EPS); rearWin.rotation.y = Math.PI; g.add(rearWin);
   for (const sx of [-1, 1]) {
     const side = new THREE.Mesh(new THREE.PlaneGeometry(cabLen - 0.2, 0.3), winGlass());
-    side.position.set(sx * (bodyW / 2 - 0.05), cabY + 0.02, cabZ); side.rotation.y = sx * Math.PI / 2; g.add(side);
+    side.position.set(sx * (cabHalfW + EPS), cabY, cabZ); side.rotation.y = sx * Math.PI / 2; g.add(side);
   }
   // lamp details: warm headlights up front, red tails at the back
   const frontZ = bodyLen / 2 - 0.03, rearZ = -bodyLen / 2 + 0.03, lampY = bodyTop - 0.1;
@@ -2483,6 +2486,15 @@ function buildTown() {
   // west connector: same deal in reverse — flush at the pocket's west edge (x=9, no overlap
   // into its tarmac either) out to the x=-20 road with the same kerb-lap on that end
   townGroup.add(terrainPlane(23.2, 6.4, 6, 2, -2.6, 22, roadJoinMat, 0.04));
+  // a painted stripe across each flush seam — same white and same stroke width as the
+  // parking-stall lines, lifted above both the lot (0.05) and the road (0.04) so it sits on
+  // the top layer and hides whatever hairline gap is left where two separately-tessellated
+  // planes meet, the same way a real lot paints over its own expansion joints
+  for (const [mx, mz] of [[71, LOT.z], [9, 22]]) {
+    const stripe = box(0.14, 0.02, 6.4, 0xd8d8d0);
+    stripe.position.set(mx, groundHeight(mx, mz) + 0.1, mz);
+    townGroup.add(stripe);
+  }
 
   // the old church and its spiked graveyard brood just north of the plaza
   buildChurchyard(rng);
