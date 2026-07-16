@@ -1943,9 +1943,19 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   plate.position.set(x, y0 + h - Math.min(w * 0.07, 1.4), fz + faceDir * 0.06);
   plate.rotation.y = faceDir > 0 ? 0 : Math.PI;
   townGroup.add(plate);
-  // facade windows
+  // facade: a big grand entrance where the centre window used to be — same dark slab as the
+  // chapel door, scaled up for a civic front — flanked by the two side windows
   const rrng = rng || Math.random;
-  for (let i = -1; i <= 1; i++) {
+  const dW = Math.min(w * 0.22, 3.4), dH = Math.min(h * 0.6, 4.6);   // bigger than the chapel's
+  // a pale stone surround, then the dark door face proud of it, so it reads as a doorway cut
+  // into the wall rather than a flat panel
+  const surround = box(dW + 0.5, dH + 0.4, 0.08, 0xbdb7a8);
+  surround.position.set(x, y0 + (dH + 0.4) / 2 - 0.2, fz + faceDir * 0.02);
+  townGroup.add(surround);
+  const door = box(dW, dH, 0.16, 0x241a12);
+  door.position.set(x, y0 + dH / 2, fz + faceDir * 0.06);
+  townGroup.add(door);
+  for (const i of [-1, 1]) {
     const win = windowPane(rrng, 1.4, 1.6);
     win.position.set(x + i * (w / 3.2), y0 + h * 0.42, fz + faceDir * 0.03);
     win.rotation.y = faceDir > 0 ? 0 : Math.PI;
@@ -2097,9 +2107,10 @@ function buildChurchyard(rng) {
   const crossH = box(0.5, 0.08, 0.08, 0x14121a);
   crossH.position.set(cx - 0.02, ridgeY + 5.92, steepleZ); crossH.rotation.z = 0.09;
   townGroup.add(crossH);
-  // tall dark windows down both flanks — the west-flank centre is left open for the side door
+  // tall dark windows down both flanks — the east-flank (graveyard-side) centre is left open
+  // for the side door
   for (const wz of [-5, 0, 5]) for (const s of [-1, 1]) {
-    if (s < 0 && wz === 0) continue;
+    if (s > 0 && wz === 0) continue;
     const win = windowPane(rng, 1.0, 2.4);
     win.position.set(cx + s * (w / 2 + 0.03), y0 + h * 0.5, cz + wz);
     win.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -2123,14 +2134,15 @@ function buildChurchyard(rng) {
   const plate = textPlate('CHAPEL', 3.6, 0.9, '#2a2422', '#9a8f7a'); // faded sign over the door
   plate.position.set(cx, y0 + h - 0.7, northZ + 0.06);
   townGroup.add(plate);
-  // side door, now on the west flank, its own step down. Tall riser against the door, short
-  // one further out — climbs up toward the threshold instead of the reverse.
+  // side door, now on the EAST flank facing the graveyard — the way out to where the Crimson
+  // One lies, between this door and the graveyard gate. Its own step: thick tread against the
+  // door, thin one further out, climbing up toward the threshold.
   const sideDoor = box(0.12, 2.4, 1.8, 0x241a12);
-  sideDoor.position.set(westX - 0.06, y0 + 1.2, cz);
+  sideDoor.position.set(eastX + 0.06, y0 + 1.2, cz);
   townGroup.add(sideDoor);
   for (const s of [1.2, 0.6]) {
     const step = box(s, 0.2, 2.4, 0x55524a);
-    step.position.set(westX - (1.3 - s * 0.5), y0 + (s > 1 ? 0.3 : 0.1), cz);
+    step.position.set(eastX + (1.3 - s * 0.5), y0 + (s > 1 ? 0.3 : 0.1), cz);
     townGroup.add(step);
   }
 
@@ -2553,11 +2565,9 @@ function buildTown() {
   for (const lx of [5.5, 18.5, 31.5, 44.5, 57.5, 70.5, 76]) {
     for (const lz of [-10.1, -23.9]) if (!onRoad(lx, lz, 0.5)) makeStreetLamp(lx, lz, townGroup);
   }
-  // up both kerbs of the plaza driveway and along the plaza frontage — skipping any that
-  // would stand inside the floodlit lot or at the foot of one of its masts
-  for (const lz of [7, 19, 31, 45]) {
-    for (const lx of [37.4, 44.6]) if (!lotIsFloodlit(lx, lz)) makeStreetLamp(lx, lz, townGroup);
-  }
+  // along the plaza frontage — skipping any that would stand inside the floodlit lot. (The
+  // old books-driveway kerb lamps are gone: the lot's own floods light that approach now, and
+  // the four that survived the lot cull just stood stranded at its south edge.)
   for (const lx of [16, 30, 58, 70]) if (!lotIsFloodlit(lx, 50)) makeStreetLamp(lx, 50, townGroup);
 }
 
@@ -3795,8 +3805,9 @@ function trackedActors() {
   }
   for (const z of zombies) {
     if (!z.isBoss || z.state === 'dying') continue;
-    out.push({ key: z.isBoss2 ? 'b2' : 'b1', label: z.isBoss2 ? 'CRIMSON' : 'TWO HORNED',
-      color: z.isBoss2 ? BOSS_CRIMSON : BOSS_PURPLE,
+    out.push({ key: z.isBoss3 ? 'b3' : z.isBoss2 ? 'b2' : 'b1',
+      label: z.isBoss3 ? 'INFECTED' : z.isBoss2 ? 'CRIMSON' : 'TWO HORNED',
+      color: z.isBoss3 ? BOSS_INFECTED : z.isBoss2 ? BOSS_CRIMSON : BOSS_PURPLE,
       x: z.pos.x, y: z.blob.root.position.y, z: z.pos.z, downed: false, boss: true, scale: z.scale });
   }
   return out;
@@ -4790,6 +4801,7 @@ function meleeTradable(id) { const w = WEAPONS[id]; return !!(w && w.melee && id
 // a recruited cousin you're close to AND looking at — so the squad trailing behind
 // doesn't spam the trade prompt while you walk
 function findNearTrade() {
+  if (player.weapon.id === 'fists') return null; // nothing in hand to trade — no prompt, no swap
   let best = null, bestD = 2.4;
   const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
   for (const c of companions) {
@@ -4807,13 +4819,14 @@ function findNearTrade() {
 function tradeWeapons(c) {
   const myId = player.weapon.id;
   const theirId = (c.weapon || WEAPONS.pistol).id;
+  if (myId === 'fists') { toast('NOTHING TO TRADE .ᐟ ARM YOURSELF FIRST'); return; } // no trading bare-fisted
   if (myId === theirId) { toast('YOU BOTH HOLD THE SAME WEAPON'); return; }
-  // melee-for-melee is a true swap: the blade you hand over leaves your kit instead of
-  // duplicating, so nothing snaps back to your cousin's signature melee on the next cycle
-  if (meleeTradable(myId) && meleeTradable(theirId)) {
-    const i = player.owned.indexOf(myId);
-    if (i >= 0) player.owned.splice(i, 1);
-  }
+  // a true swap: the weapon you hand over leaves your kit entirely — and the ammo you were
+  // carrying for it (reserve + the loaded clip) goes with it — so nothing duplicates and you
+  // can't cycle back to a gun you gave away
+  const oi = player.owned.indexOf(myId);
+  if (oi >= 0) player.owned.splice(oi, 1);
+  delete reserves[myId];
   setCompanionWeapon(c, myId);
   equipWeapon(theirId);
   // a player-run cousin is a real person elsewhere: tell their client to settle its side
@@ -4873,9 +4886,11 @@ function executeHoldTrade(a, b) {
   const idOf = e => e.self ? player.weapon.id : (e.c.weapon || WEAPONS.pistol).id;
   const idA = idOf(a), idB = idOf(b);
   if (idA === idB) { toast('YOU BOTH HOLD THE SAME WEAPON'); return; }
+  if (idA === 'fists' || idB === 'fists') { if (a.self || b.self) toast('NOTHING TO TRADE .ᐟ ARM YOURSELF FIRST'); return; } // no bare-fisted trades
   for (const [e, give, take] of [[a, idA, idB], [b, idB, idA]]) {
     if (e.self) {
-      if (give !== 'fists') { const i = player.owned.indexOf(give); if (i >= 0) player.owned.splice(i, 1); }
+      const i = player.owned.indexOf(give); if (i >= 0) player.owned.splice(i, 1);
+      delete reserves[give];   // the ammo you were carrying leaves with the weapon
       equipWeapon(take);
       toast(`TRADED: YOUR ${WEAPONS[give].name.toUpperCase()} FOR A ${WEAPONS[take].name.toUpperCase()}`);
     } else {
