@@ -2487,12 +2487,12 @@ function buildTown() {
   // into its tarmac either) out to the x=-20 road with the same kerb-lap on that end
   townGroup.add(terrainPlane(23.2, 6.4, 6, 2, -2.6, 22, roadJoinMat, 0.04));
   // a painted stripe across each flush seam — same white and same stroke width as the
-  // parking-stall lines, lifted above both the lot (0.05) and the road (0.04) so it sits on
-  // the top layer and hides whatever hairline gap is left where two separately-tessellated
-  // planes meet, the same way a real lot paints over its own expansion joints
+  // parking-stall lines, sat at the midpoint between the lot's lift (0.05) and the road's
+  // (0.04) so it straddles the seam rather than floating above both, and hides whatever
+  // hairline gap is left where two separately-tessellated planes meet
   for (const [mx, mz] of [[71, LOT.z], [9, 22]]) {
     const stripe = box(0.14, 0.02, 6.4, 0xd8d8d0);
-    stripe.position.set(mx, groundHeight(mx, mz) + 0.1, mz);
+    stripe.position.set(mx, groundHeight(mx, mz) + 0.045, mz);
     townGroup.add(stripe);
   }
 
