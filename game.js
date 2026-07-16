@@ -2336,30 +2336,45 @@ function buildTown() {
     // Every wet part of this fountain (pool, ripples, puddle, drain, the foot of the fall)
     // was pitched 0.07 under it and therefore invisible. They all hang off waterY now, and
     // waterY sits just proud of the landing, which is the only place water can actually show.
+    // The pool is an opaque disc lying on an opaque plinth, so clearance alone was never
+    // going to settle it — at any distance the two are close enough for depth precision to
+    // start picking between them. It stands a clear 6cm proud AND takes a polygon offset, so
+    // it wins the test outright rather than by a margin the far plane can eat into.
     const BASIN_H = 0.85;
-    const waterY = fy + BASIN_H + 0.03;
+    const waterY = fy + BASIN_H + 0.06;
     const basin = cyl(2.8, 3.0, BASIN_H, 0x9a948a, 18);
     basin.position.set(0, fy + BASIN_H / 2, fz);
     townGroup.add(basin);
     const water = new THREE.Mesh(new THREE.CircleGeometry(2.45, 18),
-      new THREE.MeshLambertMaterial({ color: 0x3f7fae, emissive: 0x14405e, emissiveIntensity: 0.55 }));
+      new THREE.MeshLambertMaterial({ color: 0x3f7fae, emissive: 0x14405e, emissiveIntensity: 0.55,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
     water.rotation.x = -Math.PI / 2;
     water.position.set(0, waterY, fz);
     townGroup.add(water);
     const ped = cyl(0.42, 0.62, 1.5, 0x8b8577, 10);
     ped.position.set(0, fy + 1.5, fz);
     townGroup.add(ped);
-    const bowl = cyl(1.05, 0.22, 0.45, 0x9a948a, 12);
-    bowl.position.set(0, fy + 2.4, fz);
+    // dish: wide lip up top narrowing to the stem, so water thrown up by the spout runs
+    // out over the rim and off the outside of it
+    const BOWL_Y = fy + 2.4, BOWL_H = 0.45, BOWL_RIM_R = 1.05;
+    const bowl = cyl(BOWL_RIM_R, 0.22, BOWL_H, 0x9a948a, 12);
+    bowl.position.set(0, BOWL_Y, fz);
     townGroup.add(bowl);
     const spout = ball(0.26, 0x7fb8d8, { emissive: 0x2a5a78, emissiveIntensity: 0.6 });
     spout.position.set(0, fy + 2.72, fz);
     townGroup.add(spout);
     townColliders.push(aabb(0, fz, 2.9, 2.9, 0.95, fy));
     // ---- the working water feature ----
-    const bowlBot = fy + 2.29;                          // underside of the bowl: where the fall starts
-    // a translucent skirt spilling off the bowl lip down to the pool — the top-to-bottom flow
-    const fallH = bowlBot - waterY;
+    // The ball is the pressure welling up at the top, and what it throws runs over the bowl's
+    // LIP — so that lip is where the curtain has to start. It used to hang off the bowl's
+    // underside, a third of a metre lower, which left the top of the run dry and made the
+    // spill appear to begin halfway down out of nothing. Off the rim it reads as one piece:
+    // top surface, curtain, pool.
+    const bowlRim = BOWL_Y + BOWL_H / 2;
+    // a translucent skirt hanging off the bowl lip down to the pool — the whole top-to-bottom
+    // flow in one curtain. Its top radius sits just inside the rim so it sheets over the lip,
+    // and it hangs outside the dish as that narrows away beneath it.
+    const fallH = bowlRim - waterY;
     const fall = cyl(1.02, 0.86, fallH, 0x6fb2d6, 14);
     fall.material = new THREE.MeshLambertMaterial({ color: 0x6fb2d6, emissive: 0x1e5678, emissiveIntensity: 0.4, transparent: true, opacity: 0.42, depthWrite: false });
     fall.position.set(0, waterY + fallH / 2, fz);
@@ -2381,22 +2396,27 @@ function buildTown() {
       ring.rotation.x = -Math.PI / 2; ring.position.set(0, waterY + 0.015, fz);
       townGroup.add(ring); fripples.push({ m: ring, t: i / 3 });
     }
-    // a puddle-glint circling the pedestal base
-    const puddle = new THREE.Mesh(new THREE.RingGeometry(0.64, 1.6, 30, 1, 0, Math.PI * 1.4),
+    // a puddle-glint pooled round the pedestal base. A closed ring: it used to be a 252°
+    // arc, and spinning that just dragged a bite out of the water round and round.
+    const puddle = new THREE.Mesh(new THREE.RingGeometry(0.64, 1.6, 30),
       new THREE.MeshBasicMaterial({ color: 0x7fbcda, transparent: true, opacity: 0.26, side: THREE.DoubleSide, depthWrite: false }));
     puddle.rotation.x = -Math.PI / 2; puddle.position.set(0, waterY + 0.01, fz);
     townGroup.add(puddle);
     // one drain sunk into the basin behind the pedestal — a contracting ring shows the water
-    // sliding inward into it
+    // sliding inward into it. It's the only opaque thing lying ON the pool, so it's the only
+    // one that can fight it for depth: the rings above are all depthWrite:false and can't.
+    // A polygon offset keeps it in front for good rather than trusting 6mm of clearance.
     const drainZ = fz - 1.95;
-    const drain = new THREE.Mesh(new THREE.CircleGeometry(0.3, 16), new THREE.MeshLambertMaterial({ color: 0x24282d }));
-    drain.rotation.x = -Math.PI / 2; drain.position.set(0, waterY + 0.006, drainZ); townGroup.add(drain);
+    const drain = new THREE.Mesh(new THREE.CircleGeometry(0.3, 16),
+      new THREE.MeshLambertMaterial({ color: 0x24282d, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    drain.rotation.x = -Math.PI / 2; drain.position.set(0, waterY + 0.012, drainZ); townGroup.add(drain);
     const drainRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.42, 18),
       new THREE.MeshBasicMaterial({ color: 0x8fc6e0, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
-    drainRing.rotation.x = -Math.PI / 2; drainRing.position.set(0, waterY + 0.012, drainZ); townGroup.add(drainRing);
+    drainRing.rotation.x = -Math.PI / 2; drainRing.position.set(0, waterY + 0.022, drainZ); townGroup.add(drainRing);
     // centerpiece collider: hop the basin rim, then up onto the pedestal and bowl
     townColliders.push(aabb(0, fz, 0.7, 0.7, 2.55, fy));
-    fountainFx = { fdrops, fripples, puddle, drainRing, waterY, top: bowlBot };
+    // drops respawn at the rim too, so they fall the full run rather than the bottom of it
+    fountainFx = { fdrops, fripples, puddle, drainRing, waterY, top: bowlRim };
     // lamp ring around the pavilion
     for (const a of [0.79, 2.36, 3.93, 5.5]) makeStreetLamp(Math.cos(a) * 4.3, fz + Math.sin(a) * 4.3, townGroup, 3.4);
   }
@@ -6659,7 +6679,8 @@ function updateFountain(dt) {
     r.m.scale.setScalar(0.5 + r.t * 2.1);
     r.m.material.opacity = 0.42 * (1 - r.t);
   }
-  F.puddle.rotation.z += dt * 0.35;
+  // the puddle is a closed ring now, so spinning it would be work nobody can see — it just
+  // breathes instead
   F.puddle.material.opacity = 0.2 + Math.sin(performance.now() * 0.0015) * 0.08;
   // the drain ring shrinks inward, then snaps back out — water sliding in
   F.drainRing.__t = ((F.drainRing.__t || 0) + dt * 0.8) % 1;
