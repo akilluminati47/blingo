@@ -5436,6 +5436,10 @@ function stepFrame(dt) {
     if (p >= 1) { deathFx.on = false; finishDeath(); }
   }
 
+  // clients: the rest of the lobby (other players, zombies) keeps moving live every frame,
+  // paused or not — see netClientWorldTick for why this can never grant invincibility
+  if (net.role === 'client') netClientWorldTick(dt);
+
   if (game.state === 'playing') {
     game.time += dt;
     updateDayNight(dt);
@@ -7939,7 +7943,13 @@ function netRemoveGhost(nid) {
   if (i >= 0) zombies.splice(i, 1);
 }
 // client frame: animate ghosts toward their targets and stream our own pose at 15Hz
-function netClientTick(dt) {
+// the world/other-players half: runs every frame regardless of local pause state, so a
+// paused client sees the lobby actually moving behind the dimmed menu instead of a frozen
+// snapshot that then has to catch up on resume. Damage is fully host-authoritative and
+// applied via the 'hurt' message handler (never gated on game.state), so pausing here never
+// makes you — or anyone else — untouchable; a zombie that reaches your last position still
+// lands the hit, you just can't see or react to it until you resume.
+function netClientWorldTick(dt) {
   const k = 1 - Math.exp(-10 * dt);
   for (const [, g] of net.actors) {
     const b = g.blob;
@@ -7995,7 +8005,16 @@ function netClientTick(dt) {
     updateFlash(b, dt);
   }
   netRefreshClientBars();
+  // fires the moment hp hits zero, paused or not — the host should never be kept waiting
+  // on a death notice just because the victim's own screen happened to be paused
   if (player.dead && !net.sentDead) { net.sentDead = true; try { net.conns[0].send({ t: 'dead' }); } catch (e) {} }
+  // the host's fill level drives our ring; it hides when updates stop coming
+  tradeRing(net.tradePT && performance.now() - net.tradePT < 500 ? net.tradeP || 0 : 0);
+}
+// the local-input half: only meaningful while you're actually playing, so it's gated behind
+// game.state === 'playing'. Freezing this (and not the world tick above) is what makes pause
+// a pure spectate-your-own-frozen-body state rather than a way to stop the clock on anyone.
+function netClientTick(dt) {
   // a bare fist held out at an armed player's ghost is the skin offer; the ring only
   // fills once they answer (the host streams that back as tradeP), so until it does
   // this names the offer and lets it pitch itself
@@ -8026,8 +8045,6 @@ function netClientTick(dt) {
         dn: player.downed ? 1 : 0 });
     } catch (e) {}
   }
-  // the host's fill level drives our ring; it hides when updates stop coming
-  tradeRing(net.tradePT && performance.now() - net.tradePT < 500 ? net.tradeP || 0 : 0);
 }
 // client-side squad bars: every other player big + tagged, AI cousins small
 function netRefreshClientBars() {
