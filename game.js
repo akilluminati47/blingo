@@ -7021,23 +7021,36 @@ function updateFx(dt) {
   hud.crosshair.style.top = cyp + 'px';
   hud.hitmarker.style.left = cx + 'px';
   hud.hitmarker.style.top = cyp + 'px';
-  // the X flares open when an enemy is under the crosshair
+  // the X flares open when an enemy is under the crosshair — but only one the shot could
+  // actually reach. We measure how far the aim ray travels before a wall, car/truck, roof or
+  // the ground stops the round (exactly as fireHitscan does), and a target sitting past that
+  // stays cold: no flare, and on touch no auto-fire, until the path to it is clear.
   let hot = false;
   if (game.state === 'playing' && !player.dead) {
     getAimDir(_aimDir);
+    const ox = camera.position.x, oy = camera.position.y, oz = camera.position.z;
+    const dx = _aimDir.x, dy = _aimDir.y, dz = _aimDir.z;
+    let tWall = rayGround(ox, oy, oz, dx, dy, dz, 80);
+    for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
+      const t = c.roof ? rayRoof(ox, oy, oz, dx, dy, dz, c) : rayAABB(ox, oy, oz, dx, dy, dz, c);
+      if (t < tWall) tWall = t;
+    }
     for (const z of zombies) {
       if (z.state === 'dying') continue;
       const gy2 = z.blob.root.position.y;
+      let t;
       if (z.state === 'sleep' || z.state === 'corpse') {
-        if (lyingHitT(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z, null) !== Infinity) { hot = true; break; }
-        continue;
+        t = lyingHitT(ox, oy, oz, dx, dy, dz, z, null);
+      } else {
+        t = Math.min(
+          raySphere(ox, oy, oz, dx, dy, dz, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale),
+          raySphere(ox, oy, oz, dx, dy, dz, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale));
       }
-      if (raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale) !== Infinity ||
-          raySphere(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale) !== Infinity) { hot = true; break; }
+      if (t < tWall) { hot = true; break; }   // in front of whatever the bullet would hit first
     }
-    // crows light the crosshair up like any other spawn — same sphere the bullet uses
+    // crows light the crosshair up like any other spawn — same sphere, same occlusion test
     if (!hot) for (const cw of crows) {
-      if (crowRayT(camera.position.x, camera.position.y, camera.position.z, _aimDir.x, _aimDir.y, _aimDir.z, cw) !== Infinity) { hot = true; break; }
+      if (crowRayT(ox, oy, oz, dx, dy, dz, cw) < tWall) { hot = true; break; }
     }
   }
   hud.crosshair.classList.toggle('enemy', hot);
