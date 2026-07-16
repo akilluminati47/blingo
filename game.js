@@ -1171,6 +1171,21 @@ function terrainPlane(w, d, segW, segD, cx, cz, material, lift = 0) {
   // undo double-offset: we sampled with cx+localX, so mesh must sit at cx, but geometry x is local. correct.
   return m;
 }
+// same ground-following approach as terrainPlane, but a fan disc instead of a grid — for round
+// ground decals (floodlight pools) that need to ride the terrain's own tilt instead of sinking
+// into it as a rigid flat circle would
+function terrainDisc(r, segs, cx, cz, material, lift = 0) {
+  const geo = new THREE.CircleGeometry(r, segs);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, groundHeight(cx + pos.getX(i), cz + pos.getZ(i)) + lift);
+  }
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, material);
+  m.position.set(cx, 0, cz);
+  return m;
+}
 
 // ---------- crates ----------
 // indoor: a box someone stashed under a roof rather than one left lying in a field. Worth
@@ -2030,7 +2045,10 @@ function buildChurchyard(rng) {
   // nave runs north-south: w is the (narrow) east-west width, d the long axis toward the road
   const cx = CHURCH.x, cz = CHURCH.z, w = 11, d = 16, h = 5.2;
   const y0 = groundHeight(cx, cz);
-  const southZ = cz - d / 2, eastX = cx + w / 2; // front (road side) + graveyard-flank wall
+  // front is the NORTH wall — that's the side that actually faces a real road (the z=103
+  // horizontal road runs just past it). The door used to be on the south wall, which faced
+  // nothing but open field back toward the plaza's parking lot, away from any road.
+  const northZ = cz + d / 2, eastX = cx + w / 2, westX = cx - w / 2; // front + both flanks
   // weathered stone body
   const body = box(w, h, d, 0x6b6a62);
   body.position.set(cx, y0 + h / 2, cz);
@@ -2060,7 +2078,7 @@ function buildChurchyard(rng) {
   roofSlope(townColliders, cx, y0 + h - 0.05, cz, 'z', d / 2 + 0.45, w / 2 + 0.5, rh); // scalable nave roof
   // bell tower + spire + leaning cross over the front (road-side) entrance
   const ridgeY = y0 + h - 0.05 + rh;
-  const steepleZ = southZ + 2.4;
+  const steepleZ = northZ - 2.4;
   const tower = box(2.6, 3.4, 2.6, 0x615f58);
   tower.position.set(cx, ridgeY + 0.9, steepleZ);
   townGroup.add(tower);
@@ -2079,9 +2097,9 @@ function buildChurchyard(rng) {
   const crossH = box(0.5, 0.08, 0.08, 0x14121a);
   crossH.position.set(cx - 0.02, ridgeY + 5.92, steepleZ); crossH.rotation.z = 0.09;
   townGroup.add(crossH);
-  // tall dark windows down both flanks — the east-flank centre is left open for the side door
+  // tall dark windows down both flanks — the west-flank centre is left open for the side door
   for (const wz of [-5, 0, 5]) for (const s of [-1, 1]) {
-    if (s > 0 && wz === 0) continue;
+    if (s < 0 && wz === 0) continue;
     const win = windowPane(rng, 1.0, 2.4);
     win.position.set(cx + s * (w / 2 + 0.03), y0 + h * 0.5, cz + wz);
     win.rotation.y = s > 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -2089,30 +2107,30 @@ function buildChurchyard(rng) {
   }
   // black rose window over the main door, facing the road
   const rose = new THREE.Mesh(new THREE.CircleGeometry(0.85, 18), darkGlassMat);
-  rose.position.set(cx, y0 + h + 0.9, southZ - 0.06);
+  rose.position.set(cx, y0 + h + 0.9, northZ + 0.06);
   townGroup.add(rose);
   // heavy main door facing the road, with a couple of worn steps
   const door = box(2.2, 2.6, 0.12, 0x241a12);
-  door.position.set(cx, y0 + 1.3, southZ - 0.06);
+  door.position.set(cx, y0 + 1.3, northZ + 0.06);
   townGroup.add(door);
+  // low wide step out front, taller one tucked in against the door — climbs up toward the
+  // threshold, same pattern as the courthouse/town hall/bank steps (it used to run backwards)
   for (const s of [1.35, 0.7]) {
     const step = box(3, 0.2, s, 0x55524a);
-    step.position.set(cx, y0 + (s > 1 ? 0.1 : 0.3), southZ - (1.5 - s * 0.5));
+    step.position.set(cx, y0 + (s > 1 ? 0.3 : 0.1), northZ + (1.5 - s * 0.5));
     townGroup.add(step);
   }
   const plate = textPlate('CHAPEL', 3.6, 0.9, '#2a2422', '#9a8f7a'); // faded sign over the door
-  plate.position.set(cx, y0 + h - 0.7, southZ - 0.06);
-  plate.rotation.y = Math.PI;
+  plate.position.set(cx, y0 + h - 0.7, northZ + 0.06);
   townGroup.add(plate);
-  // side door on the graveyard flank (east), lined up with the fence gate, its own step down.
-  // tall riser against the door, short one further out — climbs up toward the threshold
-  // instead of the reverse.
+  // side door, now on the west flank, its own step down. Tall riser against the door, short
+  // one further out — climbs up toward the threshold instead of the reverse.
   const sideDoor = box(0.12, 2.4, 1.8, 0x241a12);
-  sideDoor.position.set(eastX + 0.06, y0 + 1.2, cz);
+  sideDoor.position.set(westX - 0.06, y0 + 1.2, cz);
   townGroup.add(sideDoor);
   for (const s of [1.2, 0.6]) {
     const step = box(s, 0.2, 2.4, 0x55524a);
-    step.position.set(eastX + (1.3 - s * 0.5), y0 + (s > 1 ? 0.3 : 0.1), cz);
+    step.position.set(westX - (1.3 - s * 0.5), y0 + (s > 1 ? 0.3 : 0.1), cz);
     townGroup.add(step);
   }
 
@@ -2123,7 +2141,7 @@ function buildChurchyard(rng) {
   // fence: verticals with spike tips + rails, gate gap on the church side and two
   // rusted-out breaches so the dead (and you) can squeeze through elsewhere
   const gaps = {
-    w: [[gcz - 1.5, gcz + 1.5]],   // gate, facing the church door
+    w: [[gcz - 1.5, gcz + 1.5]],   // gate on the church-facing side
     s: [[46, 48.5]],               // broken sections
     n: [[50, 52.5]],
     e: [],
@@ -2251,7 +2269,6 @@ const floodBulbMat = mat(0xfff4d2, { emissive: 0xffe9a0, emissiveIntensity: 1 })
 const floodHaloMat = new THREE.MeshBasicMaterial({ color: 0xfff0c4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
 const floodPoolMat = new THREE.MeshBasicMaterial({ color: 0xffe9b4, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
 const floodHaloGeo = new THREE.SphereGeometry(1.15, 10, 8);
-const floodPoolGeo = new THREE.CircleGeometry(13, 24);
 const FLOOD_H = 12.6;   // three street lamps tall: these throw light across a lot, not a path
 // corner floods: a mast, a boxed head cocked in toward the lot, and a wide pool under it
 function makeFloodLamp(x, z, aimX, aimZ, group) {
@@ -2267,9 +2284,11 @@ function makeFloodLamp(x, z, aimX, aimZ, group) {
     group.add(bulb);
     const halo = new THREE.Mesh(floodHaloGeo, floodHaloMat); halo.position.copy(bulb.position); group.add(halo);
   }
-  const pool = new THREE.Mesh(floodPoolGeo, floodPoolMat);
-  pool.rotation.x = -Math.PI / 2;
-  pool.position.set(lerp(x, aimX, 0.28), y0 + 0.08, lerp(z, aimZ, 0.28)); // thrown in toward the lot
+  // thrown in toward the lot — and sampled at its own (poolX,poolZ), not the mast's, since a
+  // flat radius-13 disc riding the mast's ground height would float or sink the moment the
+  // ground under the pool itself sits at a different height than the ground under the pole
+  const poolX = lerp(x, aimX, 0.28), poolZ = lerp(z, aimZ, 0.28);
+  const pool = terrainDisc(13, 24, poolX, poolZ, floodPoolMat, 0.08);
   pool.renderOrder = 1; group.add(pool);
 }
 // lit: 0 (broad daylight) .. 1 (deep night / heavy rain). Drives all lamps at once.
@@ -2489,10 +2508,15 @@ function buildTown() {
   // a painted stripe across each flush seam — same white and same stroke width as the
   // parking-stall lines, sat at the midpoint between the lot's lift (0.05) and the road's
   // (0.04) so it straddles the seam rather than floating above both, and hides whatever
-  // hairline gap is left where two separately-tessellated planes meet
+  // hairline gap is left where two separately-tessellated planes meet. Tilted to match the
+  // ground's own slope across its span (sampled at both ends, same as the road rides it)
+  // instead of sitting dead flat, which used to let its sides sink into the sloped tarmac.
   for (const [mx, mz] of [[71, LOT.z], [9, 22]]) {
+    const half = 3.2;
+    const yA = groundHeight(mx, mz - half), yB = groundHeight(mx, mz + half);
     const stripe = box(0.14, 0.02, 6.4, 0xd8d8d0);
-    stripe.position.set(mx, groundHeight(mx, mz) + 0.045, mz);
+    stripe.position.set(mx, (yA + yB) / 2 + 0.045, mz);
+    stripe.rotation.x = -Math.atan2(yB - yA, half * 2);
     townGroup.add(stripe);
   }
 
