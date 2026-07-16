@@ -12,6 +12,7 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - Pause menu with audio, spawn-rate, and gore settings (max the gore slider to unlock extra gore)
 - Free-aim mouse and keyboard, intuitive touch controls, and fluid gamepad with rumble support
 - Bare-skin trades in multiplayer: hold a trade with empty fists and the two players swap cousins, kits, and spots — same player numbers, same lobby, plus a one-shot swapped-cousins theme
+- Stopping power: sniper rounds punch through everything they kill, shotgun pellets through close-range kills, magnum rounds through the skulls they pop — and crows (1hp of feathers) never stop a heavy round, so one blast can pick apart a whole murder
 
 ## Join a Lobby or play Solo
 
@@ -24,7 +25,7 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - Aim: mouse / right stick / right-side touch drag
 - Melee and Shoot: left mouse / RT / on-screen button(s)
 - Reload: R / B / on-screen button
-- Loot and Recruit: E / X / on-screen button
+- Interact (loot, recruit, trade): E / X / on-screen button
 - Slide: C or ctrl / R3 / on-screen button
 - Jump: Space / A / on-screen button
 - Sprint: Shift / L3 / on-screen button

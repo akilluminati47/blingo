@@ -2943,7 +2943,7 @@ const CONTROL_SCHEMES = {
       [['kbm', 'keyboard_f'], 'Swap weapon'],
       ['V', 'First / Third view'],
       [['kbm', 'mouse_scroll'], 'Cam distance'],
-      [['kbm', 'keyboard_e'], 'Loot / Recruit'],
+      [['kbm', 'keyboard_e'], 'Interact'],
       [['kbm', 'keyboard_r'], 'Reload'],
       [['kbm', 'keyboard_space'], 'Jump'],
       [['kbm', 'keyboard_shift'], 'Sprint'],
@@ -2961,7 +2961,7 @@ const CONTROL_SCHEMES = {
       [['xbox', 'xbox_lt'], 'Zoom / ADS'],
       [['xbox', 'xbox_button_color_y'], 'Swap weapon'],
       ['Select', 'First / Third view'],
-      [['xbox', 'xbox_button_color_x'], 'Loot / Recruit'],
+      [['xbox', 'xbox_button_color_x'], 'Interact'],
       [['xbox', 'xbox_button_color_b'], 'Reload'],
       [['xbox', 'xbox_button_color_a'], 'Jump'],
       [['xbox', 'xbox_stick_side_l'], 'Sprint (L3)'],
@@ -2978,7 +2978,7 @@ const CONTROL_SCHEMES = {
       [['ps', 'playstation_trigger_l2'], 'Zoom / ADS'],
       [['ps', 'playstation_button_triangle'], 'Swap weapon'],
       ['Share', 'First / Third view'],
-      [['ps', 'playstation_button_square'], 'Loot / Recruit'],
+      [['ps', 'playstation_button_square'], 'Interact'],
       [['ps', 'playstation_button_circle'], 'Reload'],
       [['ps', 'playstation_button_cross'], 'Jump'],
       [['ps', 'playstation_stick_side_l'], 'Sprint (L3)'],
@@ -3288,7 +3288,10 @@ function goDown() {
   SFX.hurt();
   rumble(400, 1, 0.8);
   shakeAmp = Math.max(shakeAmp, 0.14);
-  toast(`DOWN .ᐟ CRAWL FOR IT — YOU BLEED BACK UP IN ${DOWN_BLEED}s`, true);
+  // going down only happens with human allies around, so the callout is lobby-speak:
+  // short, name-tagged, the same line everyone else sees on their screen
+  const me = COUSINS.find(c => c.id === selectedCousin);
+  toast(`P${net.playerNum || 1} ${(me ? me.name : '').toUpperCase()} DOWN .ᐟ`, true);
 }
 function playerGetUp(byRescue) {
   if (!player.downed) return;
@@ -4641,32 +4644,37 @@ function fireWeapon() {
                        : rayAABB(_from.x, _from.y, _from.z, rdx, rdy, rdz, c);
       if (t < tWall) tWall = t;
     }
-    let best = null, bestT = Math.min(tWall, 80);
+    const tMax = Math.min(tWall, 80);
+    // gather EVERY body along the line, nearest first — not just the closest — so a
+    // killing hit can hand the round on to whoever stood behind (stopping power, below)
+    const line = [];
     for (const z of zombies) {
       if (z.state === 'dying') continue;
       const gy = z.blob.root.position.y, s = z.scale;
+      let zt = tMax, zh = null;
       // sleepers and carcasses lie flat — hit them where they actually are, not standing up
       if (z.state === 'sleep' || z.state === 'corpse') {
         const o = {};
         const lt = lyingHitT(_from.x, _from.y, _from.z, rdx, rdy, rdz, z, o);
-        if (lt < bestT) { bestT = lt; best = { z, isHead: o.isHead, limb: null }; }
-        continue;
-      }
-      const ht = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 1.3 * s, z.pos.z, 0.42 * s);
-      if (ht < bestT) { bestT = ht; best = { z, isHead: true, limb: null }; }
-      const bt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 0.7 * s, z.pos.z, 0.55 * s);
-      if (bt < bestT) { bestT = bt; best = { z, isHead: false, limb: null }; }
-      // arms + legs live in the zombie's facing frame; a hit here marks that exact limb
-      if (!z.isBoss) {
-        const cy = Math.cos(z.yaw || 0), sy = Math.sin(z.yaw || 0);
-        for (const L of LIMB_SPEC) {
-          if (L[0] === 'arm' ? z.blob.armGone[L[1]] : z.blob.legGone[L[1]]) continue;
-          const wx = z.pos.x + (L[2] * cy + L[4] * sy) * s;
-          const wz = z.pos.z + (-L[2] * sy + L[4] * cy) * s;
-          const lt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, wx, gy + L[3] * s, wz, L[5] * s);
-          if (lt < bestT) { bestT = lt; best = { z, isHead: false, limb: { kind: L[0], idx: L[1] } }; }
+        if (lt < zt) { zt = lt; zh = { isHead: o.isHead, limb: null }; }
+      } else {
+        const ht = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 1.3 * s, z.pos.z, 0.42 * s);
+        if (ht < zt) { zt = ht; zh = { isHead: true, limb: null }; }
+        const bt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 0.7 * s, z.pos.z, 0.55 * s);
+        if (bt < zt) { zt = bt; zh = { isHead: false, limb: null }; }
+        // arms + legs live in the zombie's facing frame; a hit here marks that exact limb
+        if (!z.isBoss) {
+          const cy = Math.cos(z.yaw || 0), sy = Math.sin(z.yaw || 0);
+          for (const L of LIMB_SPEC) {
+            if (L[0] === 'arm' ? z.blob.armGone[L[1]] : z.blob.legGone[L[1]]) continue;
+            const wx = z.pos.x + (L[2] * cy + L[4] * sy) * s;
+            const wz = z.pos.z + (-L[2] * sy + L[4] * cy) * s;
+            const lt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, wx, gy + L[3] * s, wz, L[5] * s);
+            if (lt < zt) { zt = lt; zh = { isHead: false, limb: { kind: L[0], idx: L[1] } }; }
+          }
         }
       }
+      if (zh) line.push({ t: zt, z, isHead: zh.isHead, limb: zh.limb });
     }
     // crows are fair game too — a clean hit lands like a headshot. One shared hit-sphere
     // (crowRayT) that the crosshair flare reads from as well, so a bird that's under the
@@ -4674,23 +4682,40 @@ function fireWeapon() {
     // mid-hop or taking off, and no "dropped feathers and flew off alive" whiffs.
     for (const cw of crows) {
       const ct = crowRayT(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw);
-      if (ct < bestT) { bestT = ct; best = { crow: cw }; }
+      if (ct < tMax) line.push({ t: ct, crow: cw });
     }
-    _to.set(_from.x + rdx * bestT, _from.y + rdy * bestT, _from.z + rdz * bestT);
+    line.sort((q, r) => q.t - r.t);
+    // stopping power: the round marches down the line and stops in the first body it
+    // can't pass through. A kill shot doesn't stop these — the sniper round goes through
+    // anything it drops, shotgun pellets through kills inside party range, magnum rounds
+    // through the skulls they pop. And no crow ever stopped a heavy round: 1hp of
+    // feathers pops and the shot flies on, so one blast can pick a whole murder apart.
+    let stopT = tMax, stopped = false;
+    for (const hit of line) {
+      anyHit = true;
+      const dHit = hit.t;
+      let died;
+      if (hit.crow) {
+        killCrow(hit.crow, rdx, rdz, w.dmg * player.dmgMult * 2 * closeBonus(w, dHit) * rangeFactor(w, dHit));
+        died = true; // crows carry 1hp: first contact pops them
+      } else {
+        const dmg = w.dmg * player.dmgMult * (hit.isHead ? 2 : 1) * closeBonus(w, dHit) * rangeFactor(w, dHit);
+        damageZombie(hit.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: hit.isHead, limb: hit.limb });
+        // a client can't read host-side hp, so over the wire only the sniper's execute
+        // (a guaranteed kill on anything that isn't a boss) counts as a confirmed drop
+        died = hit.z.netGhost ? !!(w.execute && !hit.z.isBoss) : hit.z.state === 'dying';
+      }
+      const pierce = died && (w.id === 'sniper'
+        || (w.id === 'shotgun' && (hit.crow || dHit < 9))
+        || (w.id === 'magnum' && (hit.crow || hit.isHead)));
+      if (!pierce) { stopT = dHit; stopped = true; break; }
+    }
+    _to.set(_from.x + rdx * stopT, _from.y + rdy * stopT, _from.z + rdz * stopT);
     if (gunMesh) {
       (gunMesh.userData.muzzle || gunMesh).getWorldPosition(_gp);
       spawnTracer(_gp.clone(), _to.clone());
     }
-    if (best) {
-      anyHit = true;
-      const dHit = bestT;
-      if (best.crow) {
-        killCrow(best.crow, rdx, rdz, w.dmg * player.dmgMult * 2 * closeBonus(w, dHit) * rangeFactor(w, dHit));
-      } else {
-        const dmg = w.dmg * player.dmgMult * (best.isHead ? 2 : 1) * closeBonus(w, dHit) * rangeFactor(w, dHit);
-        damageZombie(best.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: best.isHead, limb: best.limb });
-      }
-    } else if (bestT < 80) {
+    if (!stopped && stopT < 80) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
     }
   }
@@ -4839,14 +4864,15 @@ function meleeTradable(id) { const w = WEAPONS[id]; return !!(w && w.melee && id
 // a recruited cousin you're close to AND looking at — so the squad trailing behind
 // doesn't spam the trade prompt while you walk
 function findNearTrade() {
-  if (player.weapon.id === 'fists') return null; // nothing in hand to trade — no prompt, no swap
+  const bare = player.weapon.id === 'fists'; // empty hand: the offer on the table is you
   let best = null, bestD = 2.4;
   const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
   for (const c of companions) {
     if (!c.recruited || c.downed) continue;
     // player-run cousins keep their own kit — except melee-for-melee, when both players
-    // have their blades out (that's the handshake)
-    if (c.netP && !(meleeTradable(player.weapon.id) && c.weapon && meleeTradable(c.weapon.id))) continue;
+    // have their blades out (that's the handshake), and the bare-skin offer, which
+    // trades the players themselves
+    if (c.netP && !bare && !(meleeTradable(player.weapon.id) && c.weapon && meleeTradable(c.weapon.id))) continue;
     const dx = c.pos.x - player.pos.x, dz = c.pos.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = c; }
@@ -5423,11 +5449,14 @@ function updatePlayer(dt) {
     if (!nearTrade && net.role === 'client') nearNetTrade = netFindNearTrade();
   }
   const showPrompt = !!(nearDowned || nearCrate || nearRecruit || nearTrade || nearNetTrade);
+  const bareHand = player.weapon.id === 'fists'; // fists out: the trade on offer is your skin
   hud.prompttxt.textContent = nearDowned ? 'Pick up ' + nearDowned.data.name
     : nearCrate ? 'Open Crate'
     : nearRecruit ? 'Recruit ' + nearRecruit.data.name
-    : nearTrade ? `Trade for ${nearTrade.data.name}'s ${(nearTrade.weapon || WEAPONS.pistol).name}`
-    : nearNetTrade ? `Trade for P${nearNetTrade.p} ${nearNetTrade.data.name}'s ${WEAPONS[nearNetTrade.wp].name}` : '';
+    : nearTrade ? (bareHand ? `Offer skin to ${(nearTrade.netP ? 'P' + nearTrade.netP + ' ' : '') + nearTrade.data.name}`
+                            : `Trade for ${nearTrade.data.name}'s ${(nearTrade.weapon || WEAPONS.pistol).name}`)
+    : nearNetTrade ? (bareHand ? `Offer skin to P${nearNetTrade.p} ${nearNetTrade.data.name}`
+                               : `Trade for P${nearNetTrade.p} ${nearNetTrade.data.name}'s ${WEAPONS[nearNetTrade.wp].name}`) : '';
   hud.prompt.classList.toggle('hidden', !showPrompt || input.device === 'touch');
   if (isTouch) hud.btnInteract.style.display = showPrompt ? 'flex' : 'none';
   if (input.interact) {
@@ -5435,7 +5464,11 @@ function updatePlayer(dt) {
     else if (nearCrate) openCrate(nearCrate);
     else if (nearRecruit) recruitCousin(nearRecruit);
     else if (nearTrade) tradeWeapons(nearTrade);
-    else if (nearNetTrade) { try { net.conns[0].send({ t: 'tradeReq', p: nearNetTrade.p }); } catch (e) {} }
+    else if (nearNetTrade) {
+      // a tap with a bare fist names the offer; the swap itself is the two-sided hold
+      if (bareHand) toast('NOTHING TO TRADE BUT SKIN . .');
+      else { try { net.conns[0].send({ t: 'tradeReq', p: nearNetTrade.p }); } catch (e) {} }
+    }
     input.interact = false;
   }
 
@@ -7426,7 +7459,10 @@ function wireHostConn(conn) {
         // a player-controlled cousin owns its own downed state (hurtCompanion bails out
         // for them), so mirror it here and run their rescue beacon from it
         const dn = !!m.dn;
-        if (dn !== !!c.downed) { c.downed = dn; netSyncCousinBeacon(c); rebuildSquadBars(); }
+        if (dn !== !!c.downed) {
+          c.downed = dn; netSyncCousinBeacon(c); rebuildSquadBars();
+          if (dn) toast(`P${c.netP} ${c.data.name.toUpperCase()} DOWN .ᐟ`, true);
+        }
       }
     } else if (m.t === 'shot') {
       const z = zombies.find(zz => zz.nid === m.id);
@@ -7472,7 +7508,7 @@ function netHostTick(dt) {
   net.txT = 0.1;
   const R = v => Math.round(v * 20) / 20;
   const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
-    playerBlob.root.rotation.y, player.weapon.id, player.hp, false)];
+    playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed)];
   for (const c of companions) {
     if (!c.recruited) continue;
     ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed));
@@ -7639,6 +7675,9 @@ function netApplySnapshot(m) {
       g.gunMesh = a.wp === 'fists' ? null : buildGunMesh(a.wp);
       if (g.gunMesh) g.blob.gunSocket.add(g.gunMesh);
     }
+    // another player just hit the floor: the lobby callout (0-check skips fresh ghosts,
+    // so joining mid-rescue doesn't announce an old fall)
+    if (a.p && a.dn && g.dn === 0) toast(`P${a.p} ${g.data.name.toUpperCase()} DOWN .ᐟ`, true);
     g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn;
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
@@ -7793,13 +7832,15 @@ function netRefreshClientBars() {
     }
   }
 }
-// on a client, another player's ghost we're close to and facing while BOTH melees are out
+// on a client, another player's ghost we're close to and facing while BOTH melees are
+// out — or while our hand is empty, which is the bare-skin offer
 function netFindNearTrade() {
-  if (!meleeTradable(player.weapon.id)) return null;
+  const bare = player.weapon.id === 'fists';
+  if (!bare && !meleeTradable(player.weapon.id)) return null;
   let best = null, bestD = 2.4;
   const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
   for (const [, g] of net.actors) {
-    if (!g.p || g.dn || !meleeTradable(g.wp)) continue;
+    if (!g.p || g.dn || (!bare && !meleeTradable(g.wp))) continue;
     const dx = g.blob.root.position.x - player.pos.x, dz = g.blob.root.position.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = g; }
