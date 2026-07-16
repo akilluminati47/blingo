@@ -11,6 +11,7 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - 3D positional audio, footsteps, ambience, and a per-cousin persona music theme
 - Pause menu with audio, spawn-rate, and gore settings (max the gore slider to unlock extra gore)
 - Free-aim mouse and keyboard, intuitive touch controls, and fluid gamepad with rumble support
+- Bare-skin trades in multiplayer: hold a trade with empty fists and the two players swap cousins, kits, and spots — same player numbers, same lobby, plus a one-shot swapped-cousins theme
 
 ## Join a Lobby or play Solo
 

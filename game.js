@@ -741,6 +741,25 @@ function previewTheme(id) {
   const t = THEMES[id] || THEMES.blingo;
   for (let i = 0; i < 4; i++) setTimeout(() => tone(NF(t.seq[i]), 0.16, 0.16, t.wave, undefined, musicGain), i * 120);
 }
+// the swapped-cousins theme: two chip voices walk each other's scale lines and finish on
+// the other one's note — played through exactly once when two players trade skins, at
+// whatever the settings music dial says (it rides musicGain like every other theme)
+const SWAP_THEME = { tempo: 0.22, a: [12, 11, 9, 7, 5, 4, 2, 0], b: [0, 2, 4, 5, 7, 9, 11, 12], bass: [0, -5, -7, 0] };
+function playSwapTheme() {
+  if (!actx || !notches.music) return;
+  const t = SWAP_THEME, n = t.a.length, step = t.tempo * 1000;
+  for (let i = 0; i < n; i++) {
+    const last = i === n - 1;
+    setTimeout(() => {
+      tone(NF(t.a[i]), t.tempo * (last ? 2.4 : 0.9), 0.11, 'square', undefined, musicGain);
+      tone(NF(t.b[i]), t.tempo * (last ? 2.4 : 0.9), 0.11, 'triangle', undefined, musicGain);
+      if (i % 2 === 0) tone(NF(t.bass[(i / 2) % t.bass.length] - 12), t.tempo * 1.6, 0.15, 'triangle', undefined, musicGain);
+    }, i * step);
+  }
+  // the persona theme steps aside for the sting, then picks itself back up
+  stopTheme();
+  setTimeout(() => { if (!themeTimer) startTheme(selectedCousin); }, n * step + 600);
+}
 
 // ---------- rumble ----------
 // The motors only answer to the pad: the moment a key or the mouse moves, input.device
@@ -4838,7 +4857,7 @@ function findNearTrade() {
 function tradeWeapons(c) {
   const myId = player.weapon.id;
   const theirId = (c.weapon || WEAPONS.pistol).id;
-  if (myId === 'fists') { toast('NOTHING TO TRADE .ᐟ ARM YOURSELF FIRST'); return; } // no trading bare-fisted
+  if (myId === 'fists') { toast('NOTHING TO TRADE BUT SKIN . .'); return; } // AI cousins don't deal in skin
   if (myId === theirId) { toast('YOU BOTH HOLD THE SAME WEAPON'); return; }
   // a true swap: the weapon you hand over leaves your kit entirely — and the ammo you were
   // carrying for it (reserve + the loaded clip) goes with it — so nothing duplicates and you
@@ -4877,14 +4896,24 @@ function updateHoldTrades(dt) {
   for (let i = 0; i < holders.length && !a; i++)
     for (let j = i + 1; j < holders.length && !a; j++)
       if (Math.hypot(holders[i].x - holders[j].x, holders[i].z - holders[j].z) < 3.2) { a = holders[i]; b = holders[j]; }
+  updateSkinOfferTimers(dt);
   if (!a || tradeHold.cd > 0) {
+    // no handshake yet — but a bare fist may be held out at an armed player: the skin offer
+    updateSkinNudge(dt, !a && tradeHold.cd <= 0 && skinOfferOpen(holders));
     if (tradeHold.prog > 0) tradeSendProg(0, tradeHold.a, tradeHold.b);
     tradeHold.prog = 0; tradeHold.key = null;
     tradeRing(0);
     return;
   }
   const key = a.p + '-' + b.p;
-  if (key !== tradeHold.key) { tradeHold.key = key; tradeHold.prog = 0; }
+  if (key !== tradeHold.key) {
+    tradeHold.key = key;
+    // a standing 2s+ skin offer converts fast the moment it's answered: the ring
+    // starts half-full for whoever kept their bare fist on the table
+    const offerOf = e => e.self ? Math.max(0, skinNudge.t) : (e.c.skinOfferT || 0);
+    tradeHold.prog = Math.max(offerOf(a), offerOf(b)) >= 2 ? 0.5 : 0;
+  }
+  updateSkinNudge(dt, false);
   tradeHold.a = a; tradeHold.b = b;
   tradeHold.prog = Math.min(1, tradeHold.prog + dt / 1.3);
   tradeRing(a.self || b.self ? tradeHold.prog : 0);
@@ -4893,6 +4922,8 @@ function updateHoldTrades(dt) {
     executeHoldTrade(a, b);
     tradeSendProg(0, a, b);
     tradeHold.prog = 0; tradeHold.cd = 1.5; tradeHold.key = null;
+    if (a.c) a.c.skinOfferT = 0;
+    if (b.c) b.c.skinOfferT = 0; // a settled trade spends the standing offer
     tradeRing(0);
   }
 }
@@ -4904,8 +4935,8 @@ function tradeSendProg(v, a, b) {
 function executeHoldTrade(a, b) {
   const idOf = e => e.self ? player.weapon.id : (e.c.weapon || WEAPONS.pistol).id;
   const idA = idOf(a), idB = idOf(b);
+  if (idA === 'fists' || idB === 'fists') { executeSkinTrade(a, b); return; } // a bare fist on the table trades the skin it's attached to
   if (idA === idB) { toast('YOU BOTH HOLD THE SAME WEAPON'); return; }
-  if (idA === 'fists' || idB === 'fists') { if (a.self || b.self) toast('NOTHING TO TRADE .ᐟ ARM YOURSELF FIRST'); return; } // no bare-fisted trades
   for (const [e, give, take] of [[a, idA, idB], [b, idB, idA]]) {
     if (e.self) {
       const i = player.owned.indexOf(give); if (i >= 0) player.owned.splice(i, 1);
@@ -4938,6 +4969,117 @@ function netHandleTradeReq(conn, p) {
     try { c2.netConn.send({ t: 'tradeW', w: idA, took: idB }); } catch (e) {}
     toast(`P${c.netP} AND P${p} TRADED MELEES`);
   }
+}
+// ---------- the bare-skin trade (multiplayer cousin swap) ----------
+// When a settled hold-trade has a bare fist on either side, the two players trade
+// EVERYTHING — cousins, kits, wounds, spots. Player numbers and the lobby never move;
+// only the skins change hands. Runs on the host (hold-trades are host-settled).
+function executeSkinTrade(a, b) {
+  if ((a.self || b.self) && player.downed) return; // no dealing skin from the dirt
+  if (a.self || b.self) {
+    // host <-> client: my kit rides down with the swap order; theirs returns on the reply
+    const c = (a.self ? b : a).c;
+    const myData = COUSINS.find(k => k.id === selectedCousin) || COUSINS[0];
+    const theirData = c.data;
+    const kit = { owned: player.owned.slice(), rs: { ...reserves }, w: player.weapon.id,
+      clip: Number.isFinite(player.clip) ? player.clip : 0, hp: Math.max(1, Math.round(player.hp)) };
+    const mx = player.pos.x, mz = player.pos.z;
+    const cx = c.pos.x, cz = c.pos.z, cHp = c.hp;
+    c.swapTo = 'host';
+    try { c.netConn.send({ t: 'cswap', c: myData.id, x: mx, z: mz, kit }); } catch (e) {}
+    applyCousin(theirData.id);
+    player.pos.set(cx, groundHeight(cx, cz), cz);
+    player.vy = 0;
+    player.hp = clamp(cHp || player.maxHp, 1, player.maxHp);
+    swapCompanionIdentity(c, myData, mx, mz);
+    setCompanionWeapon(c, kit.w);
+    if (c.netPose) c.netPose.wp = kit.w;
+    c.hp = Math.min(kit.hp, c.maxHp);
+    toast(`P1 ~ ${theirData.name.toUpperCase()} .ᐟ`, true);
+    playSwapTheme();
+  } else {
+    // client <-> client: the host re-dresses both bodies and relays each kit across
+    const c1 = a.c, c2 = b.c;
+    const d1 = c1.data, d2 = c2.data;
+    const s1 = { x: c1.pos.x, z: c1.pos.z, hp: c1.hp, w: (c1.weapon || WEAPONS.pistol).id };
+    const s2 = { x: c2.pos.x, z: c2.pos.z, hp: c2.hp, w: (c2.weapon || WEAPONS.pistol).id };
+    c1.swapTo = c2.netConn; c2.swapTo = c1.netConn;
+    try { c1.netConn.send({ t: 'cswap', c: d2.id, x: s2.x, z: s2.z }); } catch (e) {}
+    try { c2.netConn.send({ t: 'cswap', c: d1.id, x: s1.x, z: s1.z }); } catch (e) {}
+    swapCompanionIdentity(c1, d2, s2.x, s2.z);
+    swapCompanionIdentity(c2, d1, s1.x, s1.z);
+    setCompanionWeapon(c1, s2.w); setCompanionWeapon(c2, s1.w);
+    if (c1.netPose) c1.netPose.wp = s2.w;
+    if (c2.netPose) c2.netPose.wp = s1.w;
+    c1.hp = Math.min(s2.hp, c1.maxHp); c2.hp = Math.min(s1.hp, c2.maxHp);
+    toast(`P${a.p} ~ ${d2.name.toUpperCase()} .ᐟ P${b.p} ~ ${d1.name.toUpperCase()} .ᐟ`, true);
+  }
+  SFX.tradePing();
+  rumble(120, 0.5, 0.5);
+}
+// re-dress a player-driven companion as a different cousin on a different spot — the
+// host-side half of a bare-skin trade (the player behind it keeps their number + conn)
+function swapCompanionIdentity(c, data, x, z) {
+  scene.remove(c.blob.root);
+  if (c.blob.shadow) scene.remove(c.blob.shadow);
+  c.data = data;
+  c.blob = buildBlob({ color: data.color, gunHand: data.id === 'blondie' ? 'left' : 'right' });
+  scene.add(c.blob.root);
+  c.pos.x = x; c.pos.z = z;
+  c.y = groundHeight(x, z);
+  c.blob.root.position.set(x, c.y, z);
+  c.blob.root.rotation.y = c.yaw || 0;
+  // stale pose targets would lerp the body straight back to the old spot
+  if (c.netPose) { c.netPose.x = x; c.netPose.z = z; c.netPose.y = c.y; }
+  c.gunMesh = null; // went down with the old blob; setCompanionWeapon rebuilds it
+  c.maxHp = data.id === 'blomba' ? 125 : 100;
+  c.hp = Math.min(c.hp, c.maxHp);
+  rebuildSquadBars();
+}
+// wholesale kit replacement: the other side of a bare-skin trade delivered their entire
+// loadout — weapon list, every reserve, the loaded clip, and the body's wounds
+function applySwapKit(kit) {
+  if (!kit || !Array.isArray(kit.owned)) return;
+  player.owned = kit.owned.filter(id => WEAPONS[id]);
+  if (!player.owned.includes('fists')) player.owned.unshift('fists');
+  for (const k in reserves) delete reserves[k];
+  for (const k in (kit.rs || {})) if (WEAPONS[k]) reserves[k] = kit.rs[k] | 0;
+  equipWeapon(WEAPONS[kit.w] ? kit.w : 'fists');
+  if (!player.weapon.melee && Number.isFinite(kit.clip)) player.clip = clamp(kit.clip | 0, 0, player.weapon.mag);
+  if (Number.isFinite(kit.hp)) player.hp = clamp(kit.hp, 1, player.maxHp);
+  updateAmmoHUD();
+}
+// ---------- the bare-skin offer ----------
+// Fists held out at an armed player who hasn't answered the hold: there's nothing to
+// trade but skin. Name the offer, and while it stands keep pitching it — every 2s the
+// Trade .ᐟ emote fires itself so the other side knows exactly what's on the table.
+const TRADE_EMOTE = EMOTES.findIndex(e => e.startsWith('Trade'));
+const skinNudge = { t: -1 };
+function updateSkinNudge(dt, on) {
+  if (!on) { skinNudge.t = -1; return; }
+  if (skinNudge.t < 0) { skinNudge.t = 0; toast('NOTHING TO TRADE BUT SKIN . .'); return; }
+  const before = skinNudge.t;
+  skinNudge.t += dt;
+  if (Math.floor(skinNudge.t / 2) > Math.floor(before / 2)) {
+    toast('NOTHING TO TRADE BUT SKIN . .');
+    if (TRADE_EMOTE >= 0) fireEmote(TRADE_EMOTE);
+  }
+}
+// host-side: is MY bare fist held out at an armed player who isn't holding back?
+function skinOfferOpen(holders) {
+  if (player.weapon.id !== 'fists' || player.downed || !holders.some(h => h.self)) return false;
+  for (const c of companions) {
+    if (!c.netP || c.downed || !c.weapon || c.weapon.id === 'fists') continue;
+    if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 3.2) return true;
+  }
+  return false;
+}
+// host-side: each client's standing fists offer, timed off the th flag they stream —
+// an offer that's been up 2s+ converts fast the moment it's answered
+function updateSkinOfferTimers(dt) {
+  for (const c of companions)
+    c.skinOfferT = (c.netP && !c.downed && c.netPose && c.netPose.th && c.weapon && c.weapon.id === 'fists')
+      ? (c.skinOfferT || 0) + dt : 0;
 }
 function openCrate(cr) {
   cr.opened = true;
@@ -7297,6 +7439,14 @@ function wireHostConn(conn) {
       }
     } else if (m.t === 'tradeReq') {
       netHandleTradeReq(conn, m.p | 0);
+    } else if (m.t === 'cswapKit') {
+      // the reply half of a bare-skin trade: this player's old kit, bound for their partner
+      const c = cousinByConn(conn);
+      if (c && c.swapTo) {
+        const to = c.swapTo; c.swapTo = null;
+        if (to === 'host') applySwapKit(m.kit);
+        else { try { to.send({ t: 'cswapKit', kit: m.kit }); } catch (e) {} }
+      }
     } else if (m.t === 'dead') {
       netFreeCousin(conn, false);
     }
@@ -7415,6 +7565,10 @@ function netClientData(m, conn, peer, code) {
     }
   } else if (m.t === 'tradeP') {
     net.tradeP = m.v; net.tradePT = performance.now();
+  } else if (m.t === 'cswap') {
+    netClientSkinSwap(m);
+  } else if (m.t === 'cswapKit') {
+    applySwapKit(m.kit); // the other half's kit, relayed through the host
   } else if (m.t === 'secured') {
     game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
     recordPrestige();                 // multiplayer clears count toward your badges too
@@ -7424,6 +7578,25 @@ function netClientData(m, conn, peer, code) {
 function netSendEmote(i) {
   if (net.role === 'client') { try { net.conns[0].send({ t: 'emote', e: i }); } catch (e) {} }
   else if (net.role === 'host') netBroadcast({ t: 'emote', e: i, p: 1 });
+}
+// the host settled a bare-skin trade on us: ship the whole kit back up the wire, then
+// walk on as the other cousin — same player number, same lobby, new body, new spot.
+// The partner's kit lands in m.kit (a host swap) or on a relayed cswapKit (client swap).
+function netClientSkinSwap(m) {
+  const data = COUSINS.find(c => c.id === m.c);
+  if (!data) return;
+  const kit = { owned: player.owned.slice(), rs: { ...reserves }, w: player.weapon.id,
+    clip: Number.isFinite(player.clip) ? player.clip : 0, hp: Math.max(1, Math.round(player.hp)) };
+  try { net.conns[0].send({ t: 'cswapKit', kit }); } catch (e) {}
+  applyCousin(data.id);
+  player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
+  player.vy = 0;
+  player.hp = Math.min(player.hp, player.maxHp);
+  if (m.kit) applySwapKit(m.kit);
+  SFX.tradePing();
+  rumble(120, 0.5, 0.5);
+  toast(`P${net.playerNum} ~ ${data.name.toUpperCase()} .ᐟ`, true);
+  playSwapTheme();
 }
 // apply a host snapshot: lerp targets for actors + zombie ghosts, HUD sync
 function netApplySnapshot(m) {
@@ -7441,6 +7614,19 @@ function netApplySnapshot(m) {
     const key = a.p ? 'p' + a.p : 'ai' + a.c;
     seenA.add(key);
     let g = net.actors.get(key);
+    if (g && g.data.id !== a.c) {
+      // a bare-skin trade re-dressed this player mid-run: rebuild the ghost in the new
+      // cousin's colours, standing right where the old one stood
+      scene.remove(g.blob.root);
+      if (g.blob.shadow) scene.remove(g.blob.shadow);
+      const cd = COUSINS.find(c => c.id === a.c) || COUSINS[0];
+      const nb = buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right' });
+      nb.root.position.copy(g.blob.root.position);
+      nb.root.rotation.y = g.blob.root.rotation.y;
+      scene.add(nb.root);
+      g = { blob: nb, wp: '', data: cd, p: a.p, walk: g.walk };
+      net.actors.set(key, g);
+    }
     if (!g) {
       const cd = COUSINS.find(c => c.id === a.c) || COUSINS[0];
       g = { blob: buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right' }), wp: '', data: cd, p: a.p, walk: 0 };
@@ -7552,6 +7738,17 @@ function netClientTick(dt) {
   }
   netRefreshClientBars();
   if (player.dead && !net.sentDead) { net.sentDead = true; try { net.conns[0].send({ t: 'dead' }); } catch (e) {} }
+  // a bare fist held out at an armed player's ghost is the skin offer; the ring only
+  // fills once they answer (the host streams that back as tradeP), so until it does
+  // this names the offer and lets it pitch itself
+  let skinOffer = false;
+  if ((input.interactHeld || input.interactHeldPad) && !player.dead && !player.downed && player.weapon.id === 'fists') {
+    for (const [, g] of net.actors) {
+      if (!g.p || g.dn || !g.wp || g.wp === 'fists') continue;
+      if (Math.hypot(g.blob.root.position.x - player.pos.x, g.blob.root.position.z - player.pos.z) < 3.2) { skinOffer = true; break; }
+    }
+  }
+  updateSkinNudge(dt, skinOffer && !(net.tradePT && performance.now() - net.tradePT < 500 && (net.tradeP || 0) > 0.02));
   net.txT -= dt;
   if (net.txT <= 0 && net.conns[0]) {
     net.txT = 1 / 15;
@@ -7579,7 +7776,7 @@ function netRefreshClientBars() {
   const rows = [];
   for (const [key, g] of net.actors) rows.push({ key, g });
   rows.sort((a, b) => (a.g.p || 99) - (b.g.p || 99));
-  const sig = rows.map(r => r.key + (r.g.wp || '')).join('|');
+  const sig = rows.map(r => r.key + r.g.data.id + (r.g.wp || '')).join('|'); // cousin id too: skin trades relabel the rows
   if (sig !== net.barSig) {
     net.barSig = sig;
     squadBarsEl.innerHTML = '';
@@ -7697,7 +7894,7 @@ window.__dbg = {
   hurtZombie: (z, dmg, opts) => damageZombie(z, dmg, 0, 1, 2, opts),
   blowLimb: z => blowLimb(z, 0, 1),
   popHead: z => popHead(z, 0, 1),
-  squadCmd, issueSquadCmd, executeHoldTrade, tradeRing, updateHoldTrades, fireWeapon, updateCompanions,
+  squadCmd, issueSquadCmd, executeHoldTrade, executeSkinTrade, applySwapKit, playSwapTheme, updateSkinNudge, tradeRing, updateHoldTrades, fireWeapon, updateCompanions,
   exposeBrain, killZombie, pauseGame, resumeGame, scene, allCrates, cycleWeapon,
   get playerBlob() { return playerBlob; },
   fire: () => fireWeapon(),
