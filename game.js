@@ -788,6 +788,28 @@ function playSwapTheme() {
   stopTheme();
   setTimeout(() => { if (!themeTimer) startTheme(selectedCousin); }, n * step + 600);
 }
+// the opening medley: all six persona motifs stitched into one march — four notes of
+// each cousin in picker order, at a shared tempo but each still in their own chip
+// voice — closing on the family chord. Plays exactly once, off the splash screen's
+// wake-up gesture, and it rides musicGain at whatever the remembered music notch
+// says: dial saved at zero means a silent opening, same as every other theme.
+function playOpeningTheme() {
+  if (!actx || !notches.music) return;
+  const tempo = 0.21, per = 4;
+  COUSINS.forEach((c, ci) => {
+    const t = THEMES[c.id] || THEMES.blingo;
+    for (let i = 0; i < per; i++) {
+      const step = ci * per + i;
+      setTimeout(() => {
+        tone(NF(t.seq[i % t.seq.length]), tempo * 0.9, 0.12, t.wave, undefined, musicGain);
+        if (step % 2 === 0) tone(NF(t.bass[(step / 2) % t.bass.length] - 12), tempo * 1.6, 0.15, 'triangle', undefined, musicGain);
+      }, step * tempo * 1000);
+    }
+  });
+  // the sting: everyone lands together
+  setTimeout(() => { for (const n of [0, 4, 7, 12]) tone(NF(n), 1.4, 0.09, 'square', undefined, musicGain); },
+    COUSINS.length * per * tempo * 1000 + 120);
+}
 
 // ---------- rumble ----------
 // The motors only answer to the pad: the moment a key or the mouse moves, input.device
@@ -5424,7 +5446,11 @@ function animate() {
 // frames — the same hook the solo-multiplayer __dbg workflow leans on.
 window.__step = (n = 1, fdt = 1 / 60) => { for (let i = 0; i < n; i++) stepFrame(fdt); };
 function stepFrame(dt) {
-  pollGamepad(dt);
+  // the opening splash owns the frame until it's gone: it renders its own stage and
+  // swallows the gamepad, so "any button" wakes the audio instead of clicking the
+  // menu waiting underneath
+  if (splash.active) splashTick(dt);
+  else pollGamepad(dt);
   // the death transition: fade runs on real time, the simulation runs on an ever-smaller
   // slice of it. The floor (5%) keeps the horde chewing right up until the black lands —
   // by the time the world would visibly stop, there's nothing left to see it stop.
@@ -8214,6 +8240,7 @@ function faceIcon(color) {
 }
 
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------
+let tabCousin = 0; // which cousin the tab is currently spelling — the splash stage mirrors it
 (function livingTab() {
   const link = document.createElement('link');
   link.rel = 'icon'; link.type = 'image/png';
@@ -8221,7 +8248,7 @@ function faceIcon(color) {
   let ci = 0, li = 0;
   function tick() {
     const c = COUSINS[ci];
-    if (li === 0) link.href = faceIcon(c.color);   // swap to this cousin's pic as their name begins
+    if (li === 0) { link.href = faceIcon(c.color); tabCousin = ci; } // this cousin's turn begins
     li++;
     if (li >= c.name.length) {
       document.title = c.name + ' .ᐟ';              // finished: name + flourish
@@ -8234,5 +8261,149 @@ function faceIcon(color) {
   }
   tick();
 })();
+
+// ---------- opening splash ----------
+// First thing anyone sees: deep space tinted the showing hero's colour, stars rushing
+// past, and the cousins taking turns rotating in the light — the real in-game blob
+// model, fists out, wearing their name over an XXL boss chevron in their own colour.
+// The rotation order rides the living-tab typewriter (tabCousin), so the blob on
+// stage is always the cousin the tab title is spelling. Any click / key / pad button
+// / touch is the audio unlock the browser was waiting for: it fires the confirm ping,
+// starts the opening medley (at the remembered music volume) and fades this screen
+// into the cousin picker, ambience rising underneath.
+const splash = { active: true, ready: false, done: false, shown: 0, morph: 0, morphT: 0, yaw: 0, t: 0 };
+const splashEl = document.getElementById('splash');
+const splashBg = new THREE.Color(0x07080d);
+const splashHeroC = new THREE.Color();
+let splashRenderer = null, splashScene = null, splashCam = null, splashBlobs = null, splashStars = null;
+{
+  const starsCv = document.getElementById('splashStars');
+  const starsCx = starsCv.getContext('2d');
+  // the little stage: its own renderer on an alpha canvas so the stars show through
+  splashRenderer = new THREE.WebGLRenderer({ canvas: document.getElementById('splashBlob'), alpha: true, antialias: true });
+  splashRenderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  splashScene = new THREE.Scene();
+  splashScene.add(new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 1.2));
+  const key = new THREE.DirectionalLight(0xfff2dd, 0.95);
+  key.position.set(2.5, 4, 3);
+  splashScene.add(key);
+  splashCam = new THREE.PerspectiveCamera(42, 1, 0.1, 50);
+  // all six cousins built up front (they're a few dozen boxes each), fists out
+  splashBlobs = COUSINS.map(c => {
+    const b = buildBlob({ color: c.color });
+    b.arms[0].rotation.x = b.arms[1].rotation.x = -1.5;  // both fists punched forward
+    b.arms[0].rotation.z = 0.14; b.arms[1].rotation.z = -0.14;
+    b.root.visible = false;
+    splashScene.add(b.root);
+    return b;
+  });
+  splashBlobs[0].root.visible = true;
+  // rushing starfield: angle + unit distance from centre; speed swells as they near the rim
+  splashStars = Array.from({ length: 240 }, () => ({
+    a: Math.random() * TAU, d: Math.random(), sp: 0.25 + Math.random() * 0.6 }));
+  function splashSize() {
+    if (!splash.active) return;
+    starsCv.width = innerWidth; starsCv.height = innerHeight;
+    splashRenderer.setSize(innerWidth, innerHeight);
+    splashCam.aspect = innerWidth / innerHeight;
+    splashCam.updateProjectionMatrix();
+  }
+  splashSize();
+  addEventListener('resize', splashSize);
+  splash.starsCx = starsCx;
+  splash.starsCv = starsCv;
+  splash.sizeFn = splashSize; // splashTick re-checks each frame: a pane that reported
+  // zero width at boot (hidden tab, prerender) heals itself the moment it has a size
+}
+// assets in (window load covers the icon images), and the door opens for input
+function splashReady() {
+  if (splash.ready) return;
+  splash.ready = true;
+  document.getElementById('splashHint').textContent = IS_TOUCH ? 'TAP ANYWHERE .ᐟ' : 'CLICK .ᐟ ANY KEY .ᐟ ANY BUTTON .ᐟ';
+}
+if (document.readyState === 'complete') splashReady();
+else addEventListener('load', splashReady);
+function splashDismiss() {
+  if (!splash.ready || splash.done) return;
+  splash.done = true;
+  initAudio();          // the user gesture audio was waiting on — ambience rises with it
+  SFX.tradePing();      // the confirm ping for the input itself
+  playOpeningTheme();   // six motifs in one march, at the volume the settings remember
+  splashEl.classList.add('hide');
+  setTimeout(() => {
+    splash.active = false;
+    splashEl.remove();
+    splashRenderer.dispose(); // frees the stage's GL context; the game's own is untouched
+  }, 1050);
+}
+splashEl.addEventListener('pointerdown', e => { e.preventDefault(); splashDismiss(); });
+addEventListener('keydown', () => { if (splash.active) splashDismiss(); });
+function splashTick(dt) {
+  splash.t += dt;
+  // --- stars over hero-tinted space (translucent fill leaves motion trails) ---
+  if (splash.starsCv.width !== innerWidth || splash.starsCv.height !== innerHeight) splash.sizeFn();
+  const cx = splash.starsCx, W = innerWidth, H = innerHeight;
+  const hero = COUSINS[splash.shown];
+  splashHeroC.set(hero.color).multiplyScalar(0.13);
+  splashBg.lerp(splashHeroC, 1 - Math.exp(-2.2 * dt));
+  cx.fillStyle = 'rgba(' + ((splashBg.r * 255) | 0) + ',' + ((splashBg.g * 255) | 0) + ',' + ((splashBg.b * 255) | 0) + ',0.5)';
+  cx.fillRect(0, 0, W, H);
+  const R = Math.hypot(W, H) * 0.52;
+  cx.lineCap = 'round';
+  for (const s of splashStars) {
+    const d0 = s.d;
+    s.d += s.sp * dt * (0.22 + s.d * 1.6);
+    if (s.d >= 1) { s.a = Math.random() * TAU; s.d = 0.03 + Math.random() * 0.05; s.sp = 0.25 + Math.random() * 0.6; continue; }
+    const e0 = d0 * d0 * R, e1 = s.d * s.d * R; // ease outward: crawl at centre, whip past the rim
+    cx.strokeStyle = 'rgba(255,255,255,' + (0.16 + s.d * 0.6).toFixed(3) + ')';
+    cx.lineWidth = 0.6 + s.d * 1.8;
+    cx.beginPath();
+    cx.moveTo(W / 2 + Math.cos(s.a) * e0, H / 2 + Math.sin(s.a) * e0);
+    cx.lineTo(W / 2 + Math.cos(s.a) * e1, H / 2 + Math.sin(s.a) * e1);
+    cx.stroke();
+  }
+  // --- the stage: slow turn, blur-morph to whoever the tab is spelling ---
+  if (splash.morph === 0 && tabCousin !== splash.shown) {
+    splash.morph = 1; splash.morphT = 0;
+    splashEl.classList.add('morph'); // blur climbs (CSS transition)
+  } else if (splash.morph === 1) {
+    splash.morphT += dt;
+    if (splash.morphT >= 0.42) {     // deep in the blur: swap the cousin + the marquee
+      splashBlobs[splash.shown].root.visible = false;
+      splash.shown = tabCousin;
+      splashBlobs[splash.shown].root.visible = true;
+      const c = COUSINS[splash.shown];
+      const hex = '#' + c.color.toString(16).padStart(6, '0');
+      const tag = document.getElementById('splashTag');
+      tag.querySelector('b').textContent = c.name.toUpperCase();
+      tag.querySelector('b').style.color = hex;
+      tag.querySelector('i').style.color = hex;
+      splashEl.classList.remove('morph'); // and the blur falls away
+      splash.morph = 2; splash.morphT = 0;
+    }
+  } else if (splash.morph === 2) {
+    splash.morphT += dt;
+    if (splash.morphT >= 0.42) splash.morph = 0;
+  }
+  splash.yaw += dt * 0.45;
+  const b = splashBlobs[splash.shown];
+  b.root.rotation.y = splash.yaw;
+  splashCam.position.set(0, 1.18 + Math.sin(splash.t * 0.7) * 0.05, 3.9);
+  splashCam.lookAt(0, 0.92, 0);
+  splashRenderer.render(splashScene, splashCam);
+  // any pad button is "any input" too (the pad polling below is menu-nav, so it's
+  // held off until the splash lets go of the frame)
+  const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const gp of gps) {
+    if (gp && gp.buttons.some(bt => bt && bt.pressed)) { splashDismiss(); break; }
+  }
+}
+// paint the marquee's opening colours (Blingo) before the first frame
+{
+  const hex = '#' + COUSINS[0].color.toString(16).padStart(6, '0');
+  const tag = document.getElementById('splashTag');
+  tag.querySelector('b').style.color = hex;
+  tag.querySelector('i').style.color = hex;
+}
 
 animate();

@@ -13,6 +13,8 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - Free-aim mouse and keyboard, intuitive touch controls, and fluid gamepad with rumble support
 - Bare-skin trades in multiplayer: hold a trade with empty fists and the two players swap cousins, kits, and spots — same player numbers, same lobby, plus a one-shot swapped-cousins theme
 - Stopping power: sniper rounds punch through everything they kill, shotgun pellets through close-range kills, magnum rounds through the skulls they pop — and crows (1hp of feathers) never stop a heavy round, so one blast can pick apart a whole murder
+- Seamless horizon rendering on a stable geometry clipmap: LOD ground rings run dense near the camera out past the fog line, the draw-distance setting scales live chunks and fog together so nothing ever pops in, and the town-center skyline stays visible as a fog-free silhouette landmark from any distance — with sky-high cousin beacons and always-on player/boss chevrons to steer home by
+- An opening splash of rushing stars where the six cousins take turns rotating under their name and XXL chevron, in sync with the tab title — any click, key, button, or tap wakes the audio with a six-motif opening medley (at your remembered volume) and drops you into the cousin picker
 
 ## Join a Lobby or play Solo
 
