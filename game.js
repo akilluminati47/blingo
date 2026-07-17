@@ -4704,6 +4704,11 @@ function padMenuNav(gp, dt, justPressed, ax, ay) {
   if (stickReady && (up || down || left || right)) padNavT = 0.22;
   if (up) setPadFocus(padFocus - 1);
   if (down) setPadFocus(padFocus + 1);
+  // LB/RB hop to the other column and wrap: the ten settings sit in two stacked columns of
+  // five (indices 0-4 | 5-9), with Resume/Quit their own two-wide row (10 | 11). Left/right
+  // are spent tuning the focused row's value, so the bumpers are what move focus sideways.
+  if (justPressed(4) || justPressed(5))
+    setPadFocus(padFocus < 10 ? (padFocus + 5) % 10 : (padFocus === 10 ? 11 : 10));
   const els = padFocusables();
   const el = els[padFocus];
   if (!el) return;
@@ -4791,8 +4796,10 @@ function padMenuScreen(gp, dt, justPressed, ax, ay) {
   if (!els[menuFocus] || !els[menuFocus].classList.contains('focus')) setMenuFocus(menuFocus);
   const vk = !document.getElementById('vkeyboard').classList.contains('hidden');
   let dx = 0, dy = 0;
-  if (justPressed(14) || (ready && sx < 0)) dx = -1;
-  else if (justPressed(15) || (ready && sx > 0)) dx = 1;
+  // LB/RB drive the horizontal step too, so the bumpers jump between cousin columns and
+  // between Single/Multiplayer just as the d-pad does — spatialNext already wraps at the ends.
+  if (justPressed(14) || justPressed(4) || (ready && sx < 0)) dx = -1;
+  else if (justPressed(15) || justPressed(5) || (ready && sx > 0)) dx = 1;
   else if (justPressed(12) || (ready && sy < 0)) dy = -1;
   else if (justPressed(13) || (ready && sy > 0)) dy = 1;
   if (dx || dy) {
