@@ -963,21 +963,28 @@ function buildGunMesh(id) {
   }
   return g;
 }
-// carry "frame" for held melee: the arm may hang at `base`, but it lifts exactly enough
-// that the weapon tip rubs just above the ground however we walk, run, slide and hop
+// the low frame for held melee: the arm may hang at `base`, but it lifts exactly enough
+// that the weapon tip rides just above the ground. This used to be the walking carry;
+// with the rest pose now HIGH it serves as the swing's floor — where a down strike ends,
+// blade kissing the dirt however high we're standing.
 function meleeCarryLift(base, shoulderY, groundY, reach) {
   const L = 0.56 + (reach || 0.8);                 // shoulder -> fist -> weapon tip
   const room = clamp((shoulderY - groundY - 0.12) / L, 0, 1);
   return -Math.max(Math.abs(base), Math.acos(room));
 }
-// A swing that actually travels: cock back past the carry frame, whip through to
+// A swing that actually travels: cock AWAY from where the strike lands, whip through to
 // `through`, then ease home. p is 0..1 across the swing. The whip is the fast quarter —
-// smoothed on either side so the arm doesn't tick between poses.
+// smoothed on either side so the arm doesn't tick between poses. Fists still cock back
+// and punch forward; a raised weapon cocks higher and comes DOWN.
 function meleeSwing(p, ready, through) {
-  if (p < 0.2) return lerp(ready, ready + 0.6, smooth(p / 0.2));                  // wind up
-  if (p < 0.45) return lerp(ready + 0.6, through, smooth((p - 0.2) / 0.25));      // whip through
-  return lerp(through, ready, smooth((p - 0.45) / 0.55));                         // recover to carry
+  const cock = ready + Math.sign(ready - through) * 0.6;
+  if (p < 0.2) return lerp(ready, cock, smooth(p / 0.2));                         // wind up
+  if (p < 0.45) return lerp(cock, through, smooth((p - 0.2) / 0.25));             // whip through
+  return lerp(through, ready, smooth((p - 0.45) / 0.55));                         // recover to rest
 }
+// armed melee rests HIGH now: weapon up over the shoulder — the old follow-through pose —
+// with the walk bob riding on it. A swing whips it from up here down into the dirt.
+const MELEE_REST = -2.45;
 // how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
 // held-down punching always chains, but a real pause drops you back to a 6 opener.
 const COMBO_WINDOW = 0.75;
@@ -1009,7 +1016,7 @@ function buildMeleeMesh(g, id, c) {
     const blade = box(0.03, 0.16, 0.74, c); blade.position.set(0, 0.02, -0.47); g.add(blade);
     const spine = box(0.034, 0.03, 0.72, 0x8a9097); spine.position.set(0, 0.1, -0.46); g.add(spine);
     const edge = box(0.012, 0.025, 0.72, 0xe8edf2); edge.position.set(0, -0.06, -0.46); g.add(edge);
-    const tip = box(0.03, 0.02, 0.2, c); tip.position.set(0, 0.09, -0.86); tip.rotation.x = 0.5; g.add(tip);
+    // (the old angled "tip" box read as a tang sticking off the point — the blade ends clean now)
     const guard = box(0.16, 0.06, 0.06, 0x2a2c30); guard.position.set(0, 0, -0.06); g.add(guard);
     for (const gy2 of [0.03, -0.03]) { // grip rivets
       const rivet = ball(0.018, 0xc8a44a); rivet.position.set(0.05, gy2, 0.02); g.add(rivet);
@@ -1213,8 +1220,15 @@ function aabb(x, z, hw, hd, h, y0, rot = 0) {
 }
 // highest standable surface under (x,z) for feet at feetY: terrain, or any collider
 // top within maxStep above the feet
+// the tarmac is laid proud of the terrain it was poured over (roads +0.04, the big lot
+// +0.05 — see the roadMat/lotMat terrainPlanes), so feet have to land on the asphalt's
+// own surface instead of the dirt line buried underneath it
+function groundLift(x, z) {
+  if (Math.abs(x - LOT.x) <= LOT.hw && Math.abs(z - LOT.z) <= LOT.hd) return 0.05;
+  return onRoad(x, z) ? 0.04 : 0;
+}
 function supportTop(x, z, feetY, maxStep = 0.45) {
-  let top = groundHeight(x, z);
+  let top = groundHeight(x, z) + groundLift(x, z);
   for (const c of nearbyColliders(x, z)) {
     const ct = c.roof ? roofTopAt(c, x, z) : c.y1; // sloped roofs support at the shingle surface
     if (ct > feetY + maxStep || ct <= top) continue;
@@ -1655,11 +1669,30 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   // instead of hitting an invisible wall, and you can hop trunk -> roof.
   const hw = bodyW / 2 - 0.05, hl = bodyLen / 2 + 0.02;
   if (opts.flipped) {
-    colliders.push(aabb(x, z, hw + 0.07, hl, truck ? 2.1 : van ? 2.4 : 1.8, y0, yaw));
+    // roof-down, you stand on the UNDERCARRIAGE: the body's underside now faces the sky at
+    // rest height minus half the body's thickness. The old tops (1.8/2.4/2.1) were set at
+    // the upturned wheels, leaving feet floating half a metre over the visible steel.
+    const restY = truck ? 2.0 : van ? 2.3 : 1.7;   // same roof-rest heights the flip sets above
+    colliders.push(aabb(x, z, hw + 0.07, hl, restY - bodyH / 2, y0, yaw));
   } else {
     colliders.push(aabb(x, z, hw, hl, bodyTop, y0, yaw));
     // cabin box hugs whatever the cab actually is (a van's shell runs wider and longer)
     colliders.push(aabb(x + cabZ * Math.sin(yaw), z + cabZ * Math.cos(yaw), cabW / 2 - 0.02, cabLen / 2 + 0.06, cabY + cabH / 2, y0, yaw));
+    if (truck) {
+      // the bed liner holds: tailgate + both side walls get their own thin boxes, so the
+      // tub keeps whoever's riding in it from strolling out over the sides. Their tops are
+      // standable like every collider top — 14cm of steel a careful jump can perch on —
+      // and at 0.53 over the bed floor they're past the 0.45 step, so leaving takes a hop.
+      const sn = Math.sin(yaw), cn = Math.cos(yaw);
+      const cabRear = cabZ - cabLen / 2, gateZ = -bodyLen / 2 + 0.1;
+      const sideLen = (cabRear + 0.1) - (gateZ - 0.07), sideZ = ((cabRear + 0.1) + (gateZ - 0.07)) / 2;
+      const wallTop = bodyTop + 0.53;
+      colliders.push(aabb(x + gateZ * sn, z + gateZ * cn, bodyW / 2, 0.07, wallTop, y0, yaw));
+      for (const sx of [-1, 1]) {
+        const lx = sx * (bodyW / 2 - 0.07);
+        colliders.push(aabb(x + lx * cn + sideZ * sn, z - lx * sn + sideZ * cn, 0.07, sideLen / 2, wallTop, y0, yaw));
+      }
+    }
   }
 }
 // traffic pileup: cluster of wrecked cars, all broken windows, some flipped
@@ -2682,8 +2715,10 @@ function buildTown() {
     const drainRing = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.42, 18),
       new THREE.MeshBasicMaterial({ color: 0x8fc6e0, transparent: true, opacity: 0.35, side: THREE.DoubleSide, depthWrite: false }));
     drainRing.rotation.x = -Math.PI / 2; drainRing.position.set(0, waterY + 0.022, drainZ); townGroup.add(drainRing);
-    // centerpiece collider: hop the basin rim, then up onto the pedestal and bowl
-    townColliders.push(aabb(0, fz, 0.7, 0.7, 2.55, fy));
+    // centerpiece collider: hop the basin rim, then up onto the pedestal and bowl. Feet
+    // land ON the bowl's lip (BOWL_Y + BOWL_H/2 = 2.625 over the base, plus a hair) —
+    // the old 2.55 top left you shin-deep in the dish water.
+    townColliders.push(aabb(0, fz, 0.7, 0.7, 2.64, fy));
     // drops respawn at the rim too, so they fall the full run rather than the bottom of it
     fountainFx = { fdrops, fripples, puddle, drainRing, waterY, top: bowlRim };
     // lamp ring around the pavilion
@@ -4776,6 +4811,16 @@ function getAimDir(out) {
   camera.getWorldDirection(out);
   return out;
 }
+// how far along an aim ray the hero himself stands. Rays are cast from the camera, which
+// in third person floats behind the blob — so a zombie between the camera and the hero's
+// back can intercept the centre line without being anywhere the gun points. Hits closer
+// than this are behind the muzzle: never hot, never shot. The 0.6 slack keeps a zombie
+// pressed right up against the hero (its sphere laps the gun plane) a legal target, and
+// in first person the whole thing collapses to ~0 so point-blank still lands.
+function selfT(ox, oy, oz, dx, dy, dz) {
+  return Math.max(0,
+    (player.pos.x - ox) * dx + (player.pos.y + 1 - oy) * dy + (player.pos.z - oz) * dz) - 0.6;
+}
 
 // ---------- drop kick ----------
 // Throwing bare fists in mid-air commits you: the boots come out, you ride the dive to
@@ -4813,6 +4858,7 @@ function updateDropKick(dt) {
     // a slide-hop kick hits twice as hard, same as any slide-hop melee
     damageZombie(z, DROPKICK_DMG * (hard ? 2 : 1), nx, nz, DROPKICK_KNOCK * (hard ? 1.6 : 1),
       { weapon: player.weapon, dist: d, isHead: false });
+    meleeMoveGib(player.weapon, z, nx, nz, hard); // a slide-hop boot that kills bursts the body too
     play3d(z.pos.x, z.pos.z, () => SFX.dropKickHit(hard));
     // boot connecting: the sharpest thing in the game. peaks above the launch snap so it
     // always cuts through it, and a slide-hop kick cracks harder like it hits harder.
@@ -4829,17 +4875,30 @@ const _from = new THREE.Vector3(), _to = new THREE.Vector3(), _gp = new THREE.Ve
 // takes. Auto-attack asks this before committing, so the probe and the swing can never
 // disagree and leave the hero punching air.
 const _mDir = new THREE.Vector3();
-function meleeTarget(w) {
+// EVERY zombie a swing would land on right now: a melee arc is a sweep, not a poke, so
+// one swing connects with the whole crowd inside reach and cone at once
+function meleeTargets(w) {
   getAimDir(_mDir);
   const yaw = Math.atan2(_mDir.x, _mDir.z);
+  const out = [];
   for (const z of zombies) {
     if (z.state === 'dying') continue;
     const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
     if (Math.hypot(dx, dz) >= w.range) continue;
     const diff = Math.abs(((Math.atan2(dx, dz) - yaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
-    if (diff < 1.15) return z;
+    if (diff < 1.15) out.push(z);
   }
-  return null;
+  return out;
+}
+function meleeTarget(w) { return meleeTargets(w)[0] || null; }
+// the gore payoff on a move-kill: a melee kill earned mid-move bursts the body — the
+// execute's centre-mass treatment. Heavy hitters (the gib-class katana/sledge/axe) take
+// it from any airborne swing kill; the lighter arms (fists, pipe, bat, machete) have to
+// earn it out of a slide-hop. Runs AFTER the damage lands, on whatever actually died.
+function meleeMoveGib(w, z, kx, kz, hop) {
+  if (!(hop || (w.gib && !player.grounded))) return;
+  if (z.state !== 'dying' || z.isBoss || z.netGhost || z.blob.bodyGone) return;
+  popChest(z, kx, kz);
 }
 // a sprawled zombie (asleep, or an already-dead carcass) lies flat, head and torso low and
 // off along the sprawl axis rather than stacked upright. Two fat low spheres down the body
@@ -4859,12 +4918,15 @@ function meleeChopHit() {
   if (player.dead || player.downed) return;
   const w = player.weapon;
   if (!w.melee || w.id === 'fists') return;
-  const hit = meleeTarget(w);
-  if (!hit) return;
-  const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z, d = Math.hypot(dx, dz) || 1;
+  const hits = meleeTargets(w);
+  if (!hits.length) return;
   const hop = player.meleeChopHop;
   const knock = 3.5 * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
-  damageZombie(hit, w.dmg * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock, { weapon: w, dist: d, isHead: false });
+  for (const hit of hits) {   // the down swing sweeps the whole crowd too
+    const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z, d = Math.hypot(dx, dz) || 1;
+    damageZombie(hit, w.dmg * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock, { weapon: w, dist: d, isHead: false });
+    meleeMoveGib(w, hit, dx / d, dz / d, hop);
+  }
   SFX.shoot(w); rumble(...w.rmb);
 }
 function fireWeapon() {
@@ -4893,18 +4955,19 @@ function fireWeapon() {
       player.meleeArm = playerBlob.gunArm;  // an armed melee always swings the weapon hand
     }
     const hop = player.hopT > 0;            // swung out of a slide hop: twice the damage
-    const hit = meleeTarget(w);
-    if (hit) {
+    const hits = meleeTargets(w);           // the arc sweeps EVERYONE inside reach + cone
+    for (const hit of hits) {
       const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z;
-      const d = Math.hypot(dx, dz);
+      const d = Math.hypot(dx, dz) || 1;
       // fists land on the chain, not the hand: opener 6, answer 7. Melee ignores hero
       // damage perks so the numbers stay true for everyone — the perks live on guns.
       const base = w.id === 'fists' ? (player.comboN % 2 === 0 ? 6 : 7) : w.dmg;
       const knock = (w.id === 'fists' ? 11 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
       damageZombie(hit, base * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
         { weapon: w, dist: d, isHead: false });
-      rumble(...w.rmb);
+      meleeMoveGib(w, hit, dx / d, dz / d, hop);
     }
+    if (hits.length) rumble(...w.rmb);
     // armed weapons chop through: schedule the down swing to land mid-arc (fists keep their
     // own alternating 6,7 chain, one hit per press)
     if (w.id !== 'fists') { player.meleeChopT = player.swingDur * 0.4; player.meleeChopHop = hop; }
@@ -4950,6 +5013,9 @@ function fireWeapon() {
       if (t < tWall) tWall = t;
     }
     const tMax = Math.min(tWall, 80);
+    // nothing behind the muzzle takes a round: the stretch of ray between the camera and
+    // the hero's back is dead air (same line the crosshair flare draws — see selfT)
+    const tSelf = selfT(_from.x, _from.y, _from.z, rdx, rdy, rdz);
     // gather EVERY body along the line, nearest first — not just the closest — so a
     // killing hit can hand the round on to whoever stood behind (stopping power, below)
     const line = [];
@@ -4979,7 +5045,7 @@ function fireWeapon() {
           }
         }
       }
-      if (zh) line.push({ t: zt, z, isHead: zh.isHead, limb: zh.limb });
+      if (zh && zt > tSelf) line.push({ t: zt, z, isHead: zh.isHead, limb: zh.limb });
     }
     // crows are fair game too — a clean hit lands like a headshot. One shared hit-sphere
     // (crowRayT) that the crosshair flare reads from as well, so a bird that's under the
@@ -4987,7 +5053,7 @@ function fireWeapon() {
     // mid-hop or taking off, and no "dropped feathers and flew off alive" whiffs.
     for (const cw of crows) {
       const ct = crowRayT(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw);
-      if (ct < tMax) line.push({ t: ct, crow: cw });
+      if (ct > tSelf && ct < tMax) line.push({ t: ct, crow: cw });
     }
     line.sort((q, r) => q.t - r.t);
     // stopping power: the round marches down the line and stops in the first body it
@@ -5889,13 +5955,16 @@ function updatePlayer(dt) {
       if (sw >= 0) b.arms[player.meleeArm].rotation.x = meleeSwing(sw, b.arms[player.meleeArm].rotation.x, -2.5);
       else if (stumbling) { b.arms[0].rotation.x -= stumbleLean * 1.0; b.arms[1].rotation.x -= stumbleLean * 1.0; }
     } else {
-      // armed melee: the weapon hand swings; between swings the carry frame keeps the
-      // blade tip skimming just above the ground through walks, runs, slides and hops
+      // armed melee: rests raised over the shoulder (MELEE_REST + the walk bob), and a
+      // swing whips it from up there DOWN into the ground — the old carry frame's
+      // tip-skimming angle is reused as the strike's floor, so the blade ends the arc
+      // kissing the dirt however high we're standing
       const bob = Math.sin(player.walkPhase) * (moving ? 0.14 : 0.04);
       const reach = gunMesh ? gunMesh.userData.reach : 0.8;
-      const ready = meleeCarryLift(-0.55 - aimAmt * 1.0 + bob,
+      const ready = MELEE_REST + bob - aimAmt * 0.25;
+      const strike = meleeCarryLift(-0.35,
         player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
-      b.arms[b.gunArm].rotation.x = sw >= 0 ? meleeSwing(sw, ready, -2.7) : ready;
+      b.arms[b.gunArm].rotation.x = sw >= 0 ? meleeSwing(sw, ready, strike) : ready;
       b.arms[b.offArm].rotation.x = -swing * 0.6 - aimAmt * 0.35;
       if (stumbling) { b.arms[b.gunArm].rotation.x -= stumbleLean * 0.6; b.arms[b.offArm].rotation.x -= stumbleLean * 1.0; }
     }
@@ -6147,13 +6216,12 @@ function updateCompanions(dt) {
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
-    // guns held levelled; melee rides the same carry frame as the hero, tip skimming
-    // just above the ground, whipping forward on a swing
+    // guns held levelled; melee rests raised like the hero's, and a swing buries the
+    // blade down at the dirt (the tip-skimming lift is the strike floor now)
     if (!cw.melee) b.arms[b.gunArm].rotation.x = -Math.PI / 2;
-    else if (c.meleeT > 0) b.arms[b.gunArm].rotation.x = -2.3;
-    else b.arms[b.gunArm].rotation.x = meleeCarryLift(
-      -0.55 + Math.sin(c.walkPhase) * (moving ? 0.14 : 0.04),
-      (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8);
+    else if (c.meleeT > 0) b.arms[b.gunArm].rotation.x = meleeCarryLift(
+      -0.35, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8);
+    else b.arms[b.gunArm].rotation.x = MELEE_REST + Math.sin(c.walkPhase) * (moving ? 0.14 : 0.04);
     if (!c.grounded) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
@@ -7606,6 +7674,10 @@ function updateFx(dt) {
     getAimDir(_aimDir);
     const ox = camera.position.x, oy = camera.position.y, oz = camera.position.z;
     const dx = _aimDir.x, dy = _aimDir.y, dz = _aimDir.z;
+    // the ray starts at the CAMERA, which rides behind the hero in third person — anything
+    // it crosses before it reaches the gun is at the hero's back, not under the sights.
+    // Nothing behind that line may flare (or, on touch, open fire): see selfT in fireWeapon.
+    const tSelf = selfT(ox, oy, oz, dx, dy, dz);
     let tWall = rayGround(ox, oy, oz, dx, dy, dz, 80);
     for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
       const t = c.roof ? rayRoof(ox, oy, oz, dx, dy, dz, c) : rayAABB(ox, oy, oz, dx, dy, dz, c);
@@ -7622,11 +7694,12 @@ function updateFx(dt) {
           raySphere(ox, oy, oz, dx, dy, dz, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale),
           raySphere(ox, oy, oz, dx, dy, dz, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale));
       }
-      if (t < tWall) { hot = true; break; }   // in front of whatever the bullet would hit first
+      if (t > tSelf && t < tWall) { hot = true; break; }   // in front of the gun, and of whatever stops the round
     }
     // crows light the crosshair up like any other spawn — same sphere, same occlusion test
     if (!hot) for (const cw of crows) {
-      if (crowRayT(ox, oy, oz, dx, dy, dz, cw) < tWall) { hot = true; break; }
+      const t = crowRayT(ox, oy, oz, dx, dy, dz, cw);
+      if (t > tSelf && t < tWall) { hot = true; break; }
     }
   }
   hud.crosshair.classList.toggle('enemy', hot);
@@ -8122,9 +8195,7 @@ function netClientWorldTick(dt) {
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
     b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8
-      : (WEAPONS[g.wp] && WEAPONS[g.wp].melee
-        ? meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8)
-        : -Math.PI / 2);
+      : (WEAPONS[g.wp] && WEAPONS[g.wp].melee ? MELEE_REST : -Math.PI / 2); // melee rides raised now
     if (g.dn) {
       // downed players crawl on their belly, same read as the host's own view of them
       b.wob.rotation.x = 1.2;
@@ -8293,9 +8364,7 @@ function netPoseCompanion(c, dt) {
   b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
   b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
   b.arms[b.offArm].rotation.x = -swing * 0.7;
-  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
-    ? meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8)
-    : -Math.PI / 2;
+  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee ? MELEE_REST : -Math.PI / 2; // melee rides raised now
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
   if (c.downed) {
     b.wob.rotation.x = 1.2;
