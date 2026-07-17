@@ -1988,7 +1988,17 @@ function resolveCollision(x, z, r, y) {
       // oriented box: work in the collider's local frame
       const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
       const wx = x - c.x, wz = z - c.z;
-      const lx = wx * cs - wz * sn, lz = wx * sn + wz * cs;
+      let lx = wx * cs - wz * sn, lz = wx * sn + wz * cs;
+      if (Math.abs(lx) < c.hw && Math.abs(lz) < c.hd) {
+        // centre INSIDE the box: a hard knock tunneled it past the surface in one frame
+        // (the clamp math below sees zero depth there and would shrug). Eject through the
+        // nearest side face — for a thin wall that's the way it came in.
+        if (c.hw - Math.abs(lx) < c.hd - Math.abs(lz)) lx = Math.sign(lx || 1) * (c.hw + r);
+        else lz = Math.sign(lz || 1) * (c.hd + r);
+        x = c.x + lx * cs + lz * sn;
+        z = c.z - lx * sn + lz * cs;
+        continue;
+      }
       const nx = clamp(lx, -c.hw, c.hw), nz = clamp(lz, -c.hd, c.hd);
       const ddx = lx - nx, ddz = lz - nz;
       const d2 = ddx * ddx + ddz * ddz;
@@ -2000,6 +2010,12 @@ function resolveCollision(x, z, r, y) {
         z = c.z - plx * sn + plz * cs;
       }
     } else {
+      if (Math.abs(x - c.x) < c.hw && Math.abs(z - c.z) < c.hd) {
+        // same tunneling rescue as the oriented branch, in world axes
+        if (c.hw - Math.abs(x - c.x) < c.hd - Math.abs(z - c.z)) x = c.x + Math.sign(x - c.x || 1) * (c.hw + r);
+        else z = c.z + Math.sign(z - c.z || 1) * (c.hd + r);
+        continue;
+      }
       const nx = clamp(x, c.x - c.hw, c.x + c.hw);
       const nz = clamp(z, c.z - c.hd, c.z + c.hd);
       const dx = x - nx, dz = z - nz;
@@ -5070,18 +5086,22 @@ function fireWeapon() {
     const dl = Math.hypot(dx, dy, dzz);
     const rdx = dx / dl, rdy = dy / dl, rdz = dzz / dl;
 
+    // nothing behind the muzzle takes a round: the stretch of ray between the camera and
+    // the hero's back is dead air (same line the crosshair flare draws — see selfT).
+    // WALLS live by this too — backed against a building, the camera sits inside faded
+    // wall geometry, and without the gate that wall caught the round at the camera, so
+    // fire the hero was plainly clear of died "inside" a building at his back. The round
+    // now truly leaves from the gun: geometry behind it is as dead as bodies behind it.
+    const tSelf = selfT(_from.x, _from.y, _from.z, rdx, rdy, rdz);
     let tWall = rayGround(_from.x, _from.y, _from.z, rdx, rdy, rdz, 80);
     for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
       // roofs stop a round on their real pitch, not the box that errs large, so a bird on the
       // ridge (poking above the roofline) is hittable instead of the box eating the shot
       const t = c.roof ? rayRoof(_from.x, _from.y, _from.z, rdx, rdy, rdz, c)
                        : rayAABB(_from.x, _from.y, _from.z, rdx, rdy, rdz, c);
-      if (t < tWall) tWall = t;
+      if (t > tSelf && t < tWall) tWall = t;
     }
     const tMax = Math.min(tWall, 80);
-    // nothing behind the muzzle takes a round: the stretch of ray between the camera and
-    // the hero's back is dead air (same line the crosshair flare draws — see selfT)
-    const tSelf = selfT(_from.x, _from.y, _from.z, rdx, rdy, rdz);
     // gather EVERY body along the line, nearest first — not just the closest — so a
     // killing hit can hand the round on to whoever stood behind (stopping power, below)
     const line = [];
@@ -7763,7 +7783,10 @@ function updateFx(dt) {
     let tWall = rayGround(ox, oy, oz, dx, dy, dz, 80);
     for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
       const t = c.roof ? rayRoof(ox, oy, oz, dx, dy, dz, c) : rayAABB(ox, oy, oz, dx, dy, dz, c);
-      if (t < tWall) tWall = t;
+      // walls at the hero's back are dead air, exactly as fireWeapon treats them — the
+      // flare must read the same line the round will fly, or touch auto-fire goes blind
+      // the moment the camera backs into a building
+      if (t > tSelf && t < tWall) tWall = t;
     }
     for (const z of zombies) {
       if (z.state === 'dying') continue;
