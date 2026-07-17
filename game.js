@@ -109,6 +109,12 @@ function inTown(x, z, margin = 0) {
   for (const r of TOWN_RECTS) if (rectDist(x, z, r) <= margin) return true;
   return false;
 }
+// dead-flat "poured pads" under the enterable houses. makeBuilding registers one before
+// its chunk's terrain mesh samples heights (terrain builds LAST in buildChunk now), so
+// inside the pad the ground IS the pad level — no outside grade leaking through the
+// floorboards — and a short apron blends back out to the natural grade so the yard
+// doesn't cliff at the wall line.
+const flatPads = [];
 function groundHeight(x, z) {
   const base = (vnoise(x, z, 57) - 0.5) * 3.4 + (vnoise(x, z, 23) - 0.5) * 1.1 + (vnoise(x, z, 131) - 0.5) * 2.2;
   const dr = Math.min(roadAxisDistX(x), roadAxisDist(z));
@@ -116,7 +122,13 @@ function groundHeight(x, z) {
   let td = Infinity;
   for (const r of TOWN_RECTS) td = Math.min(td, rectDist(x, z, r));
   f = Math.min(f, smooth(clamp((td - 1) / 12, 0, 1))); // graded flat in town
-  return base * (0.12 + 0.88 * f);
+  let g = base * (0.12 + 0.88 * f);
+  for (const p of flatPads) {
+    const dOut = Math.max(Math.abs(x - p.x) - p.hw, Math.abs(z - p.z) - p.hd);
+    if (dOut >= p.apron) continue;
+    g = dOut <= 0 ? p.y : lerp(p.y, g, smooth(dOut / p.apron));
+  }
+  return g;
 }
 // roads are two-way now: a lane each direction, 12.8 wide in total
 function onRoad(x, z, margin = 0) {
@@ -890,7 +902,9 @@ const INDOOR_NEW_GUN_CHANCE = 0.7;
 function rollCrateLoot(rng, crate) {
   if (!crate || !crate.indoor) return rollLoot(rng);
   const missing = unownedGuns();
-  if (!missing.length) return 'sniperammo';
+  // fully kitted out: half the boxes feed the iron actually in your hands, half still
+  // pay the scarcest rounds in the game — not every consolation is a sniper box now
+  if (!missing.length) return rng() < 0.5 ? 'ammo' : 'sniperammo';
   if (rng() < INDOOR_NEW_GUN_CHANCE) return missing[(rng() * missing.length) | 0];
   return rollLoot(rng);
 }
@@ -1326,8 +1340,10 @@ function respawnCrateElsewhere() {
   }
 }
 
-function makeShelf(rng, x, z, rotY, group, colliders, crateList) {
-  const y0 = groundHeight(x, z);
+function makeShelf(rng, x, z, rotY, group, colliders, crateList, baseY) {
+  // indoors the shelf stands ON the floorboards (baseY = the floor's top); outdoors it
+  // keeps planting its feet a knuckle into the dirt like it always has
+  const yb = baseY !== undefined ? baseY : groundHeight(x, z) - 0.1;
   const s = new THREE.Group();
   const frame = 0x4a4f58;
   for (const sx of [-0.9, 0.9]) for (const sz of [-0.25, 0.25]) {
@@ -1340,19 +1356,19 @@ function makeShelf(rng, x, z, rotY, group, colliders, crateList) {
     plank.position.y = y;
     s.add(plank);
   }
-  s.position.set(x, y0 - 0.1, z);
+  s.position.set(x, yb, z);
   s.rotation.y = rotY;
   group.add(s);
-  colliders.push(aabb(x, z, 1.0, 0.45, 1.85, y0 - 0.1));
+  colliders.push(aabb(x, z, 1.0, 0.45, 1.85, yb));
   const cos = Math.cos(rotY), sin = Math.sin(rotY);
   for (const y of [0.485, 1.185]) {
     if (rng() < 0.62) {
       const off = (rng() - 0.5) * 1.2;
       const wx = x + cos * off, wz = z - sin * off;
-      if (rng() < 0.55) makeCrate(rng, wx, y0 + y, wz, group, colliders, crateList, true);
+      if (rng() < 0.55) makeCrate(rng, wx, yb + 0.1 + y, wz, group, colliders, crateList, true);
       else {
         const junk = box(0.3 + rng() * 0.2, 0.25 + rng() * 0.2, 0.3, [0x666f7a, 0x7a5a40, 0x505a44][(rng() * 3) | 0]);
-        junk.position.set(wx, y0 + y + 0.15, wz);
+        junk.position.set(wx, yb + 0.1 + y + 0.15, wz);
         group.add(junk);
       }
     }
@@ -1380,7 +1396,7 @@ function roofTopAt(c, x, z) {
 }
 // pitched shingle roof + gables. Returns the peek entry (materials + the blocker box) so
 // the house can fade its own roof out from over the hero — see updateHousePeek.
-function addRoof(group, bx, by, bz, w, d, rng, colliders) {
+function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
   const rh = d * 0.32;
   // cloned: roofMats is shared by every house on the map, so fading the cached one
   // would ghost roofs chunks away
@@ -1399,7 +1415,9 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders) {
   const shape = new THREE.Shape();
   shape.moveTo(-d / 2, 0); shape.lineTo(d / 2, 0); shape.lineTo(0, rh); shape.closePath();
   const ggeo = new THREE.ShapeGeometry(shape);
-  const gmat = new THREE.MeshLambertMaterial({ color: 0x5d5044, side: THREE.DoubleSide });
+  // the gable triangles wear the house's own wall colour — they ARE wall, not trim,
+  // and the old mystery brown read as a third material the building never had
+  const gmat = new THREE.MeshLambertMaterial({ color: gableC !== undefined ? gableC : 0x5d5044, side: THREE.DoubleSide });
   gmat.userData.owned = true; // already per-house, just needs disposing with the chunk
   for (const s of [-1, 1]) {
     const gable = new THREE.Mesh(ggeo, gmat);
@@ -1414,9 +1432,16 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders) {
   return { mats: [roofMat, gmat], box: colliders[colliders.length - 1], op: 1, want: 1 };
 }
 
-function makeBuilding(rng, bx, bz, group, colliders, crateList) {
+function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
   const w = 7 + ((rng() * 5) | 0), d = 6 + ((rng() * 4) | 0), h = 2.6 + rng() * 1.2;
   const y0 = groundHeight(bx, bz);
+  // pour the pad FIRST (its level sampled from the still-natural grade): from here on,
+  // every groundHeight call inside the footprint — the shelf, the crates, the barrels'
+  // apron, the terrain mesh built after us — answers with this one flat height
+  if (pads) {
+    const pad = { x: bx, z: bz, hw: w / 2 + 0.9, hd: d / 2 + 0.9, apron: 2.0, y: y0 };
+    flatPads.push(pad); pads.push(pad);
+  }
   const wallC = [0x6b6154, 0x5d6068, 0x745f4d, 0x606a5d][(rng() * 4) | 0];
   const t = 0.35;
   const doorSide = (rng() * 4) | 0;
@@ -1468,9 +1493,12 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
   const floor = box(w, 0.6, d, 0x4a453e);
   floor.position.set(bx, y0 - 0.24, bz);
   group.add(floor);
-  const roofPeek = addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders); // roof sits down onto the walls, standable
+  // the boards are a real surface now: a walkable collider whose top matches the mesh,
+  // so feet stand ON the floor (a 6cm sill over the pad — walked over, never noticed)
+  colliders.push(aabb(bx, bz, w / 2 - t, d / 2 - t, 0.56, y0 - 0.5));
+  const roofPeek = addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders, wallC); // roof sits down onto the walls, standable
   if (roofPeek) shell.push(roofPeek); // the roof clears too, or looking down at the hero shows only shingles
-  if (rng() < 0.85) makeShelf(rng, bx + (rng() - 0.5) * (w - 3), bz + (rng() - 0.5) * (d - 3), (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList);
+  if (rng() < 0.85) makeShelf(rng, bx + (rng() - 0.5) * (w - 3), bz + (rng() - 0.5) * (d - 3), (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList, y0 + 0.06);
   // the floor crate lands somewhere the shelf that just went in isn't standing
   if (rng() < 0.7) {
     for (let t = 0; t < 10; t++) {
@@ -1675,7 +1703,11 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
     const restY = truck ? 2.0 : van ? 2.3 : 1.7;   // same roof-rest heights the flip sets above
     colliders.push(aabb(x, z, hw + 0.07, hl, restY - bodyH / 2, y0, yaw));
   } else {
-    colliders.push(aabb(x, z, hw, hl, bodyTop, y0, yaw));
+    const bodyCol = aabb(x, z, hw, hl, bodyTop, y0, yaw);
+    // a rider standing on an upright truck's body top is standing down IN the tub —
+    // the bite gate below (inTruckBed) reads this flag and calls them unbiteable
+    if (truck) bodyCol.bed = true;
+    colliders.push(bodyCol);
     // cabin box hugs whatever the cab actually is (a van's shell runs wider and longer)
     colliders.push(aabb(x + cabZ * Math.sin(yaw), z + cabZ * Math.cos(yaw), cabW / 2 - 0.02, cabLen / 2 + 0.06, cabY + cabH / 2, y0, yaw));
     if (truck) {
@@ -1769,27 +1801,12 @@ function buildChunk(cx, cz) {
   const crateList = [];
   const ox = cx * CHUNK, oz = cz * CHUNK;
 
-  group.add(terrainPlane(CHUNK, CHUNK, 10, 10, ox, oz, grassMat(rng())));
-
-  // roads on grid lines every 3 chunks (vertical centre ox-20, horizontal oz-17)
+  // roads on grid lines every 3 chunks (vertical centre ox-20, horizontal oz-17).
+  // NOTE: only the FLAGS live up here — the terrain and road meshes themselves are built
+  // at the BOTTOM of this function, after the buildings have registered their flat
+  // interior pads, so the ground mesh samples the padded heights.
   const hasVRoad = ((cx % 3) + 3) % 3 === 0;
   const hasHRoad = ((cz % 3) + 3) % 3 === 0;
-  if (hasVRoad) group.add(terrainPlane(12.8, CHUNK, 3, 10, ox - 20, oz, roadMat, 0.04));
-  if (hasHRoad) group.add(terrainPlane(CHUNK, 12.8, 10, 3, ox, oz - 17, roadMat, 0.04));
-  // dotted yellow centre line between the two lanes, broken well clear of intersections
-  for (const vert of [true, false]) {
-    if (vert ? !hasVRoad : !hasHRoad) continue;
-    for (let off = -CHUNK / 2 + 1.6; off < CHUNK / 2; off += 4.2) {
-      const dxp = vert ? ox - 20 : ox + off;
-      const dzp = vert ? oz + off : oz - 17;
-      // skip dashes near a crossing: on a vertical road that's a horizontal road (z), on a
-      // horizontal road that's a vertical road (x) — each axis has its own offset now
-      if ((vert ? roadAxisDist(dzp) : roadAxisDistX(dxp)) < 8.4) continue;
-      const dash = box(vert ? 0.16 : 1.7, 0.02, vert ? 1.7 : 0.16, 0xd8b62a);
-      dash.position.set(dxp, groundHeight(dxp, dzp) + 0.075, dzp);
-      group.add(dash);
-    }
-  }
 
   const spots = [];
   function freeSpot(minDist, roadMargin = 2) {
@@ -1810,10 +1827,11 @@ function buildChunk(cx, cz) {
   }
 
   const buildings = [];
+  const pads = [];
   const nB = rng() < 0.55 ? 1 + (rng() < 0.3 ? 1 : 0) : 0;
   for (let i = 0; i < nB; i++) {
     const p = freeSpot(10, 4);
-    if (p) buildings.push(makeBuilding(rng, p.x, p.z, group, colliders, crateList));
+    if (p) buildings.push(makeBuilding(rng, p.x, p.z, group, colliders, crateList, pads));
   }
   if (cx === 0 && cz === 0) makeCrate(rng, 4.5, groundHeight(4.5, 5) + 0.02, 5, group, colliders, crateList, false);
   const nC = Math.round((1 + ((rng() * 2) | 0)) * clamp(settings.lootSpawn, 0, 3));
@@ -1847,8 +1865,28 @@ function buildChunk(cx, cz) {
     makePileup(rng, ox + (rng() - 0.5) * 16, oz - 17, 'x', group, colliders);
   }
 
+  // terrain LAST: every building above has registered its flat pad by now, so the
+  // ground mesh (and the road skins riding it) bake those pads into their vertices
+  group.add(terrainPlane(CHUNK, CHUNK, 10, 10, ox, oz, grassMat(rng())));
+  if (hasVRoad) group.add(terrainPlane(12.8, CHUNK, 3, 10, ox - 20, oz, roadMat, 0.04));
+  if (hasHRoad) group.add(terrainPlane(CHUNK, 12.8, 10, 3, ox, oz - 17, roadMat, 0.04));
+  // dotted yellow centre line between the two lanes, broken well clear of intersections
+  for (const vert of [true, false]) {
+    if (vert ? !hasVRoad : !hasHRoad) continue;
+    for (let off = -CHUNK / 2 + 1.6; off < CHUNK / 2; off += 4.2) {
+      const dxp = vert ? ox - 20 : ox + off;
+      const dzp = vert ? oz + off : oz - 17;
+      // skip dashes near a crossing: on a vertical road that's a horizontal road (z), on a
+      // horizontal road that's a vertical road (x) — each axis has its own offset now
+      if ((vert ? roadAxisDist(dzp) : roadAxisDistX(dxp)) < 8.4) continue;
+      const dash = box(vert ? 0.16 : 1.7, 0.02, vert ? 1.7 : 0.16, 0xd8b62a);
+      dash.position.set(dxp, groundHeight(dxp, dzp) + 0.075, dzp);
+      group.add(dash);
+    }
+  }
+
   scene.add(group);
-  return { group, colliders, crates: crateList, buildings, cx, cz };
+  return { group, colliders, crates: crateList, buildings, pads, cx, cz };
 }
 // the hollow chunk house whose footprint contains (x,z), or null — keeps spawns
 // outdoors and lets zombies respect doorways instead of pressing through walls
@@ -1960,6 +1998,12 @@ function updateChunks(px, pz) {
       for (const cr of ch.crates) {
         const i = allCrates.indexOf(cr);
         if (i >= 0) allCrates.splice(i, 1);
+      }
+      // the flat pads leave with their houses, or the terrain here would stay ironed
+      // forever for a building that no longer exists
+      if (ch.pads) for (const p of ch.pads) {
+        const i = flatPads.indexOf(p);
+        if (i >= 0) flatPads.splice(i, 1);
       }
       chunks.delete(key);
     }
@@ -5628,6 +5672,12 @@ function recruitCousin(c) {
   // half of them say hello, half just fall in — so the greeting stays a moment rather
   // than a formality. Beat late: the JOINED toast lands first, then they speak.
   if (Math.random() < 0.5) c.helloT = 0.45;
+  // family lore: Bloopy has watched Blondie's pocket-geometry looting for years. Every
+  // time she signs back on, he wishes the world good luck. Always — no coin on this one.
+  if (c.data.id === 'blondie') {
+    const bp = companions.find(o => o.data.id === 'bloopy' && o.recruited && !o.downed && !o.netP);
+    if (bp) bp.luckT = 1.2; // lands after her own possible hello, so the bubbles don't stack
+  }
 }
 // ---------- cousin battle personas ----------
 // Each cousin fights like themselves, not like a squad slot. These are the tells you'd
@@ -5655,6 +5705,7 @@ function cousinEmote(c, i) {
 }
 const HELLO_EMOTE = EMOTES.findIndex(e => e.startsWith('Hello'));
 const NICE_EMOTE = EMOTES.findIndex(e => e.startsWith('Nice'));
+const LUCK_EMOTE = EMOTES.findIndex(e => e.startsWith('Good'));
 // weapon-only loot roll (companions only ever grab guns from crates)
 function rollLootWeapon(rng) {
   for (let i = 0; i < 8; i++) { const id = rollLoot(rng); if (id !== 'ammo' && id !== 'medkit') return id; }
@@ -6136,6 +6187,28 @@ function updatePlayer(dt) {
 
 // ---------- companions ----------
 const _cv = new THREE.Vector3();
+// ---------- the splash melt, in-world ----------
+// The opening splash blurs one cousin into the next; a teleport out here borrows that
+// feel with what a mesh can actually do — every material fades to nothing where they
+// stood, and fades back up at the new spot. Clones exist only for the fade; the shared
+// originals come back (and the clones are disposed) the moment it lands.
+function beginBlobFade(c) {
+  c.tpMats = [];
+  c.blob.root.traverse(o => {
+    if (!o.isMesh || o.material === shadowMat) return;
+    const m = o.material.clone(); m.transparent = true;
+    c.tpMats.push({ mesh: o, orig: o.material, clone: m });
+    o.material = m;
+  });
+}
+function setBlobFade(c, a) {
+  if (c.tpMats) for (const e of c.tpMats) if (e.mesh.material === e.clone) e.clone.opacity = a;
+}
+function endBlobFade(c) {
+  if (!c.tpMats) return;
+  for (const e of c.tpMats) { e.mesh.material = e.orig; e.clone.dispose(); }
+  c.tpMats = null;
+}
 function updateCompanions(dt) {
   // emote squad orders run on a timer (lineup also breaks when the player fires)
   if (squadCmd.mode) {
@@ -6183,6 +6256,7 @@ function updateCompanions(dt) {
     // downed: kneel where they fell, flashing red under a rescue beacon, until
     // someone comes and picks them up by hand
     if (c.downed) {
+      if (c.tp) { endBlobFade(c); c.tp = null; } // going down mid-melt: reappear and kneel here
       c.y = gy; c.vy = 0; c.grounded = true;
       b.root.position.set(c.pos.x, gy, c.pos.z);
       b.wob.rotation.x = 0.55; b.wob.scale.set(1, 0.7, 1);
@@ -6194,6 +6268,29 @@ function updateCompanions(dt) {
         c.beacon.material.opacity = 0.22 + Math.sin(performance.now() * 0.004) * 0.12;
         c.beacon.rotation.y += dt * 0.8;
       }
+      continue;
+    }
+    // mid-teleport: the splash melt. Fade out where they stand, cross over, fade back in
+    // at the formation slot — no walking, no fighting, just the dissolve.
+    if (c.tp) {
+      c.tp.t += dt;
+      const k = Math.min(c.tp.t / 0.32, 1);
+      if (c.tp.phase === 0) {
+        setBlobFade(c, 1 - k);
+        if (k >= 1) {
+          const ii = c.slotIdx || 0;
+          let tx = player.pos.x + bkX * (2 + ii * 1.5), tz = player.pos.z + bkZ * (2 + ii * 1.5);
+          [tx, tz] = resolveCollision(tx, tz, 0.42);
+          c.pos.x = tx; c.pos.z = tz;
+          c.y = groundHeight(tx, tz); c.vy = 0; c.grounded = true;
+          c.tp.phase = 1; c.tp.t = 0;
+        }
+      } else {
+        setBlobFade(c, k);
+        if (k >= 1) { endBlobFade(c); c.tp = null; }
+      }
+      b.root.position.set(c.pos.x, c.y, c.pos.z);
+      placeShadow(b, c.pos.x, c.pos.z, c.y);
       continue;
     }
     // steady regen once they've been out of a bite for a few seconds
@@ -6237,10 +6334,13 @@ function updateCompanions(dt) {
     const dist = Math.hypot(dx, dz);
     const pd = Math.hypot(player.pos.x - c.pos.x, player.pos.z - c.pos.z);
     let moving = false;
-    if (pd > 30) { // teleport catch-up if left far behind
-      c.pos.x = player.pos.x + bkX * (2 + i * 1.5);
-      c.pos.z = player.pos.z + bkZ * (2 + i * 1.5);
-      c.y = groundHeight(c.pos.x, c.pos.z); c.vy = 0; c.grounded = true;
+    // teleport catch-up only when left FAR behind — 60m now, not 30, so a slide-hopping
+    // cousin gets to show she can close a real gap on her own legs before the world
+    // cheats for her. Never during a Wait: they were told to stay put, and stay they do.
+    if (pd > 60 && cmd !== 'wait') {
+      c.tp = { t: 0, phase: 0 };   // the splash-screen melt, worldside (handled above)
+      beginBlobFade(c);
+      continue;
     } else if (dist > 0.4) {
       // Blizzy (and Blondie heading home) don't jog a long gap — they drop into a slide and
       // hop out of it, the same trick the hero uses to cover ground. The slide holds while
@@ -6325,6 +6425,7 @@ function updateCompanions(dt) {
     // fallen boss, on the same beat-late timer
     if (c.helloT > 0) { c.helloT -= dt; if (c.helloT <= 0) cousinEmote(c, HELLO_EMOTE); }
     if (c.niceT > 0) { c.niceT -= dt; if (c.niceT <= 0) cousinEmote(c, NICE_EMOTE); }
+    if (c.luckT > 0) { c.luckT -= dt; if (c.luckT <= 0) cousinEmote(c, LUCK_EMOTE); } // Bloopy, on Blondie signing on
     // Blingo fights on his toes: with something to shoot at, he won't keep both feet down
     if (persona(c).fightHops && tgt && c.grounded && !cmd) {
       c.hopCd = (c.hopCd || 0) - dt;
@@ -6438,6 +6539,33 @@ function updateCompanions(dt) {
 }
 
 // ---------- zombies ----------
+// teeth obey walls: the mouth-to-target line must be clear of solid geometry — a wall
+// segment, a car body, a crate is enough to keep a bite on its own side. Roofs test on
+// their true pitch (like bullets do) so a lunge under an awning isn't eaten by the
+// bounding box that errs large.
+function biteBlocked(z, tx, ty, tz) {
+  const oy = z.blob.root.position.y + 1.0 * z.scale;
+  let dx = tx - z.pos.x, dy = ty - oy, dz2 = tz - z.pos.z;
+  const dl = Math.hypot(dx, dy, dz2) || 1;
+  dx /= dl; dy /= dl; dz2 /= dl;
+  for (const c of nearbyColliders(z.pos.x, z.pos.z)) {
+    const t = c.roof ? rayRoof(z.pos.x, oy, z.pos.z, dx, dy, dz2, c)
+                     : rayAABB(z.pos.x, oy, z.pos.z, dx, dy, dz2, c);
+    if (t < dl - 0.15) return true;
+  }
+  return false;
+}
+// standing down in a truck bed, the tub is armour: nothing on the ground gets its teeth
+// over those walls. Matches the collider flagged `bed` in makeCar (upright trucks only).
+function inTruckBed(px, pz, py) {
+  for (const c of nearbyColliders(px, pz)) {
+    if (!c.bed || Math.abs(py - c.y1) > 0.35) continue;
+    let lx = px - c.x, lz = pz - c.z;
+    if (c.rot) { const cs = Math.cos(c.rot), sn = Math.sin(c.rot); const t = lx * cs - lz * sn; lz = lx * sn + lz * cs; lx = t; }
+    if (Math.abs(lx) < c.hw && Math.abs(lz) < c.hd) return true;
+  }
+  return false;
+}
 function updateZombies(dt) {
   for (let i = zombies.length - 1; i >= 0; i--) {
     const z = zombies[i];
@@ -6594,14 +6722,22 @@ function updateZombies(dt) {
     if (z.attackT <= 0) {
       const reach = z.isBoss ? 3.4 : 1.7;
       const vReach = z.isBoss ? 2.4 : 1.25;
-      // no biting through house walls: both parties must be in the same room (or both outside)
+      // no biting through house walls: both parties must be in the same room (or both
+      // outside) — AND the actual mouth-to-target line must be clear. The room test alone
+      // let teeth reach through outdoor walls, fences and car bodies; now any solid
+      // between the two stops the bite exactly like it stops a bullet. A rider standing
+      // down in a truck bed is off the menu entirely.
       const sameRoom = z.isBoss || buildingAt(z.pos.x, z.pos.z) === buildingAt(player.pos.x, player.pos.z);
-      if (!player.dead && sameRoom && pDist < reach && player.pos.y - b.root.position.y < vReach) {
+      if (!player.dead && sameRoom && pDist < reach && player.pos.y - b.root.position.y < vReach
+          && !inTruckBed(player.pos.x, player.pos.z, player.pos.y)
+          && !biteBlocked(z, player.pos.x, player.pos.y + 1, player.pos.z)) {
         z.attackT = z.isBoss ? 1.1 : 0.9;
         hurtPlayer((z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
       } else if (tgtC && !tgtC.downed && (tgtC.y || 0) - b.root.position.y < vReach) {
         const cd = Math.hypot(tgtC.pos.x - z.pos.x, tgtC.pos.z - z.pos.z);
-        if (cd < (z.isBoss ? 3.2 : 1.6)) { z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, (z.isBoss ? 22 : 7 + Math.random() * 5) * (z.biteMult || 1)); }
+        if (cd < (z.isBoss ? 3.2 : 1.6) && !biteBlocked(z, tgtC.pos.x, (tgtC.y || 0) + 1, tgtC.pos.z)) {
+          z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, (z.isBoss ? 22 : 7 + Math.random() * 5) * (z.biteMult || 1));
+        }
       }
     }
 
@@ -8670,6 +8806,7 @@ playerBlob.root.position.copy(player.pos);
 window.__tagDbg = { updatePlayerTags, trackedActors, tagOccluded, spawnBoss2, darken, CRIMSON_HANDS };
 window.__dbg = {
   player, game, zombies, crows, buildCrow, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop, net,
+  groundHeight, chunks, buildingAt, flatPads, rollCrateLoot,
   openNearest: () => { const c = findNearCrate(); if (c) openCrate(c); },
   recruitNearest: () => { const c = findNearRecruit(); if (c) recruitCousin(c); },
   give: id => giveWeapon(id),
