@@ -5697,7 +5697,7 @@ const PERSONA = {
   blizzy:  { slideCatchup: true },   // never merely walks back to you: slides, hops out of it
   blingo:  { fightHops: true },      // can't stand still in a fight
   blazo:   { leapChop: true },       // melee in hand? the swing comes down out of the air
-  blomba:  { crowShot: true, meleeReaper: true }, // guns: no crow is safe. Melee: a walking exclusion zone
+  blomba:  { crowShot: true, meleeBrawler: true }, // guns: no crow is safe. Melee: he takes the fight TO them
   bloopy:  { bossNice: true },       // says the quiet part when a boss drops
   blondie: { sweeper: true },        // wider loot reach, and hops home once she has it
 };
@@ -6337,6 +6337,26 @@ function updateCompanions(dt) {
         tz2 = player.pos.z + (fz * Math.cos(th) + fx * Math.sin(th)) * 2.3;
       }
     }
+    // Blomba's brawl: with a real melee weapon he doesn't hold his slot — any walker
+    // inside 14m pulls him in AT A SPRINT, the swing itself stays the ordinary one at
+    // ordinary reach, and with nothing left to hit he sprints back to formation the same
+    // way he left. Only while he's still in earshot of the squad (26m), and never over a
+    // squad order — Wait means wait, even for the bouncer.
+    let hunt = null, brawlSprint = false;
+    {
+      const cwM = c.weapon;
+      if (persona(c).meleeBrawler && cwM && cwM.melee && cwM.id !== 'fists' && !cmd
+          && Math.hypot(player.pos.x - c.pos.x, player.pos.z - c.pos.z) < 26) {
+        brawlSprint = true; // the trip home is a sprint too
+        let hd2 = 14;
+        for (const z of zombies) {
+          if (z.state !== 'chase' && z.state !== 'wake') continue;
+          const dz3 = Math.hypot(z.pos.x - c.pos.x, z.pos.z - c.pos.z);
+          if (dz3 < hd2) { hd2 = dz3; hunt = z; }
+        }
+        if (hunt) { tx2 = hunt.pos.x; tz2 = hunt.pos.z; }
+      }
+    }
     const dx = tx2 - c.pos.x, dz = tz2 - c.pos.z;
     const dist = Math.hypot(dx, dz);
     const pd = Math.hypot(player.pos.x - c.pos.x, player.pos.z - c.pos.z);
@@ -6348,7 +6368,7 @@ function updateCompanions(dt) {
       c.tp = { t: 0, phase: 0 };   // the splash-screen melt, worldside (handled above)
       beginBlobFade(c);
       continue;
-    } else if (dist > 0.4) {
+    } else if (dist > (hunt ? Math.max(0.4, c.weapon.range - 0.6) : 0.4)) {   // a brawler pulls up at swinging distance, not on top of the mark
       // Blizzy (and Blondie heading home) don't jog a long gap — they drop into a slide and
       // hop out of it, the same trick the hero uses to cover ground. The slide holds while
       // there's ground to make up, then spends itself on a hop that lands near the slot.
@@ -6360,7 +6380,9 @@ function updateCompanions(dt) {
         if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 22) play3d(c.pos.x, c.pos.z, () => SFX.slide && SFX.slide());
       }
       const sliding = c.slideT > 0;
-      const sp = Math.min(sliding ? 10.5 : dist > 8 ? 7.3 : dist > 2 ? 5.4 : 2.8, dist / dt);
+      // the brawler covers ground at a sprint both ways: closing on a mark, and hustling
+      // back to his slot once the floor's been cleaned
+      const sp = Math.min(sliding ? 10.5 : (hunt || (brawlSprint && dist > 6)) ? 8.2 : dist > 8 ? 7.3 : dist > 2 ? 5.4 : 2.8, dist / dt);
       const step = sp * dt;
       let nx = c.pos.x + dx / dist * step;
       let nz = c.pos.z + dz / dist * step;
@@ -6467,13 +6489,8 @@ function updateCompanions(dt) {
     if (tgt && c.shootCd <= 0) {
       const kx = (tgt.pos.x - c.pos.x) / tD, kz = (tgt.pos.z - c.pos.z) / tD;
       if (cw.melee) {
-        // Blomba with a melee weapon is a walking exclusion zone: the old Blob Lounge
-        // bouncer drops ANY regular walker that steps inside 6m, mid-stride, without the
-        // squad breaking step — the door policy travels with him. Bosses are above the
-        // policy and get the ordinary swing at ordinary reach.
-        const reaper = persona(c).meleeReaper && cw.id !== 'fists' && !tgt.isBoss;
         // melee cousins swing once the target shambles into reach
-        if (tD < (reaper ? 6 : cw.range + 0.5)) {
+        if (tD < cw.range + 0.5) {
           // Blazo doesn't chop from the floor: with a real weapon in hand he leaps and brings
           // it down, and the landing hit is worth the wind-up. Fists don't earn the leap —
           // the family's hot head needs something with a head of its own to swing.
@@ -6482,9 +6499,7 @@ function updateCompanions(dt) {
           c.shootCd = 60 / cw.rpm + 0.2;
           c.meleeT = 0.16;
           const air = leap && !c.grounded;
-          // the reaper hit routes through damageZombie (not killZombie directly) so a
-          // net-ghost zombie's death still travels the host-authoritative path
-          damageZombie(tgt, reaper ? 9999 : cw.dmg * (air ? 1.7 : 1.1), kx, kz, air ? 4.4 : 2.2, { weapon: cw, dist: tD, isHead: false });
+          damageZombie(tgt, cw.dmg * (air ? 1.7 : 1.1), kx, kz, air ? 4.4 : 2.2, { weapon: cw, dist: tD, isHead: false });
           if (air) meleeMoveGib(cw, tgt, kx, kz, true); // a leaping kill bursts the body, same as ours
           if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
         }
