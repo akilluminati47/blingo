@@ -49,6 +49,15 @@
   #topbar .stat b { font-size:18px; line-height:1; color:#fff; }
   #topbar .stat span { font-size:9px; letter-spacing:2px; opacity:.6; text-transform:uppercase; margin-top:2px; }
   #kills b { color:#ff6b6b !important; }
+  /* cleanup-quota readout: top right, the hero's colour in the blobby face — kills left
+     before the block is scoured. Topbar-stat sized, and it fades in/out with the hunt. */
+  #quota { position:absolute; top:calc(10px + env(safe-area-inset-top)); right:calc(14px + env(safe-area-inset-right));
+    display:flex; flex-direction:column; align-items:center; pointer-events:none;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    text-shadow:0 2px 6px rgba(0,0,0,.7); opacity:0; transition:opacity .8s; }
+  #quota.show { opacity:1; }
+  #quota b { font-size:18px; line-height:1; color:var(--hero); }
+  #quota span { font-size:9px; letter-spacing:2px; color:var(--hero); opacity:.65; margin-top:2px; }
   #cousins b { color:#6fd8ff !important; }
 
   #bottomleft { position:absolute; left:calc(14px + env(safe-area-inset-left)); bottom:calc(14px + env(safe-area-inset-bottom)); color:#fff; }
@@ -485,6 +494,7 @@
     <div id="bosswrap"><div id="bosshp"></div></div>
   </div>
 
+  <div id="quota"><b>0/0</b><span>REMAIN</span></div>
   <div id="topbar">
     <div class="stat" id="kills"><b>0</b><span>Kills</span></div>
     <div class="stat" id="timer"><b>0:00</b><span>Survived</span></div>

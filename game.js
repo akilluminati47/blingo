@@ -4300,8 +4300,9 @@ function resetGame() {
   game.clock = [8, 11, 13][(Math.random() * 3) | 0];
   game.phase = coarsePhase(game.clock);
   wxReset();
-  game.cycle = 0; game.cleanup = false; game.clearTarget = 0;
+  game.cycle = 0; game.cleanup = false; game.clearTarget = 0; game.quotaN = 0;
   game.celebrateT = 0;
+  updateQuotaHud();
   applyEnvironment();
   // clear ground gore from the last run
   for (const d of decals) { scene.remove(d); d.material.dispose(); }
@@ -4312,8 +4313,10 @@ function resetGame() {
   zombies.length = 0;
   // reset the boss + its beam
   if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+  bossState.beamFade = false;
   bossState.boss = null; bossState.spawned = false; bossState.defeated = false;
   bossState.spawned2 = false; bossState.defeated2 = false;
+  bossState.spawned3 = false; bossState.defeated3 = false; // the Infected One resets with his brothers
   bossBarEl.classList.remove('show');
   resetCrows();
   for (const p of pickups) scene.remove(p.mesh);
@@ -5033,6 +5036,7 @@ function killZombie(z, kx, kz, headPop) {
   if (z.isBoss) onBossDefeated(z);
   game.kills++;
   hud.kills.textContent = game.kills;
+  if (game.cleanup) updateQuotaHud();
   if (game.cleanup && game.kills >= game.clearTarget) completeCleanup();
   play3d(z.pos.x, z.pos.z, () => SFX.splat());
   rumble(70, 0.4, 0.3);
@@ -5586,7 +5590,7 @@ function stepFrame(dt) {
     }
     updateCrates(dt);
     updatePickups(dt);
-    updateBossFx();
+    updateBossFx(dt);
     updateFloodlights(dt);
     updateCrows(dt);
     updateFountain(dt);
@@ -6451,6 +6455,16 @@ function bossPhase() { return bossState.spawned || bossState.spawned2 || bossSta
 const bossBarEl = document.getElementById('bossbar');
 const bossHpEl = document.getElementById('bosshp');
 const bossLabelEl = document.getElementById('bosslabel');
+// cleanup-quota tracker (top right): how many of the hunt's zombies still stand before
+// the block is scoured. Appears when the Two Horned One drops his quota, ticks down with
+// every kill, and fades once the last one falls and the next beacon takes over the pointing.
+const quotaEl = document.getElementById('quota');
+const quotaNumEl = quotaEl.querySelector('b');
+function updateQuotaHud() {
+  const on = game.cleanup && game.clearTarget > 0;
+  if (on) quotaNumEl.textContent = Math.max(game.clearTarget - game.kills, 0) + '/' + (game.quotaN || game.clearTarget);
+  quotaEl.classList.toggle('show', on);
+}
 // The Crimson One is always a clear step up from the Two Horned One — taken off his number
 // rather than parked beside it, so tuning one can never quietly leave the second boss the
 // softer of the two. Each cleared block then wakes tougher versions of both.
@@ -6498,7 +6512,7 @@ function spawnBoss() {
   );
   beam.position.set(bx, groundHeight(bx, bz) + 64, bz);
   scene.add(beam);
-  bossState.beam = beam;
+  bossState.beam = beam; bossState.beamFade = false; // fresh pillar, full strength
   bossBarEl.classList.remove('show');         // the bar appears once it aggros
   toast('ALL COUSINS FOUND . . SOMETHING STIRS BY THE BANK .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
@@ -6533,7 +6547,7 @@ function spawnBoss2() {
   );
   beam.position.set(bx, groundHeight(bx, bz) + 64, bz);
   scene.add(beam);
-  bossState.beam = beam;
+  bossState.beam = beam; bossState.beamFade = false; // fresh pillar, full strength
   bossBarEl.classList.remove('show');
   toast('BLOCK SCOURED . . BUT THE GRAVES SHIFT BY THE OLD CHURCH .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
@@ -6570,7 +6584,7 @@ function spawnBoss3() {
   );
   beam.position.set(bx, groundHeight(bx, bz) + 64, bz);
   scene.add(beam);
-  bossState.beam = beam;
+  bossState.beam = beam; bossState.beamFade = false; // fresh pillar, full strength
   bossBarEl.classList.remove('show');
   toast('THE CHURCH IS QUIET . . SOMETHING STIRS UNDER THE LOT LIGHTS .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
@@ -6578,6 +6592,9 @@ function spawnBoss3() {
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;
   z.state = 'chase';
+  // the beacon's pointing is done the moment he aggros — his chevron tracks him from
+  // here, so the pillar drains away instead of hanging over the fight
+  bossState.beamFade = true;
   dressBossBar(z);
   bossBarEl.classList.add('show');
   toast(z.isBoss3 ? 'THE INFECTED ONE DISTURBS THE LOT .ᐟ' : z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS .ᐟ', true);
@@ -6712,6 +6729,8 @@ function onBossDefeated(z) {
   // at 299 kills the target is 400, never a one-kill cheese to 300
   game.cleanup = true;
   game.clearTarget = Math.ceil((game.kills + 1 + 100) / 100) * 100;
+  game.quotaN = game.clearTarget - game.kills; // the size of the hunt, for the X/N readout
+  updateQuotaHud();
   toast(`BOSS DOWN .ᐟ REACH ${game.clearTarget} KILLS TO SECURE THE BLOCK .ᐟ`, true);
   for (let k = 0; k < 40; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xb03cff, 0x6fd8ff][k % 3], 1, 6, 1.2);
   rumble(600, 1, 1);
@@ -6721,6 +6740,7 @@ function onBossDefeated(z) {
 // only plays once HE falls (see onBossDefeated).
 function completeCleanup() {
   game.cleanup = false;
+  updateQuotaHud(); // the readout fades out: the hunt is done, the next beacon points the way
   if (!bossState.spawned2 && !bossState.defeated2) { spawnBoss2(); return; }
   game.celebrateT = 5.5;
   recordPrestige();
@@ -6749,8 +6769,17 @@ function updateCelebration(dt) {
     setTimeout(() => fadeEl.classList.remove('show'), 300);
   }
 }
-function updateBossFx() {
-  if (bossState.beam) bossState.beam.material.opacity = 0.16 + Math.sin(performance.now() * 0.004) * 0.08;
+function updateBossFx(dt) {
+  if (bossState.beam) {
+    if (bossState.beamFade) {
+      // aggro'd: ~1.5s drain from the pulse's brightest, then the pillar is gone
+      const m = bossState.beam.material;
+      m.opacity -= dt * 0.16;
+      if (m.opacity <= 0) { scene.remove(bossState.beam); bossState.beam = null; bossState.beamFade = false; }
+    } else {
+      bossState.beam.material.opacity = 0.16 + Math.sin(performance.now() * 0.004) * 0.08;
+    }
+  }
   const z = bossState.boss;
   if (z && z.state !== 'dormant') bossHpEl.style.width = clamp(z.hp / z.maxHp, 0, 1) * 100 + '%';
 }
@@ -7861,7 +7890,8 @@ function netHostTick(dt) {
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
-    b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3) }); // which one is up: clients dress the bar in his colours
+    b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), // which one is up: clients dress the bar in his colours
+    ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0 }); // cleanup quota, so every screen runs the REMAIN readout
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
   const R = v => Math.round(v * 20) / 20;
@@ -7956,6 +7986,7 @@ function netClientData(m, conn, peer, code) {
     applySwapKit(m.kit); // the other half's kit, relayed through the host
   } else if (m.t === 'secured') {
     game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
+    updateQuotaHud();
     recordPrestige();                 // multiplayer clears count toward your badges too
     toast('BLOCK SECURED .ᐟ', true);
   }
@@ -7993,6 +8024,9 @@ function netApplySnapshot(m) {
   if (m.w && m.w !== wx.to) { wx.from = game.weather; wx.to = m.w; wx.u = 0; }
   bossBarEl.classList.toggle('show', m.bb >= 0);
   if (m.bb >= 0) { dressBossBar({ isBoss2: !!m.b2, isBoss3: !!m.b3 }); bossHpEl.style.width = m.bb * 100 + '%'; }
+  // mirror the host's cleanup quota so the REMAIN readout ticks on every screen
+  game.cleanup = (m.ct || 0) > 0; game.clearTarget = m.ct || 0; game.quotaN = m.cq || 0;
+  updateQuotaHud();
   const seenA = new Set();
   for (const a of m.ac) {
     if (a.p === net.playerNum) continue;          // that's me
