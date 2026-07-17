@@ -277,7 +277,10 @@
      the blur while one cousin melts into the next (the name tag blurs in sympathy) */
   #splashBlob, #splashTag { transition:filter .4s; }
   #splash.morph #splashBlob, #splash.morph #splashTag { filter:blur(16px); }
-  #splashTag { position:absolute; left:50%; top:15%; transform:translateX(-50%); text-align:center;
+  /* top is written per-frame by splashTick: the chevron tip is pinned just over the
+     blob's projected head, so the gap reads the same at every window size (a fixed
+     top:15% drifted with resolution — tight on squat panes, floaty on tall ones) */
+  #splashTag { position:absolute; left:50%; top:15%; transform:translate(-50%,-100%); text-align:center;
     line-height:1; pointer-events:none;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   /* letter-spacing pads the RIGHT of every glyph, the last one included — that phantom
