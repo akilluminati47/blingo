@@ -8284,18 +8284,19 @@ function faceRounded(x, y, w, h, r) {
   fx.lineTo(x, y + tl); fx.arcTo(x, y, x + tl, y, tl);
   fx.closePath();
 }
-function faceIcon(color) {
+function faceIcon(color, lookLeft) {
   const fx = faceFx;
   fx.clearRect(0, 0, 64, 64);
   fx.fillStyle = '#' + color.toString(16).padStart(6, '0');
   faceRounded(8, 6, 48, 52, [24, 24, 20, 20]); fx.fill();        // rounded blob head
   fx.fillStyle = 'rgba(0,0,0,.14)';
   faceRounded(8, 42, 48, 16, [0, 0, 20, 20]); fx.fill();          // soft chin shading
+  const gaze = lookLeft ? -1.5 : 1.5;                             // Blondie glances left; the rest look right
   for (const ex of [24, 40]) {                                    // two googly eyes
     fx.fillStyle = '#fff';
     fx.beginPath(); fx.ellipse(ex, 27, 7, 8, 0, 0, TAU); fx.fill();
     fx.fillStyle = '#222';
-    fx.beginPath(); fx.arc(ex + 1.5, 29, 3.2, 0, TAU); fx.fill();
+    fx.beginPath(); fx.arc(ex + gaze, 29, 3.2, 0, TAU); fx.fill();
   }
   return faceCv.toDataURL('image/png');
 }
@@ -8308,7 +8309,7 @@ function faceIcon(color) {
     card.className = 'card' + (c.id === selectedCousin ? ' sel' : '');
     const hex = '#' + c.color.toString(16).padStart(6, '0');
     card.innerHTML = `
-      <img class="blobface" src="${faceIcon(c.color)}" alt="">
+      <img class="blobface" src="${faceIcon(c.color, c.id === 'blondie')}" alt="">
       <b>${c.name}</b>
       <i>${c.perk}</i>
       <p>${c.lore}</p>`;
@@ -9058,7 +9059,7 @@ tabTitle = (function livingTab() {
   let ci = 0, li = 0, lock = null, timer = null;
   function tick() {
     const c = COUSINS[ci];
-    if (li === 0) { link.href = faceIcon(c.color); tabCousin = ci; } // this cousin's turn begins
+    if (li === 0) { link.href = faceIcon(c.color, c.id === 'blondie'); tabCousin = ci; } // this cousin's turn begins
     li++;
     if (li >= c.name.length) {
       document.title = c.name + ' .ᐟ';              // finished: name + flourish
