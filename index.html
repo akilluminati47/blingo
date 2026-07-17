@@ -270,14 +270,18 @@
   #splashTag { position:absolute; left:50%; top:15%; transform:translateX(-50%); text-align:center;
     line-height:1; pointer-events:none;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
+  /* letter-spacing pads the RIGHT of every glyph, the last one included — that phantom
+     trailing gap widens the box and drags the centred glyphs left of the chevron under
+     them. Padding the same amount onto the left pre-pays it, and the name sits true. */
   #splashTag b { display:block; font-size:min(11vw,62px); font-weight:700; letter-spacing:7px;
-    text-shadow:0 3px 16px rgba(0,0,0,.85); }
+    padding-left:7px; text-shadow:0 3px 16px rgba(0,0,0,.85); }
   /* the boss chevron, XXL: the same ▼ and idle bounce it wears in game, sized for a marquee */
   #splashTag i { display:block; font-style:normal; font-size:min(8vw,46px); margin-top:10px;
     filter:drop-shadow(0 4px 7px rgba(0,0,0,.85)); animation:bossTagBounce 1.1s ease-in-out infinite; }
   #splashHint { position:absolute; left:50%; bottom:9%; transform:translateX(-50%); color:#fff;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
-    font-size:15px; letter-spacing:3px; white-space:nowrap; pointer-events:none;
+    font-size:15px; letter-spacing:3px; padding-left:3px; /* same trailing-gap pre-pay as the name */
+    white-space:nowrap; pointer-events:none;
     text-shadow:0 2px 8px #000; animation:splashPulse 1.6s ease-in-out infinite; }
   @keyframes splashPulse { 0%, 100% { opacity:.8; } 50% { opacity:.28; } }
 
