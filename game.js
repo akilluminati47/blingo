@@ -739,6 +739,7 @@ const THEMES = {
   blondie: { wave: 'triangle', tempo: 0.30, seq: [7, 9, 11, 12, 11, 9, 7, 4], bass: [-5, -8] },
 };
 let themeTimer = null, themeStep = 0;
+let openingThemeUntil = 0; // while the opening medley holds the floor, solo snippets wait
 function startTheme(id) {
   stopTheme();
   if (!actx) return;
@@ -765,7 +766,9 @@ function startTheme(id) {
 }
 function stopTheme() { if (themeTimer) { clearTimeout(themeTimer); themeTimer = null; } }
 function previewTheme(id) {
-  if (!actx) return;
+  // the opening medley has the floor until it resolves: picking cousins stays silent
+  // (the pickup click still answers), and the snippets come back the moment it lands
+  if (!actx || performance.now() < openingThemeUntil) return;
   const t = THEMES[id] || THEMES.blingo;
   for (let i = 0; i < 4; i++) setTimeout(() => tone(NF(t.seq[i]), 0.16, 0.16, t.wave, undefined, musicGain), i * 120);
 }
@@ -796,6 +799,8 @@ function playSwapTheme() {
 function playOpeningTheme() {
   if (!actx || !notches.music) return;
   const tempo = 0.21, per = 4;
+  // claim the floor until the closing chord has rung out — previewTheme defers to this
+  openingThemeUntil = performance.now() + COUSINS.length * per * tempo * 1000 + 120 + 1400;
   COUSINS.forEach((c, ci) => {
     const t = THEMES[c.id] || THEMES.blingo;
     for (let i = 0; i < per; i++) {
@@ -1556,22 +1561,32 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   const g = new THREE.Group();
   const truck = !!opts.truck;
   const c = [0x7a3030, 0x30507a, 0x6a6a30, 0x555555, 0x8a6a2a, 0x3a6a5a][(rng() * 6) | 0];
-  const bodyW = truck ? 2.0 : 1.8, bodyLen = truck ? 5.4 : 4, bodyH = truck ? 0.62 : 0.55;
+  // ride height up 25% across the fleet (body, cab, glass and tires all scaled together)
+  const bodyW = truck ? 2.0 : 1.8, bodyLen = truck ? 5.4 : 4, bodyH = truck ? 0.78 : 0.69;
   const bodyTop = bodyH + bodyH / 2;
   const body = box(bodyW, bodyH, bodyLen, c);
   body.position.y = bodyTop - bodyH / 2;
   g.add(body);
   // cab sits back on a car, forward over the front axle on a truck (leaving the bed behind)
-  const cabZ = truck ? 0.95 : -0.2, cabLen = truck ? 1.55 : 1.7, cabH = truck ? 0.62 : 0.5;
+  const cabZ = truck ? 0.95 : -0.2, cabLen = truck ? 1.55 : 1.7, cabH = truck ? 0.78 : 0.63;
   const cabY = bodyTop + cabH / 2;
   const cab = box(bodyW - 0.3, cabH, cabLen, c);
   cab.position.set(0, cabY, cabZ);
   g.add(cab);
   if (truck) {
-    // open cargo bed behind the cab: low walls on three sides, floor is the body top
-    for (const [px, sw, sd] of [[0, bodyW, 0.14], [-(bodyW / 2 - 0.07), 0.14, 2.5], [bodyW / 2 - 0.07, 0.14, 2.5]]) {
-      const wall = box(sw, 0.42, sd, c);
-      wall.position.set(px, bodyTop + 0.21, px === 0 ? -bodyLen / 2 + 0.1 : -1.2);
+    // open cargo bed behind the cab: floor is the body top, the tailgate across the back,
+    // and side walls that run the FULL bed — tucked a hand into the cab's rear wall and
+    // over the tailgate's ends, so the tub reads as one welded piece instead of three
+    // floating planks with daylight at both joins
+    const cabRear = cabZ - cabLen / 2;
+    const gateZ = -bodyLen / 2 + 0.1;
+    const sideLen = (cabRear + 0.1) - (gateZ - 0.07);
+    const sideZ = ((cabRear + 0.1) + (gateZ - 0.07)) / 2;
+    for (const [px, sw, sd, pz] of [[0, bodyW, 0.14, gateZ],
+                                    [-(bodyW / 2 - 0.07), 0.14, sideLen, sideZ],
+                                    [bodyW / 2 - 0.07, 0.14, sideLen, sideZ]]) {
+      const wall = box(sw, 0.53, sd, c);
+      wall.position.set(px, bodyTop + 0.265, pz);
       g.add(wall);
     }
   }
@@ -1581,13 +1596,13 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   const winGlass = () => darkGlassMat;
   const EPS = 0.01;
   const cabHalfW = (bodyW - 0.3) / 2;
-  const windshield = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, truck ? 0.42 : 0.34), winGlass());
+  const windshield = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, truck ? 0.53 : 0.43), winGlass());
   windshield.position.set(0, cabY, cabZ + cabLen / 2 + EPS);
   g.add(windshield);
-  const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, 0.32), winGlass());
+  const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, 0.4), winGlass());
   rearWin.position.set(0, cabY, cabZ - cabLen / 2 - EPS); rearWin.rotation.y = Math.PI; g.add(rearWin);
   for (const sx of [-1, 1]) {
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(cabLen - 0.2, 0.3), winGlass());
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(cabLen - 0.2, 0.38), winGlass());
     side.position.set(sx * (cabHalfW + EPS), cabY, cabZ); side.rotation.y = sx * Math.PI / 2; g.add(side);
   }
   // lamp details: warm headlights up front, red tails at the back
@@ -1598,9 +1613,9 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
     const tl = box(0.24, 0.14, 0.05, 0xff6a6a, { emissive: 0xff2626, emissiveIntensity: 0.85 });
     tl.position.set(sx * (bodyW / 2 - 0.3), lampY, rearZ); g.add(tl);
   }
-  const wr = truck ? 0.45 : 0.3, wA = truck ? 1.75 : 1.3, wX = truck ? 0.92 : 0.85;
+  const wr = truck ? 0.56 : 0.38, wA = truck ? 1.75 : 1.3, wX = truck ? 0.92 : 0.85;
   for (const [wx, wz] of [[-wX, wA], [wX, wA], [-wX, -wA], [wX, -wA]]) {
-    const wheel = cyl(wr, wr, truck ? 0.28 : 0.22, 0x14161a);
+    const wheel = cyl(wr, wr, truck ? 0.35 : 0.28, 0x14161a);
     wheel.rotation.z = Math.PI / 2;
     wheel.position.set(wx, wr, wz);
     g.add(wheel);
@@ -1610,14 +1625,14 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   g.rotation.y = yaw;
   if (opts.flipped) {
     g.rotation.z = Math.PI + (rng() - 0.5) * 0.3;
-    g.position.y = y0 + (truck ? 1.6 : 1.35);
+    g.position.y = y0 + (truck ? 2.0 : 1.7); // roof-rest height rode the +25% up too
   }
   group.add(g);
   // tight oriented boxes: low body + narrower cabin. bullets skim past the hood
   // instead of hitting an invisible wall, and you can hop trunk -> roof.
   const hw = bodyW / 2 - 0.05, hl = bodyLen / 2 + 0.02;
   if (opts.flipped) {
-    colliders.push(aabb(x, z, hw + 0.07, hl, truck ? 1.7 : 1.45, y0, yaw));
+    colliders.push(aabb(x, z, hw + 0.07, hl, truck ? 2.1 : 1.8, y0, yaw));
   } else {
     colliders.push(aabb(x, z, hw, hl, bodyTop, y0, yaw));
     colliders.push(aabb(x + cabZ * Math.sin(yaw), z + cabZ * Math.cos(yaw), bodyW / 2 - 0.17, cabLen / 2 + 0.06, cabY + cabH / 2, y0, yaw));
@@ -2143,13 +2158,18 @@ function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
   townGroup.add(plate);
 }
 
-function parkingLot(x, z, w, d, rows, rng) {
+// gateN: leave the first gateN stall lines of the FIRST row unpainted (and keep cars out
+// of the slots they'd frame). The big lot's SW corner is where the angled driveway throat
+// comes in — lines painted straight across it read as stalls blocking the entrance, so
+// that corner stays bare tarmac a driver could actually pull through.
+function parkingLot(x, z, w, d, rows, rng, gateN = 0) {
   townGroup.add(terrainPlane(w, d, 8, 8, x, z, lotMat, 0.05));
   const lineMat = mat(0xd8d8d0);
   for (let r = 0; r < rows; r++) {
     const rz = z - d / 2 + (r + 0.5) * (d / rows);
     const nLines = Math.floor(w / 3.2) - 1;
-    for (let i = 0; i < nLines; i++) {
+    const skip = r === 0 ? gateN : 0; // row 0 is the south row, the one the throat opens onto
+    for (let i = skip; i < nLines; i++) {
       const lx = x - w / 2 + 2.4 + i * 3.2;
       const line = new THREE.Mesh(BOX, lineMat);
       line.scale.set(0.14, 0.02, 2.6);
@@ -2158,7 +2178,7 @@ function parkingLot(x, z, w, d, rows, rng) {
     }
     // abandoned cars sit properly inside the painted stalls, nose-in or backed-in — and in
     // a big lot (deep enough rows) some are pickup trucks nosed straight into the space
-    for (let i = 0; i < nLines - 1; i++) {
+    for (let i = skip; i < nLines - 1; i++) {
       if (rng() < 0.3) {
         const sx = x - w / 2 + 2.4 + i * 3.2 + 1.6;
         makeCar(rng, sx, rz, townGroup, townColliders, {
@@ -2630,7 +2650,7 @@ function buildTown() {
     shopBuilding(px + w / 2, 58, w, 9, 4.6, -1, name, rng);
     px += w + 1.5;
   }
-  parkingLot(42, 36, 58, 26, 3, rng);   // large parking
+  parkingLot(42, 36, 58, 26, 3, rng, 3); // large parking; 3 SW stalls yield to the driveway throat
   // floodlight masts on the big lot's four corners, each cocked in at the middle of it, so
   // after dusk (and under rain) the whole lot is lit rather than the odd pool of lamplight
   for (const [fx, fzz] of [[LOT.x - LOT.hw + 1.6, LOT.z - LOT.hd + 1.6], [LOT.x + LOT.hw - 1.6, LOT.z - LOT.hd + 1.6],
