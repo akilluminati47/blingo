@@ -345,6 +345,16 @@
   /* fades gently in and out under the respawn button while a client waits on the host */
   #waitmsg { margin-top:10px; font-size:14px; color:var(--hero); animation:waitPulse 1.8s ease-in-out infinite; }
   #waitmsg.hidden { display:none; }
+  /* lobby game over: the pause menu's fused button pair, death-screen edition. The host's
+     HOST RETRY is live; a client's copy waits greyed on Player 1 (same read as the pause
+     screen's waithost RESUME); QUIT TO MENU always works. */
+  #deathbtns { display:flex; margin-top:14px; border:2px solid var(--hero); border-radius:14px; overflow:hidden; width:min(430px, 84vw); }
+  #deathbtns.hidden, #respawnbtn.hidden { display:none; }
+  #deathbtns button { flex:1; pointer-events:auto; cursor:pointer; background:rgba(255,255,255,.05); border:none; color:#eee;
+    font-size:15px; font-weight:700; letter-spacing:2px; padding:14px 0; }
+  #deathbtns button:first-child { border-right:2px solid var(--hero); }
+  #deathbtns button:hover, #deathbtns button.focus { background:var(--hero); color:#10131a; }
+  #deathbtns button.waithost { opacity:.45; pointer-events:none; }
   @keyframes waitPulse { 0%, 100% { opacity:.15; } 50% { opacity:.95; } }
   /* the death fade sits over the world AND the HUD (z10-13) but under the screens (z30),
      so the black it lays down becomes the backdrop the death screen arrives on */
@@ -460,6 +470,10 @@
     #controls { top:calc(56px + env(safe-area-inset-top)); max-width:64vw; } /* below the topbar, not beside it */
     #bossbar { top:calc(104px + env(safe-area-inset-top)); }
     #healthwrap { width:170px; }
+    /* other players' bars must never outgrow the hero's own (170x16 here) — cap them a
+       step under it; the plain NPC rows keep their thin 150x9 default untouched */
+    .sqrow.pc .sqwrap { width:150px; height:12px; border-radius:6px; }
+    .sqrow.pc .sqname { font-size:11px; }
     #ammo { font-size:28px; }
     #ewring { width:250px; height:250px; }
     #pausepanel { padding:14px 14px 0; }
@@ -604,6 +618,10 @@
   <p class="lore" id="deathlore">The cousins will avenge you, blob-kind remembers. .</p>
   <div id="deathstats"></div>
   <button class="bigbtn" id="respawnbtn">RESPAWN</button>
+  <div id="deathbtns" class="hidden">
+    <button id="retrybtn">HOST RETRY . .</button>
+    <button id="dquitbtn">QUIT TO MENU</button>
+  </div>
   <p id="waitmsg" class="hidden">. . waiting for Player 1 .ᐟ</p>
 </div>
 

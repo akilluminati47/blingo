@@ -199,34 +199,11 @@ const glowTex = canvasTex(64, 64, ctx => {
   g.addColorStop(1, 'rgba(255,220,120,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
 });
-// the gore-horde underglow: a WHITE radial so a per-material tint reads true (red for the
-// player whose own Extra Gore is maxed, grey for a client only mirroring the host's horde).
-// One shared additive material for every zombie's foot-pool, driven globally each frame —
-// opacity 0 is the whole feature switched off, so a fresh spawn needs no per-body bookkeeping.
-const zGlowTex = canvasTex(64, 64, ctx => {
-  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
-});
-const zGlowMat = new THREE.SpriteMaterial({ map: zGlowTex, transparent: true, opacity: 0,
-  depthWrite: false, blending: THREE.AdditiveBlending, color: 0xff3b2e });
-function addZombieGlow(blob) {
-  const s = new THREE.Sprite(zGlowMat);   // shares the one material: colour + opacity are global
-  s.position.set(0, 0.16, 0);
-  s.scale.setScalar(2.0);
-  blob.root.add(s);
-}
 // Extra Gore at full is the "gore horde": locally it's the slider maxed; a client also
-// inherits it from the host, since the host's world is the one doing the spawning.
+// inherits it from the host, since the host's world is the one doing the spawning. It lights
+// the settings notches (see updateGoreHordeUI) and swells the spawner — the in-world zombies
+// themselves stay unlit, the glow is a menu-only tell.
 function goreHordeLocal() { return notches.extraGore >= 5; }
-function updateGoreGlow() {
-  const localMax = goreHordeLocal();
-  const on = localMax || (net.role === 'client' && net.hostGoreHorde);
-  zGlowMat.opacity = on ? 0.9 : 0;
-  // a client seeing only the host's forced horde gets a grey glow; your own maxed gore burns red
-  zGlowMat.color.setHex(on && !localMax ? 0x9aa0aa : 0xff3b2e);
-}
 // ---------- shop + civic signage ----------
 // The town's signs are the blob font in caps, same face the blobs' own menus wear, on a
 // clean plate: one hairline rule inset off the edge instead of the old heavy frame, and the
@@ -3797,7 +3774,6 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const color = green ? 0x39b83a : red ? 0xd43a3a : purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
   const blob = buildBlob({ color, zombie: true, scale, droopy, brain, blind, wounded });
   blob.root.position.set(x, groundHeight(x, z), z);
-  addZombieGlow(blob); // the gore-horde underglow (off until Extra Gore is maxed)
   if (horns) {
     for (const s of [-1, 1]) {
       const horn = cyl(0.015, 0.12, 0.42, 0x2a1a3a, 6);
@@ -4521,10 +4497,11 @@ function startRun() {
   if (input.device === 'kbm') grabPointer();
 }
 document.getElementById('playbtn').addEventListener('click', () => { netLeave(); startRun(); });
-document.getElementById('respawnbtn').addEventListener('click', () => {
-  // in a lobby, respawning is Player 1's call alone. A client's click just lights the
-  // waiting line under the button; the host's click restarts the run for everyone, with
-  // the lobby held open (no netLeave — the connections ARE the lobby).
+// shared by the solo RESPAWN button and the lobby game-over's HOST RETRY: in a lobby,
+// respawning is Player 1's call alone. A client's click just lights the waiting line
+// under the button; the host's click restarts the run for everyone, with the lobby
+// held open (no netLeave — the connections ARE the lobby).
+function respawnRun() {
   if (net.role === 'client') { document.getElementById('waitmsg').classList.remove('hidden'); return; }
   if (net.role === 'host' && net.conns.length) {
     // remember who was riding each connection (their number and cousin), restart the run,
@@ -4551,6 +4528,12 @@ document.getElementById('respawnbtn').addEventListener('click', () => {
     return;
   }
   netLeave(); startRun();
+}
+document.getElementById('respawnbtn').addEventListener('click', respawnRun);
+document.getElementById('retrybtn').addEventListener('click', respawnRun); // clients never fire this: their copy is pointer-events:none
+document.getElementById('dquitbtn').addEventListener('click', () => {
+  document.getElementById('deathscreen').classList.add('hidden');
+  quitToMenu();
 });
 document.getElementById('mpbtn').addEventListener('click', () => { initAudio(); showLobbies(); });
 document.getElementById('hostbtn').addEventListener('click', () => hostLobby(codeEl.value));
@@ -4610,6 +4593,12 @@ function finishDeath() {
   document.getElementById('deathstats').innerHTML = chips.map(([ic, val, lab]) =>
     `<div class="dchip">${DEATH_ICONS[ic]}<div><b>${val}</b><span>${lab}</span></div></div>`).join('');
   document.getElementById('deathtitle').textContent = deathFx.gameOver && net.role ? 'GAME OVER' : 'YOU GOT EATEN';
+  // a lobby that still has players online swaps the solo RESPAWN for the pause menu's
+  // fused pair: HOST RETRY (live for the host, greyed-waiting for a client) + QUIT TO MENU
+  const lobbyOver = deathFx.gameOver && !!net.role && (net.role === 'client' || net.conns.length > 0);
+  document.getElementById('respawnbtn').classList.toggle('hidden', lobbyOver);
+  document.getElementById('deathbtns').classList.toggle('hidden', !lobbyOver);
+  if (lobbyOver) document.getElementById('retrybtn').classList.toggle('waithost', net.role === 'client');
   document.getElementById('waitmsg').classList.add('hidden');
   document.getElementById('deathscreen').classList.remove('hidden');
 }
@@ -4621,17 +4610,25 @@ function bloodSplat() { bloodEl.style.opacity = clamp(0.5 + settings.extraGore *
 
 // ---------- pause menu + settings ----------
 const pauseScreen = document.getElementById('pausescreen');
+// multiplayer readout on the pause badge: the lobby code + how many slots are filled.
+// Split out of pauseGame so joins and leaves refresh it LIVE while the menu is open —
+// the host counts player-ridden cousins, a client counts the player ghosts it renders.
+function updatePauseLobby() {
+  const pl = document.getElementById('pauselobby');
+  if (net.role && net.lobbyCode) {
+    const n = net.role === 'client'
+      ? 1 + [...net.actors.values()].filter(g => g.p).length
+      : 1 + companions.filter(c => c.netP).length;
+    const html = `LOBBY ${net.lobbyCode.toUpperCase()} <span class="plslots">${n}/${NET_SLOTS}</span>`;
+    if (pl.innerHTML !== html) pl.innerHTML = html;
+    pl.classList.remove('hidden');
+  } else pl.classList.add('hidden');
+}
 function pauseGame() {
   if (game.state !== 'playing') return;
   game.state = 'paused';
   syncSettingsUI();
-  // multiplayer readout: the lobby code everyone can reference + how many slots are filled
-  const pl = document.getElementById('pauselobby');
-  if (net.role && net.lobbyCode) {
-    const n = 1 + companions.filter(c => c.netP).length;
-    pl.innerHTML = `LOBBY ${net.lobbyCode.toUpperCase()} <span class="plslots">${n}/${NET_SLOTS}</span>`;
-    pl.classList.remove('hidden');
-  } else pl.classList.add('hidden');
+  updatePauseLobby();
   pauseScreen.classList.remove('hidden');
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
@@ -5058,11 +5055,18 @@ function startDropKick() {
   player.comboN = 0;                       // the kick is not a punch — it breaks the chain
   player.swingT = 0; player.meleeChopT = 0;
   player.lastShotT = game.time;
-  // lock the line of the dive along the aim and kill any remaining climb, so it reads as
-  // a committed fall rather than a float
-  getAimDir(_aimDir);
-  const l = Math.hypot(_aimDir.x, _aimDir.z) || 1;
-  player.dkX = _aimDir.x / l; player.dkZ = _aimDir.z / l;
+  // lock the line of the dive and kill any remaining climb, so it reads as a committed
+  // fall rather than a float. First person dives down the sights; third person dives
+  // where the BODY is pointing — the blob you watch is the thing that kicks, not the
+  // crosshair floating over its shoulder.
+  if (player.fpv) {
+    getAimDir(_aimDir);
+    const l = Math.hypot(_aimDir.x, _aimDir.z) || 1;
+    player.dkX = _aimDir.x / l; player.dkZ = _aimDir.z / l;
+  } else {
+    const yw = playerBlob.root.rotation.y;
+    player.dkX = Math.sin(yw); player.dkZ = Math.cos(yw);
+  }
   if (player.vy > 0) player.vy *= 0.35;
   SFX.dropKick(player.dropKickHard);
   // the commit, not the impact: a short snap weighted to the high-frequency motor.
@@ -5102,8 +5106,12 @@ const _mDir = new THREE.Vector3();
 // EVERY zombie a swing would land on right now: a melee arc is a sweep, not a poke, so
 // one swing connects with the whole crowd inside reach and cone at once
 function meleeTargets(w) {
-  getAimDir(_mDir);
-  const yaw = Math.atan2(_mDir.x, _mDir.z);
+  // grounded (and first-person) swings sweep along the crosshair; an airborne swing in
+  // third person sweeps where the BODY faces — a jump attack goes where the blob goes,
+  // matching the drop kick's body-committed dive
+  let yaw;
+  if (!player.grounded && !player.fpv) yaw = playerBlob.root.rotation.y;
+  else { getAimDir(_mDir); yaw = Math.atan2(_mDir.x, _mDir.z); }
   const out = [];
   for (const z of zombies) {
     if (z.state === 'dying') continue;
@@ -5324,6 +5332,25 @@ function fireWeapon() {
   scareCrows(player.pos.x, player.pos.z, 16);
   scareCrows(_to.x, _to.z, 9);
   if (anyHit) { hitmarkT = 0.18; SFX.hit(); }
+  // every round is visible lobby-wide: the endpoint rides a tiny message and the far side
+  // draws the same tracer from this player's muzzle (netRemotePew). Host shots broadcast
+  // as Player 1; a client's go up to the host, who draws them and relays to the rest.
+  if (net.role) {
+    const pm = { t: 'pew', x: Math.round(_to.x * 10) / 10, y: Math.round(_to.y * 10) / 10, z: Math.round(_to.z * 10) / 10 };
+    if (net.role === 'host') netBroadcast({ ...pm, p: 1 });
+    else try { net.conns[0].send(pm); } catch (e) {}
+  }
+}
+// draw another player's round: a tracer from their muzzle to where it ended, the bang
+// audible in 3d — the far half of fireWeapon's own tracer + shot sound
+function netRemotePew(blob, gunMeshR, weapon, ex, ey, ez) {
+  if (!blob) return;
+  const from = new THREE.Vector3();
+  if (gunMeshR && gunMeshR.userData.muzzle) gunMeshR.userData.muzzle.getWorldPosition(from);
+  else { blob.root.getWorldPosition(from); from.y += 1.1; }
+  spawnTracer(from, new THREE.Vector3(ex, ey, ez));
+  if (weapon && !weapon.melee && Math.hypot(from.x - player.pos.x, from.z - player.pos.z) < 30)
+    play3d(from.x, from.z, () => SFX.shoot(weapon));
 }
 // death bookkeeping: kills counter, gore burst, optional head-pop, loot drop
 function killZombie(z, kx, kz, headPop) {
@@ -5930,7 +5957,6 @@ function stepFrame(dt) {
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
   }
-  updateGoreGlow();     // one shared material tints + lights every zombie's foot-pool at once
   updateCamera(dt);
   updateHousePeek(dt); // after the camera: the sightline test needs its settled position
   updatePlayerTags(dt);
@@ -6022,6 +6048,9 @@ function updatePlayer(dt) {
     if (hop) { player.hopT = 0.5; player.slideT = 0; }
     player.grounded = false;
     player.squash = -0.25;
+    // an armed-melee jump reads like a swing: the weapon snaps up into the same 1s
+    // over-the-shoulder hold a swing leaves behind, then drifts back down after landing
+    if (player.weapon.melee && player.weapon.id !== 'fists') player.meleeHoldT = 1.0;
     SFX.jump();
     rumble(sprinting ? 70 : 40, sprinting ? 0.35 : 0.15, sprinting ? 0.5 : 0.3);
   }
@@ -6211,7 +6240,11 @@ function updatePlayer(dt) {
 
   const recentShot = game.time - player.lastShotT < 2.2 && !w.melee;
   let targetYaw;
-  if (recentShot || wantShoot || player.aiming) {
+  // an airborne third-person melee press never yanks the body toward the camera: the
+  // jump attack committed along the body's own facing (see meleeTargets / startDropKick),
+  // so the blob holds its line instead of twisting mid-air to face the crosshair
+  const bodyCommitted = w.melee && !player.grounded && !player.fpv;
+  if ((recentShot || wantShoot || player.aiming) && !bodyCommitted) {
     getAimDir(_aimDir);
     targetYaw = Math.atan2(_aimDir.x, _aimDir.z);
   }
@@ -6283,7 +6316,9 @@ function updatePlayer(dt) {
     // but its sound effect. Whichever arm is mid-swing keeps its arc; the rest tuck.
     const swingArm = player.swingT > 0 ? (w.id === 'fists' ? player.meleeArm : b.gunArm) : -1;
     if (swingArm !== b.offArm) b.arms[b.offArm].rotation.x = -2.4;
-    if (w.melee && swingArm !== b.gunArm) b.arms[b.gunArm].rotation.x = -2.4;
+    // the post-swing (and now post-jump) hold outranks the tuck: a raised weapon stays
+    // raised through the air instead of snapping into the generic airborne pose
+    if (w.melee && swingArm !== b.gunArm && !(player.meleeHoldT > 0)) b.arms[b.gunArm].rotation.x = -2.4;
     b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3;
   }
   if (player.dropKick) {
@@ -8432,6 +8467,7 @@ function wireHostConn(conn) {
         zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0, // the host's spawn dials + gore-horde flag
         hp: game.state === 'paused' ? 1 : 0 });               // joined a held lobby: wait with it
       rebuildSquadBars();
+      updatePauseLobby();   // a paused host sees the count tick up the moment they join
     } else if (m.t === 'p') {
       const c = cousinByConn(conn);
       if (c) {
@@ -8447,6 +8483,15 @@ function wireHostConn(conn) {
     } else if (m.t === 'shot') {
       const z = zombies.find(zz => zz.nid === m.id);
       if (z) damageZombie(z, m.d, m.kx, m.kz, 2, { weapon: WEAPONS[m.wid], dist: m.ds, isHead: m.hd });
+    } else if (m.t === 'pew') {
+      // a client fired: draw their round here, let it ring in the host's world (blind
+      // zombies home on it like any gunshot), and relay it to everyone else's screen
+      const c = cousinByConn(conn);
+      if (c) {
+        netRemotePew(c.blob, c.gunMesh, c.weapon, m.x, m.y, m.z);
+        game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
+        for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'pew', p: c.netP, x: m.x, y: m.y, z: m.z }); } catch (e) {} }
+      }
     } else if (m.t === 'emote') {
       const c = cousinByConn(conn);
       if (c) {
@@ -8480,6 +8525,7 @@ function netFreeCousin(conn, gone) {
   c.hp = Math.max(c.hp, c.maxHp * 0.5);
   if (gone) toast(`PLAYER ${num} LEFT — ${c.data.name.toUpperCase()} REJOINS THE SQUAD`);
   rebuildSquadBars();
+  updatePauseLobby();   // and tick back down the moment they leave, pause menu open or not
 }
 // 10Hz world snapshot to every client
 function netHostTick(dt) {
@@ -8588,6 +8634,11 @@ function netClientData(m, conn, peer, code) {
     // Player 1 respawned the lobby: drop the death screen and step back into the fresh run
     deathFx.on = false; deathFadeEl.style.opacity = 0;
     startRun();
+  } else if (m.t === 'pew') {
+    // another player's round (the host's own, or a relayed client's): trace it from
+    // their ghost's muzzle so the whole lobby sees who is shooting at what
+    const g = net.actors.get('p' + m.p);
+    if (g) netRemotePew(g.blob, g.gunMesh, WEAPONS[g.wp], m.x, m.y, m.z);
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
@@ -8696,6 +8747,7 @@ function netApplySnapshot(m) {
     g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn;
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
+  updatePauseLobby();   // the slots readout follows the actor list live, even mid-pause
   const seenZ = new Set();
   for (const zs of m.zb) {
     seenZ.add(zs.i);
@@ -8706,7 +8758,6 @@ function netApplySnapshot(m) {
       const color = zs.bo ? (zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
         : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
       const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b2 ? CRIMSON_HANDS : 0 });
-      addZombieGlow(blob); // the gore-horde underglow rides the ghosts too, so clients see the glowing horde
       if (zs.ho || zs.bo) for (const s of [-1, 1]) {
         const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
         horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
