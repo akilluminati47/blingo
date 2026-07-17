@@ -360,8 +360,9 @@
   /* picked cousin reads as a clean white highlight, not a yellow glow */
   .card.sel { border-color:#fff; background:rgba(255,255,255,.14); box-shadow:0 0 18px rgba(255,255,255,.3); }
   .card.sel.focus { border-color:#fff; box-shadow:0 0 18px rgba(255,255,255,.3), 0 0 22px -2px var(--hero); }
-  .card .blobface { width:44px; height:40px; border-radius:48% 48% 42% 42%; margin:0 auto 6px; display:flex; justify-content:center; gap:7px; padding-top:11px; }
-  .card .beye { width:9px; height:9px; background:#fff; border-radius:50%; box-shadow: inset -1px 2px 0 2px #222; }
+  /* the same face the tab favicon and the lobby roster draw, so a cousin looks like
+     themselves everywhere they appear (painted into an img by faceIcon) */
+  .card .blobface { display:block; width:46px; height:46px; margin:0 auto 4px; image-rendering:auto; }
   .card b { display:block; font-size:14px; letter-spacing:.5px; }
   /* stat-pill face for the green role line, like the topbar stat labels */
   .card i { display:block; font-size:9px; color:#7bd88f; margin:2px 0 5px; font-style:normal;

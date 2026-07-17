@@ -938,10 +938,10 @@ function buildGunMesh(id) {
   } else if (w.melee && id !== 'fists') {
     buildMeleeMesh(g, id, c);
   }
+  // everything rides forward out of the fist rather than clipping back into it. Guns go
+  // further than melee, whose handles are meant to sit near the knuckles anyway.
+  if (id !== 'fists') g.position.z = w.melee ? -0.1 : -0.22;
   if (!w.melee) {
-    // firearms ride forward out of the fist (they sat clipped inside it), and carry a
-    // muzzle anchor at the barrel tip so flashes + tracers leave the actual geometry
-    g.position.z = -0.14;
     // muzzle anchors track the geometry above: the magnum's rides out with its bigger frame,
     // the AA-12's sits at the tip of its short barrel rather than a pump's long one
     const tip = { pistol: [0.05, -0.3], magnum: [0.05 * MAGNUM_BIG, -0.3 * MAGNUM_BIG], smg: [0.04, -0.42],
@@ -7786,6 +7786,36 @@ function updateFx(dt) {
   if (bloodSplatT > 0) { bloodSplatT -= dt; if (bloodSplatT <= 0) bloodEl.style.opacity = 0; }
 }
 
+// ---------- blob face icon (64px canvas): one drawing of a cousin's head, wherever a
+// cousin needs a face — the tab favicon, the lobby roster portraits, the picker cards ----------
+const faceCv = document.createElement('canvas'); faceCv.width = 64; faceCv.height = 64;
+const faceFx = faceCv.getContext('2d');
+function faceRounded(x, y, w, h, r) {
+  const fx = faceFx, [tl, tr, br, bl] = r;
+  fx.beginPath();
+  fx.moveTo(x + tl, y);
+  fx.lineTo(x + w - tr, y); fx.arcTo(x + w, y, x + w, y + tr, tr);
+  fx.lineTo(x + w, y + h - br); fx.arcTo(x + w, y + h, x + w - br, y + h, br);
+  fx.lineTo(x + bl, y + h); fx.arcTo(x, y + h, x, y + h - bl, bl);
+  fx.lineTo(x, y + tl); fx.arcTo(x, y, x + tl, y, tl);
+  fx.closePath();
+}
+function faceIcon(color) {
+  const fx = faceFx;
+  fx.clearRect(0, 0, 64, 64);
+  fx.fillStyle = '#' + color.toString(16).padStart(6, '0');
+  faceRounded(8, 6, 48, 52, [24, 24, 20, 20]); fx.fill();        // rounded blob head
+  fx.fillStyle = 'rgba(0,0,0,.14)';
+  faceRounded(8, 42, 48, 16, [0, 0, 20, 20]); fx.fill();          // soft chin shading
+  for (const ex of [24, 40]) {                                    // two googly eyes
+    fx.fillStyle = '#fff';
+    fx.beginPath(); fx.ellipse(ex, 27, 7, 8, 0, 0, TAU); fx.fill();
+    fx.fillStyle = '#222';
+    fx.beginPath(); fx.arc(ex + 1.5, 29, 3.2, 0, TAU); fx.fill();
+  }
+  return faceCv.toDataURL('image/png');
+}
+
 // ---------- character select ----------
 (function buildCousinCards() {
   const row = document.getElementById('cousincards');
@@ -7794,7 +7824,7 @@ function updateFx(dt) {
     card.className = 'card' + (c.id === selectedCousin ? ' sel' : '');
     const hex = '#' + c.color.toString(16).padStart(6, '0');
     card.innerHTML = `
-      <div class="blobface" style="background:${hex}"><span class="beye"></span><span class="beye"></span></div>
+      <img class="blobface" src="${faceIcon(c.color)}" alt="">
       <b>${c.name}</b>
       <i>${c.perk}</i>
       <p>${c.lore}</p>`;
@@ -8507,35 +8537,6 @@ window.__dbg = {
   recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateCelebration(dt); updateFx(dt); },
 };
-
-// ---------- blob face icon (64px canvas): the favicon + lobby roster portraits ----------
-const faceCv = document.createElement('canvas'); faceCv.width = 64; faceCv.height = 64;
-const faceFx = faceCv.getContext('2d');
-function faceRounded(x, y, w, h, r) {
-  const fx = faceFx, [tl, tr, br, bl] = r;
-  fx.beginPath();
-  fx.moveTo(x + tl, y);
-  fx.lineTo(x + w - tr, y); fx.arcTo(x + w, y, x + w, y + tr, tr);
-  fx.lineTo(x + w, y + h - br); fx.arcTo(x + w, y + h, x + w - br, y + h, br);
-  fx.lineTo(x + bl, y + h); fx.arcTo(x, y + h, x, y + h - bl, bl);
-  fx.lineTo(x, y + tl); fx.arcTo(x, y, x + tl, y, tl);
-  fx.closePath();
-}
-function faceIcon(color) {
-  const fx = faceFx;
-  fx.clearRect(0, 0, 64, 64);
-  fx.fillStyle = '#' + color.toString(16).padStart(6, '0');
-  faceRounded(8, 6, 48, 52, [24, 24, 20, 20]); fx.fill();        // rounded blob head
-  fx.fillStyle = 'rgba(0,0,0,.14)';
-  faceRounded(8, 42, 48, 16, [0, 0, 20, 20]); fx.fill();          // soft chin shading
-  for (const ex of [24, 40]) {                                    // two googly eyes
-    fx.fillStyle = '#fff';
-    fx.beginPath(); fx.ellipse(ex, 27, 7, 8, 0, 0, TAU); fx.fill();
-    fx.fillStyle = '#222';
-    fx.beginPath(); fx.arc(ex + 1.5, 29, 3.2, 0, TAU); fx.fill();
-  }
-  return faceCv.toDataURL('image/png');
-}
 
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------
 let tabCousin = 0; // which cousin the tab is currently spelling — the splash stage mirrors it
