@@ -1466,12 +1466,12 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
       break;
     }
   }
-  // parked car (or, 40% of the time, a pickup truck) pulled up beside the house
+  // parked vehicle pulled up beside the house — 40% a pickup, else sometimes a work van
   if (rng() < 0.45) {
     const side = rng() < 0.5 ? -1 : 1;
-    const truck = rng() < 0.4;
-    const cxr = bx + side * (w / 2 + (truck ? 3.2 : 2.6)), czr = bz + (rng() - 0.5) * d;
-    if (!onRoad(cxr, czr, 1)) makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6, truck });
+    const truck = rng() < 0.4, van = !truck && rng() < 0.3;
+    const cxr = bx + side * (w / 2 + (truck ? 3.2 : van ? 3.0 : 2.6)), czr = bz + (rng() - 0.5) * d;
+    if (!onRoad(cxr, czr, 1)) makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6, truck, van });
   }
   // barrels leaning against the outside walls
   const nBar = (rng() * 3) | 0;
@@ -1560,19 +1560,29 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   const y0 = groundHeight(x, z);
   const g = new THREE.Group();
   const truck = !!opts.truck;
+  const van = !!opts.van && !truck; // a van is its own silhouette; truck wins a double-booking
   const c = [0x7a3030, 0x30507a, 0x6a6a30, 0x555555, 0x8a6a2a, 0x3a6a5a][(rng() * 6) | 0];
   // ride height up 25% across the fleet (body, cab, glass and tires all scaled together)
-  const bodyW = truck ? 2.0 : 1.8, bodyLen = truck ? 5.4 : 4, bodyH = truck ? 0.78 : 0.69;
+  const bodyW = truck ? 2.0 : van ? 1.9 : 1.8, bodyLen = truck ? 5.4 : van ? 4.8 : 4, bodyH = truck ? 0.78 : van ? 0.72 : 0.69;
   const bodyTop = bodyH + bodyH / 2;
   const body = box(bodyW, bodyH, bodyLen, c);
   body.position.y = bodyTop - bodyH / 2;
   g.add(body);
-  // cab sits back on a car, forward over the front axle on a truck (leaving the bed behind)
-  const cabZ = truck ? 0.95 : -0.2, cabLen = truck ? 1.55 : 1.7, cabH = truck ? 0.78 : 0.63;
+  // cab sits back on a car, forward over the front axle on a truck (leaving the bed
+  // behind). On a van the "cab" IS the cargo shell: one tall box running from a stubby
+  // hood at the front all the way back to the rear doors, nearly the body's full width.
+  const cabZ = truck ? 0.95 : van ? -0.52 : -0.2, cabLen = truck ? 1.55 : van ? 3.72 : 1.7, cabH = truck ? 0.78 : van ? 1.18 : 0.63;
+  const cabW = van ? bodyW - 0.12 : bodyW - 0.3;
   const cabY = bodyTop + cabH / 2;
-  const cab = box(bodyW - 0.3, cabH, cabLen, c);
+  const cab = box(cabW, cabH, cabLen, c);
   cab.position.set(0, cabY, cabZ);
   g.add(cab);
+  if (van) {
+    // barn-door seam down the back panel, under the rear glass — reads as doors, costs a box
+    const seam = box(0.05, cabH * 0.5, 0.04, 0x1c1e24);
+    seam.position.set(0, bodyTop + cabH * 0.27, cabZ - cabLen / 2 - 0.01);
+    g.add(seam);
+  }
   if (truck) {
     // open cargo bed behind the cab: floor is the body top, the tailgate across the back,
     // and side walls that run the FULL bed — tucked a hand into the cab's rear wall and
@@ -1595,25 +1605,35 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   // rather than out at the wider body's edge, where they used to float past the cab in open air
   const winGlass = () => darkGlassMat;
   const EPS = 0.01;
-  const cabHalfW = (bodyW - 0.3) / 2;
-  const windshield = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, truck ? 0.53 : 0.43), winGlass());
-  windshield.position.set(0, cabY, cabZ + cabLen / 2 + EPS);
+  const cabHalfW = cabW / 2;
+  // van glass rides the upper half of the tall shell; the windshield gets van height too
+  const glassY = van ? cabY + 0.14 : cabY;
+  const windshield = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, truck ? 0.53 : van ? 0.6 : 0.43), winGlass());
+  windshield.position.set(0, glassY, cabZ + cabLen / 2 + EPS);
   g.add(windshield);
   const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(bodyW - 0.48, 0.4), winGlass());
-  rearWin.position.set(0, cabY, cabZ - cabLen / 2 - EPS); rearWin.rotation.y = Math.PI; g.add(rearWin);
+  rearWin.position.set(0, glassY, cabZ - cabLen / 2 - EPS); rearWin.rotation.y = Math.PI; g.add(rearWin);
+  // side glass: full cab length on cars and trucks; on a van just the driver's window up
+  // front — the cargo panels behind it stay solid steel
+  const swLen = van ? 0.85 : cabLen - 0.2, swZ = van ? cabZ + cabLen / 2 - 0.7 : cabZ;
   for (const sx of [-1, 1]) {
-    const side = new THREE.Mesh(new THREE.PlaneGeometry(cabLen - 0.2, 0.38), winGlass());
-    side.position.set(sx * (cabHalfW + EPS), cabY, cabZ); side.rotation.y = sx * Math.PI / 2; g.add(side);
+    const side = new THREE.Mesh(new THREE.PlaneGeometry(swLen, 0.38), winGlass());
+    side.position.set(sx * (cabHalfW + EPS), glassY, swZ); side.rotation.y = sx * Math.PI / 2; g.add(side);
   }
-  // lamp details: warm headlights up front, red tails at the back
-  const frontZ = bodyLen / 2 - 0.03, rearZ = -bodyLen / 2 + 0.03, lampY = bodyTop - 0.1;
+  // lamp details: warm headlights up front, red tails behind — mounted PROUD of the
+  // body faces. They used to be centred a hair inside the box, outer face 5mm behind
+  // the panel, so every lamp on every car in the game was invisible. Wrecks roll a
+  // dead bulb per corner: dull plastic, no glow, like something already gave out.
+  const frontZ = bodyLen / 2 + 0.01, rearZ = -bodyLen / 2 - 0.01, lampY = bodyTop - 0.12;
   for (const sx of [-1, 1]) {
-    const hl = box(0.26, 0.15, 0.05, 0xfff6d8, { emissive: 0xffefb0, emissiveIntensity: 0.9 });
-    hl.position.set(sx * (bodyW / 2 - 0.3), lampY, frontZ); g.add(hl);
-    const tl = box(0.24, 0.14, 0.05, 0xff6a6a, { emissive: 0xff2626, emissiveIntensity: 0.85 });
-    tl.position.set(sx * (bodyW / 2 - 0.3), lampY, rearZ); g.add(tl);
+    const hlDead = opts.broken && rng() < 0.35;
+    const hl = box(0.3, 0.17, 0.06, hlDead ? 0x8f8a76 : 0xfff6d8, hlDead ? {} : { emissive: 0xffefb0, emissiveIntensity: 0.9 });
+    hl.position.set(sx * (bodyW / 2 - 0.32), lampY, frontZ); g.add(hl);
+    const tlDead = opts.broken && rng() < 0.35;
+    const tl = box(0.26, 0.15, 0.06, tlDead ? 0x5f2626 : 0xff6a6a, tlDead ? {} : { emissive: 0xff2626, emissiveIntensity: 0.85 });
+    tl.position.set(sx * (bodyW / 2 - 0.32), lampY, rearZ); g.add(tl);
   }
-  const wr = truck ? 0.56 : 0.38, wA = truck ? 1.75 : 1.3, wX = truck ? 0.92 : 0.85;
+  const wr = truck ? 0.56 : 0.38, wA = truck ? 1.75 : van ? 1.6 : 1.3, wX = truck ? 0.92 : van ? 0.88 : 0.85;
   for (const [wx, wz] of [[-wX, wA], [wX, wA], [-wX, -wA], [wX, -wA]]) {
     const wheel = cyl(wr, wr, truck ? 0.35 : 0.28, 0x14161a);
     wheel.rotation.z = Math.PI / 2;
@@ -1625,17 +1645,18 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   g.rotation.y = yaw;
   if (opts.flipped) {
     g.rotation.z = Math.PI + (rng() - 0.5) * 0.3;
-    g.position.y = y0 + (truck ? 2.0 : 1.7); // roof-rest height rode the +25% up too
+    g.position.y = y0 + (truck ? 2.0 : van ? 2.3 : 1.7); // roof-rest height rode the +25% up too
   }
   group.add(g);
   // tight oriented boxes: low body + narrower cabin. bullets skim past the hood
   // instead of hitting an invisible wall, and you can hop trunk -> roof.
   const hw = bodyW / 2 - 0.05, hl = bodyLen / 2 + 0.02;
   if (opts.flipped) {
-    colliders.push(aabb(x, z, hw + 0.07, hl, truck ? 2.1 : 1.8, y0, yaw));
+    colliders.push(aabb(x, z, hw + 0.07, hl, truck ? 2.1 : van ? 2.4 : 1.8, y0, yaw));
   } else {
     colliders.push(aabb(x, z, hw, hl, bodyTop, y0, yaw));
-    colliders.push(aabb(x + cabZ * Math.sin(yaw), z + cabZ * Math.cos(yaw), bodyW / 2 - 0.17, cabLen / 2 + 0.06, cabY + cabH / 2, y0, yaw));
+    // cabin box hugs whatever the cab actually is (a van's shell runs wider and longer)
+    colliders.push(aabb(x + cabZ * Math.sin(yaw), z + cabZ * Math.cos(yaw), cabW / 2 - 0.02, cabLen / 2 + 0.06, cabY + cabH / 2, y0, yaw));
   }
 }
 // traffic pileup: cluster of wrecked cars, all broken windows, some flipped
@@ -1661,6 +1682,7 @@ function makePileup(rng, x, z, along, group, colliders) {
     makeCar(rng, px, pz, group, colliders, {
       broken: true,
       flipped: rng() < 0.3,
+      van: rng() < 0.28, // work vans crashed among the cars, some on their roofs
       rotY: (along === 'z' ? 0 : Math.PI / 2) + (rng() - 0.5) * (rng() < 0.25 ? 2.5 : 0.5),
     });
   }
@@ -2698,7 +2720,7 @@ function buildTown() {
   // parked cars near town buildings
   makeCar(rng, 84, -14, townGroup, townColliders, { broken: true, rotY: 0.3 });
   makeCar(rng, 20, -32.5, townGroup, townColliders, { broken: rng() < 0.5, rotY: Math.PI / 2 });
-  makeCar(rng, 47, 8, townGroup, townColliders, { broken: true, flipped: true });
+  makeCar(rng, 47, 8, townGroup, townColliders, { broken: true, flipped: true, van: true }); // the plaza's roof-down van
 
   // loot crates scattered through town
   const spots = [[10, -9.8], [36, -9.8], [58, -24.4], [88, -9.4], [94, -26], [30, 30], [55, 42], [18, 20], [70, 55], [41, 10]];
