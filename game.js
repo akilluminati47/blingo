@@ -9152,11 +9152,14 @@ function splashTick(dt) {
   splashCam.position.set(0, 1.18 + Math.sin(splash.t * 0.7) * 0.05, 3.9);
   splashCam.lookAt(0, 0.92, 0);
   splashRenderer.render(splashScene, splashCam);
-  // pin the marquee to the blob, not the window: project a point just over the head
-  // and hang the chevron tip there (CSS translates the tag up by its own height).
-  // A fixed top:15% only looked right at one viewport height — this holds the same
-  // gap on every screen, and rides the camera's idle bob for free.
-  _splTagV.set(0, 2.12, 0).project(splashCam);
+  // pin the marquee to the blob's actual crown, not the window: read the head's live world
+  // position (render just ran, so the matrices are current), lift a hair past the scalp for
+  // a neat gap, and hang the chevron tip there (CSS translates the tag up by its own height).
+  // Projecting the real head — not a guessed constant — keeps the chevron on the scalp at
+  // every viewport, and rides the camera's idle bob for free.
+  b.head.getWorldPosition(_splTagV);
+  _splTagV.y += 0.5;   // crown (~+0.4 above the head origin) plus a small gap
+  _splTagV.project(splashCam);
   splashTagEl.style.top = ((-_splTagV.y * 0.5 + 0.5) * H) + 'px';
   // any pad button is "any input" too (the pad polling below is menu-nav, so it's
   // held off until the splash lets go of the frame)
