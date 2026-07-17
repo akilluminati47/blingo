@@ -199,6 +199,34 @@ const glowTex = canvasTex(64, 64, ctx => {
   g.addColorStop(1, 'rgba(255,220,120,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
 });
+// the gore-horde underglow: a WHITE radial so a per-material tint reads true (red for the
+// player whose own Extra Gore is maxed, grey for a client only mirroring the host's horde).
+// One shared additive material for every zombie's foot-pool, driven globally each frame —
+// opacity 0 is the whole feature switched off, so a fresh spawn needs no per-body bookkeeping.
+const zGlowTex = canvasTex(64, 64, ctx => {
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+});
+const zGlowMat = new THREE.SpriteMaterial({ map: zGlowTex, transparent: true, opacity: 0,
+  depthWrite: false, blending: THREE.AdditiveBlending, color: 0xff3b2e });
+function addZombieGlow(blob) {
+  const s = new THREE.Sprite(zGlowMat);   // shares the one material: colour + opacity are global
+  s.position.set(0, 0.16, 0);
+  s.scale.setScalar(2.0);
+  blob.root.add(s);
+}
+// Extra Gore at full is the "gore horde": locally it's the slider maxed; a client also
+// inherits it from the host, since the host's world is the one doing the spawning.
+function goreHordeLocal() { return notches.extraGore >= 5; }
+function updateGoreGlow() {
+  const localMax = goreHordeLocal();
+  const on = localMax || (net.role === 'client' && net.hostGoreHorde);
+  zGlowMat.opacity = on ? 0.9 : 0;
+  // a client seeing only the host's forced horde gets a grey glow; your own maxed gore burns red
+  zGlowMat.color.setHex(on && !localMax ? 0x9aa0aa : 0xff3b2e);
+}
 // ---------- shop + civic signage ----------
 // The town's signs are the blob font in caps, same face the blobs' own menus wear, on a
 // clean plate: one hairline rule inset off the edge instead of the old heavy frame, and the
@@ -3352,6 +3380,15 @@ const COUSINS = [
   { id: 'blondie', name: 'Blondie', color: 0xffd84a, perk: '+50% ammo from loot', melee: 'machete', lore: 'The family hoarder. Her pockets don’t make sense geometrically. If there’s a bullet in a crate, she’ll find three.' },
 ];
 let selectedCousin = 'blingo';
+// the living-tab controller (set up far below): { lockTo(idx), unlock() }. Declared here so
+// the run-start / skin-swap / quit hooks can reach it before its definition runs.
+let tabTitle = null;
+// the multiplayer session (its lobby wiring lives far below). Declared up here because the
+// settings UI is built at load and reads net.role for the gore-horde notch glow, well before
+// the lobby code runs — a later const would still be in its temporal dead zone at that point.
+const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
+  ghosts: new Map(), actors: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '',
+  hostPaused: false, hostGoreHorde: false };
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
 const prestige = { blocks: {}, bestTime: 0, bestHero: '' };
@@ -3550,6 +3587,24 @@ function netSyncCousinBeacon(c) {
 let playerBlob = buildBlob({ color: 0xff8c42 });
 scene.add(playerBlob.root);
 let gunMesh = null;
+// Give the player blob its OWN copies of every material so we can fade the whole avatar out
+// under the sniper scope without touching the shared material cache the rest of the world
+// draws from. The gun sits under gunSocket and is skipped (its models are re-equipped from
+// shared mats constantly) — it's dropped by a plain visibility toggle instead. Rebuilt after
+// applyCousin, which swaps in a fresh blob.
+let playerBodyMats = [];
+function ownPlayerBodyMats() {
+  playerBodyMats = [];
+  (function walk(node) {
+    if (node === playerBlob.gunSocket) return; // never descend the gun
+    if (node.material && node.material !== shadowMat) {
+      if (!node.userData._ownMat) { node.material = node.material.clone(); node.userData._ownMat = true; }
+      playerBodyMats.push(node.material);
+    }
+    for (const c of node.children) walk(c);
+  })(playerBlob.root);
+}
+ownPlayerBodyMats();
 
 const player = {
   pos: new THREE.Vector3(0, 0, 0),
@@ -3661,6 +3716,11 @@ function applyCousin(id) {
   player.jumpMult = id === 'blingo' ? 1.1 : 1; // unlisted perk: the "balanced hero" quietly jumps higher
   if (gunMesh) { gunMesh.removeFromParent(); gunMesh = null; }
   equipWeapon(player.weapon.id === 'fists' ? 'fists' : player.weapon.id);
+  ownPlayerBodyMats(); // the fresh blob needs its own fade-able materials again
+  // mid-run, a skin swap re-locks the tab title to the traded hero (spell it once, then hold);
+  // at the menu the title keeps cycling — startRun does the first lock
+  if (game.state === 'playing' || game.state === 'paused')
+    tabTitle && tabTitle.lockTo(COUSINS.findIndex(c => c.id === id));
 }
 
 function equipWeapon(id) {
@@ -3716,10 +3776,15 @@ const ZOMBIE_COLORS = [0x6fae4e, 0x7fb85a, 0x5f9a44, 0x8fbc6a];
 // opts.mode: 'grave' claws up out of the dirt, 'sleeper' lies on the ground until you're
 // close, 'runner' spawns far out and sprints in, default 'pop' just appears (boss waves).
 // opts.horns: purple boss-wave guard — wears the Two Horned One's horns and shields him while alive.
+// opts.goreHorn: the gore-horde extra — an Infected-style green horned brute, but a FREE walker.
+//   It looks exactly like the Infected One's minions yet never shields a boss (no hornWave),
+//   so it can join the ordinary street horde without breaking the boss-shield rule.
 function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const purple = !!opts.purple;              // boss-swarm variant: purple & 33% faster
   const red = !!opts.red;                    // Crimson One's church swarm: red & quick
-  const green = !!opts.green;                // Infected One's lot swarm: the red brute, 10% bigger
+  const goreHorn = !!opts.goreHorn;          // gore-horde extra: green horned brute, but no boss shield
+  const green = !!opts.green || goreHorn;     // Infected One's lot swarm: the red brute, 10% bigger
+  const horns = !!opts.horns || goreHorn;
   const mode = opts.mode || 'pop';
   const scale = (0.85 + Math.random() * 0.5) * (green ? 1.1 : 1);
   // random rot-variants; brain-showing spawns are the rare weak-spot walkers
@@ -3732,7 +3797,8 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const color = green ? 0x39b83a : red ? 0xd43a3a : purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
   const blob = buildBlob({ color, zombie: true, scale, droopy, brain, blind, wounded });
   blob.root.position.set(x, groundHeight(x, z), z);
-  if (opts.horns) {
+  addZombieGlow(blob); // the gore-horde underglow (off until Extra Gore is maxed)
+  if (horns) {
     for (const s of [-1, 1]) {
       const horn = cyl(0.015, 0.12, 0.42, 0x2a1a3a, 6);
       horn.position.set(0.2 * s, 0.28, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
@@ -3760,8 +3826,8 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
     brainExposed: brain, blind, stepT: Math.random(),
-    bleeding: wounded, dripT: 0, purple, red, green, biteMult: (red || green) ? 1.35 : 1,
-    mode, emergeT: 0, hornWave: !!opts.horns,
+    bleeding: wounded, dripT: 0, purple, red, green, goreHorn, biteMult: (red || green) ? 1.35 : 1,
+    mode, emergeT: 0, hornWave: !!opts.horns, // NOTE: goreHorn deliberately never sets hornWave — it never shields a boss
     farBorn: mode === 'runner', // runners live on a longer leash — they were born out past the fog
 
     wanderT: 0, wanderYaw: Math.random() * TAU, shotIgnoreT: -99,
@@ -4450,6 +4516,8 @@ function startRun() {
   document.body.classList.add('playing');
   resetGame();
   game.state = 'playing';
+  // now that we're in as a cousin, lock the tab title to them: spell it once more, then hold
+  tabTitle && tabTitle.lockTo(COUSINS.findIndex(c => c.id === selectedCousin));
   if (input.device === 'kbm') grabPointer();
 }
 document.getElementById('playbtn').addEventListener('click', () => { netLeave(); startRun(); });
@@ -4593,6 +4661,7 @@ function quitToMenu() {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   stopTheme();
   netLeave();
+  tabTitle && tabTitle.unlock(); // back at the menu: the tab title cycles the family again
   renderPrestige();
 }
 function togglePause() {
@@ -4656,6 +4725,9 @@ function setNotch(key, n, silent) {
   // "extra" means more than full: dialing up Extra Gore quietly fills the Gore bar first
   if (key === 'extraGore' && n > 0 && notches.gore < 5) setNotch('gore', 5, true);
   if (key === 'gore' && n < 5 && notches.extraGore > 0) { notches.extraGore = 0; refreshRow('extraGore'); }
+  // Extra Gore maxed forces the Zombies dial to full too — the horde IS the gore now. (A
+  // client can't set the host-owned Zombies dial; the host's forced 5 rides down to them.)
+  if (key === 'extraGore' && n >= 5 && notches.zombieSpawn < 5 && net.role !== 'client') setNotch('zombieSpawn', 5, true);
   if (n === notches[key]) return;
   notches[key] = n;
   syncDerived();
@@ -4663,11 +4735,12 @@ function setNotch(key, n, silent) {
   saveNotches();
   refreshRow(key);
   if (key === 'gore') refreshRow('extraGore');
+  if (key === 'extraGore' || key === 'zombieSpawn') updateGoreHordeUI();
   if (!silent) notchClickSfx(n);
   // the host turning a spawn dial updates every client's greyed copy live — even from
   // the pause menu, where the periodic snapshot isn't flowing
   if (net.role === 'host' && HOST_NOTCH_KEYS.includes(key))
-    netBroadcast({ t: 'notch', zs: notches.zombieSpawn, ls: notches.lootSpawn });
+    netBroadcast({ t: 'notch', zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 });
 }
 function nudgeNotch(key, dir) { setNotch(key, notches[key] + dir); }
 for (const [key, label] of SETTING_DEFS) {
@@ -4706,7 +4779,24 @@ function refreshRow(key) {
   if (key === 'extraGore') row.classList.toggle('live', extraGoreOn());
   if (key === 'music') row.classList.toggle('live', notches.music >= 5);
 }
-function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); }
+function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); updateGoreHordeUI(); }
+// light the Extra Gore + Zombies pips while the gore horde is on. The owner (single player,
+// or whoever maxed their own slider) gets the hero-coloured throb; a client only mirroring
+// the host's forced horde gets it grey — they see the horde, but it isn't their setting.
+function updateGoreHordeUI() {
+  const localMax = goreHordeLocal();
+  const clientForced = net.role === 'client' && net.hostGoreHorde;
+  const grey = clientForced && !localMax;
+  for (const key of ['extraGore', 'zombieSpawn']) {
+    const row = rowEls[key];
+    if (!row) continue;
+    // the Extra Gore row only glows for its OWN maxed slider; the Zombies row glows whenever
+    // the horde is on (host-forced included, in grey)
+    const rowOn = key === 'extraGore' ? localMax : (localMax || clientForced);
+    row.classList.toggle('gorehorde', rowOn);
+    row.classList.toggle('greygore', rowOn && grey);
+  }
+}
 syncSettingsUI();
 
 // ---------- host-owned spawn settings + host pause (multiplayer) ----------
@@ -4719,7 +4809,7 @@ let ownSpawnNotches = null; // the client's own saved values, restored when they
 function lockSpawnRows(on) {
   for (const k of HOST_NOTCH_KEYS) rowEls[k].classList.toggle('locked', on);
 }
-function applyHostNotches(zs, ls) {
+function applyHostNotches(zs, ls, hg) {
   if (net.role !== 'client') return;
   if (!ownSpawnNotches) ownSpawnNotches = { zombieSpawn: notches.zombieSpawn, lootSpawn: notches.lootSpawn };
   let changed = false;
@@ -4730,9 +4820,12 @@ function applyHostNotches(zs, ls) {
   }
   if (changed) syncDerived();  // no saveNotches: the host's dials are borrowed, not ours
   lockSpawnRows(true);
+  if (hg !== undefined) { net.hostGoreHorde = !!hg; updateGoreHordeUI(); } // the host's gore-horde flag drives our grey glow
 }
 function restoreOwnNotches() {
   lockSpawnRows(false);
+  net.hostGoreHorde = false;
+  updateGoreHordeUI();
   if (!ownSpawnNotches) return;
   notches.zombieSpawn = ownSpawnNotches.zombieSpawn;
   notches.lootSpawn = ownSpawnNotches.lootSpawn;
@@ -5837,6 +5930,7 @@ function stepFrame(dt) {
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
   }
+  updateGoreGlow();     // one shared material tints + lights every zombie's foot-pool at once
   updateCamera(dt);
   updateHousePeek(dt); // after the camera: the sightline test needs its settled position
   updatePlayerTags(dt);
@@ -6081,6 +6175,28 @@ function updatePlayer(dt) {
   player.fpvT = lerp(player.fpvT, player.fpv ? 1 : 0, 1 - Math.exp(-12 * dt));
   // hide our own head only in first person so it doesn't block the view
   b.head.visible = player.fpvT < 0.55;
+  // down the sniper scope the whole avatar melts away so it never crosses the eyepiece —
+  // it fades OUT as the scope comes up (matched to the scope overlay's aimT>0.55 onset) and
+  // snaps back the instant we come off the scope. The gun rides the same fade as a hard
+  // visibility flip (its models are shared-material, so it can't take the opacity fade).
+  {
+    const hide = player.weapon.id === 'sniper' && player.aimT > 0.55 && !player.dead;
+    const prev = player.scopeFadeT || 0;
+    const sf = hide ? Math.min(1, prev + dt * 6) : 0;   // ~0.17s to vanish, instant to return
+    player.scopeFadeT = sf;
+    const fadingNow = sf > 0.001;
+    if (fadingNow || player._scopeFading) {
+      for (const m of playerBodyMats) {
+        if (m.transparent !== fadingNow) { m.transparent = fadingNow; m.needsUpdate = true; }
+        m.opacity = 1 - sf;
+      }
+      if (gunMesh) gunMesh.visible = sf < 0.5;
+      if (b.shadow) b.shadow.visible = sf < 0.5;
+      b.root.visible = sf < 0.999;   // fully gone: skip drawing the body entirely
+      player._scopeFading = fadingNow;
+      if (!fadingNow) { b.root.visible = true; if (gunMesh) gunMesh.visible = true; if (b.shadow) b.shadow.visible = true; }
+    }
+  }
 
   // footsteps on each half of the walk cycle — the pad ticks in time with the stride,
   // so a sprint drums twice as fast and twice as hard as a walk
@@ -6828,8 +6944,13 @@ function updateSpawner(dt) {
   // block is clean again. Wake him and the whole map floods as before, until he falls.
   const vigil = churchyardVigil();
   if (vigil && nearestPlayerDist(CHURCHYARD.x, CHURCHYARD.z) > CHURCHYARD_NEAR) return;
-  const maxZ = Math.round(Math.min(26, 4 + Math.floor(game.time / 22) + Math.floor(game.kills / 7)) * settings.zombieSpawn);
-  const interval = Math.max(0.35, (3.6 - game.time / 80) / settings.zombieSpawn);
+  // Extra Gore maxed swells the whole horde by a fifth — a denser cap and a faster clock —
+  // and salts the street spawns with green horned brutes (the Infected One's minions, but
+  // free walkers). They ride the SAME spawner, so every boss-phase / vigil / cleanup rule
+  // above already governs them.
+  const horde = goreHordeLocal();
+  const maxZ = Math.round(Math.min(26, 4 + Math.floor(game.time / 22) + Math.floor(game.kills / 7)) * settings.zombieSpawn * (horde ? 1.2 : 1));
+  const interval = Math.max(0.35, (3.6 - game.time / 80) / settings.zombieSpawn / (horde ? 1.2 : 1));
   if (game.spawnT <= 0 && zombies.length < maxZ) {
     game.spawnT = interval;
     // the graveyard breathes: near the churchyard, some spawns claw up out of the mounds.
@@ -6862,6 +6983,10 @@ function updateSpawner(dt) {
     const power = 1 + game.time / 240;
     // near spawns claw out of the dirt or wake from the pavement — no popping into view.
     // during cleanup everything actively hunts, so the last stragglers come find you
+    // a fifth of the horde's street spawns come up as green horned brutes while Extra Gore
+    // is maxed — never laid out (they rise from the dirt, they don't sleep), never blind,
+    // now and then already cracked open at the skull like the rest of the dead
+    if (horde && !runner && Math.random() < 0.2) { spawnZombie(x, z, power, { goreHorn: true, mode: 'grave' }); return; }
     const mode = runner ? 'runner'
       : game.cleanup ? 'grave'
       : (!bossPhase() && (onRoad(x, z, 0.5) || Math.random() < 0.35)) ? 'sleeper' : 'grave';
@@ -8165,9 +8290,8 @@ function faceIcon(color) {
 // only people you hand it to can knock. (This replaced four fixed ids that everyone on
 // the internet shared — strangers collided in them and dead peers squatted them.)
 const NET_SLOTS = 6;
-const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
-  ghosts: new Map(), actors: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '',
-  hostPaused: false };
+// net is declared far earlier (near selectedCousin) so the settings UI, which builds at load
+// and reads net.role for the gore-horde glow, can reach it before this block runs.
 const lobbyHintEl = document.getElementById('lobbyhint');
 const lobbyListEl = document.getElementById('lobbylist');
 const codeEl = document.getElementById('lobbycode');
@@ -8305,7 +8429,7 @@ function wireHostConn(conn) {
       net.conns.push(conn);
       conn.send({ t: 'welcome', n: num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
         w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
-        zs: notches.zombieSpawn, ls: notches.lootSpawn,       // the host's spawn dials
+        zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0, // the host's spawn dials + gore-horde flag
         hp: game.state === 'paused' ? 1 : 0 });               // joined a held lobby: wait with it
       rebuildSquadBars();
     } else if (m.t === 'p') {
@@ -8374,15 +8498,15 @@ function netHostTick(dt) {
     if (!z.nid) z.nid = ++net.zid;
     zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
       st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' || z.state === 'corpse' ? 2 : 0),
-      sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, ho: z.hornWave ? 1 : 0,
-      bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0 });
+      sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, gr: z.green ? 1 : 0, gh: z.goreHorn ? 1 : 0,
+      ho: (z.hornWave || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0 });
   }
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
     b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), // which one is up: clients dress the bar in his colours
     ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
-    zs: notches.zombieSpawn, ls: notches.lootSpawn }); // host's spawn dials, mirrored on every client's greyed rows
+    zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 }); // host's spawn dials + gore-horde, mirrored on every client
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
   const R = v => Math.round(v * 20) / 20;
@@ -8434,13 +8558,13 @@ function netClientData(m, conn, peer, code) {
     game.phase = m.ph; wxSet(m.w); applyEnvironment();
     game.time = m.tm; game.kills = m.k; hud.kills.textContent = m.k;
     player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
-    applyHostNotches(m.zs, m.ls);   // the host's spawn dials land on our greyed rows
+    applyHostNotches(m.zs, m.ls, m.hg);   // the host's spawn dials + gore-horde land on our greyed rows
     if (m.hp) { net.hostPaused = true; pauseGame(); } // lobby is held: wait with it
     toast(`JOINED ${code.toUpperCase()} .ᐟ YOU ARE PLAYER ${m.n}`, true);
   } else if (m.t === 's') {
     netApplySnapshot(m);
   } else if (m.t === 'notch') {
-    applyHostNotches(m.zs, m.ls);   // the host turned a spawn dial: our pips follow live
+    applyHostNotches(m.zs, m.ls, m.hg);   // the host turned a spawn dial (or maxed gore): our pips follow live
   } else if (m.t === 'hpause') {
     // the host's pause is the lobby's pause: the settings screen drops over everyone
     // together, and only the host's resume lifts it
@@ -8534,7 +8658,7 @@ function netApplySnapshot(m) {
   // mirror the host's cleanup quota so the REMAIN readout ticks on every screen
   game.cleanup = (m.ct || 0) > 0; game.clearTarget = m.ct || 0; game.quotaN = m.cq || 0;
   updateQuotaHud();
-  applyHostNotches(m.zs, m.ls); // and the host's spawn dials, in case a change slipped past
+  applyHostNotches(m.zs, m.ls, m.hg); // and the host's spawn dials + gore-horde, in case a change slipped past
   const seenA = new Set();
   for (const a of m.ac) {
     if (a.p === net.playerNum) continue;          // that's me
@@ -8580,8 +8704,9 @@ function netApplySnapshot(m) {
       // bosses wear their own livery: without this they fell through to a random
       // zombie colour, so a joiner met a differently-coloured monster than the host
       const color = zs.bo ? (zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
-        : zs.re ? 0xd43a3a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
+        : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
       const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b2 ? CRIMSON_HANDS : 0 });
+      addZombieGlow(blob); // the gore-horde underglow rides the ghosts too, so clients see the glowing horde
       if (zs.ho || zs.bo) for (const s of [-1, 1]) {
         const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
         horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
@@ -8590,7 +8715,8 @@ function netApplySnapshot(m) {
       }
       scene.add(blob.root);
       g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2,
-        state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false, purple: !!zs.pu };
+        state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false,
+        purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh };
       net.ghosts.set(zs.i, g);
       zombies.push(g);              // lives in the same list so shots + crosshair see it
     }
@@ -8857,25 +8983,42 @@ window.__dbg = {
 
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------
 let tabCousin = 0; // which cousin the tab is currently spelling — the splash stage mirrors it
-(function livingTab() {
+// The living tab cycles every cousin's name in the menu. Start a run (or host/join a lobby)
+// as a cousin and it spells THAT hero one last time, then holds the name static with its
+// sideways-! flourish; a mid-run skin swap re-spells the traded hero once and holds the new
+// one; quitting to the menu lets go and resumes the full cycle. lock === null is "cycling".
+tabTitle = (function livingTab() {
   const link = document.createElement('link');
   link.rel = 'icon'; link.type = 'image/png';
   document.head.appendChild(link);
-  let ci = 0, li = 0;
+  let ci = 0, li = 0, lock = null, timer = null;
   function tick() {
     const c = COUSINS[ci];
     if (li === 0) { link.href = faceIcon(c.color); tabCousin = ci; } // this cousin's turn begins
     li++;
     if (li >= c.name.length) {
       document.title = c.name + ' .ᐟ';              // finished: name + flourish
-      ci = (ci + 1) % COUSINS.length; li = 0;       // then move on to the next cousin
-      setTimeout(tick, 900);
+      if (lock !== null && ci === lock) return;     // locked hero fully spelled: hold it, stop ticking
+      ci = lock !== null ? lock : (ci + 1) % COUSINS.length; // a lock that arrived mid-pass is spelled next
+      li = 0;
+      timer = setTimeout(tick, 900);
     } else {
       document.title = c.name.slice(0, li);         // one more letter (every .5s)
-      setTimeout(tick, 500);
+      timer = setTimeout(tick, 500);
     }
   }
   tick();
+  return {
+    lockTo(idx) {                                    // spell this hero once from the top, then hold
+      if (idx == null || idx < 0) return;
+      lock = idx; clearTimeout(timer); ci = idx; li = 0; tick();
+    },
+    unlock() {                                       // let go and resume the full cycle from the next cousin
+      if (lock === null) return;
+      const from = lock; lock = null;
+      clearTimeout(timer); ci = (from + 1) % COUSINS.length; li = 0; tick();
+    },
+  };
 })();
 
 // ---------- opening splash ----------

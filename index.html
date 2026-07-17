@@ -429,6 +429,11 @@
   .pip.on { background:var(--hero); box-shadow:0 0 7px var(--hero); }
   .pip.pop { animation:pipPop .16s ease; }
   @keyframes pipPop { 40% { transform:scaleY(1.65) scaleX(1.15); } }
+  /* Extra Gore maxed lights the whole horde: its own pips and the (forced) Zombies pips
+     burn brighter and throb. A client only mirroring the host's forced horde gets it grey. */
+  .srow.gorehorde .pip.on { box-shadow:0 0 12px 3px var(--hero); animation:goreThrob 1.15s ease-in-out infinite; }
+  .srow.greygore .pip.on { background:#9aa0aa; box-shadow:0 0 12px 3px #9aa0aa; }
+  @keyframes goreThrob { 0%, 100% { filter:brightness(1); } 50% { filter:brightness(1.6); } }
   /* resume / quit fused onto the bottom edge of the badge */
   #pausebtns { display:flex; margin:16px -24px 0; border-top:2px solid var(--hero); }
   #pausebtns button { flex:1; pointer-events:auto; cursor:pointer; background:transparent; border:none; color:#eee;
