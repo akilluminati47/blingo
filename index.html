@@ -181,12 +181,13 @@
   .modebtn { pointer-events:auto; cursor:pointer; background:transparent; border:none; color:var(--hero);
     font-size:16px; font-weight:700; letter-spacing:2px; padding:13px 30px; transition:color .12s; }
   .modebtn:first-child { border-right:2px solid var(--hero); }
-  .modebtn:hover { background:var(--hero); color:#10131a; }
+  .modebtn:hover, .modebtn.focus { background:var(--hero); color:#10131a; }
   #lobbylist { display:flex; flex-direction:column; gap:10px; margin:14px 0 4px; min-height:40px; }
   .lobbyrow { --bc:#8a8f9a; display:flex; align-items:center; gap:12px; border:2px solid var(--bc); border-radius:14px;
     padding:10px 20px; color:var(--bc); font-weight:700; letter-spacing:1.5px; pointer-events:auto; cursor:pointer;
     background:rgba(0,0,0,.35); box-shadow:0 0 12px -3px var(--bc); }
-  .lobbyrow:hover { background:rgba(255,255,255,.08); }
+  .lobbyrow:hover, .lobbyrow.focus { background:rgba(255,255,255,.08); }
+  .lobbyrow.focus { border-color:#fff; }
   .lobbyrow .slots { opacity:.75; font-size:12px; }
   .lobbyrow img { width:26px; height:26px; image-rendering:auto; }
   /* lobby code: your cousin's name is prefilled, and leaving it that way is what makes
@@ -196,13 +197,13 @@
     border:2px solid var(--hero); border-radius:14px; padding:12px 18px; text-align:center;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     font-size:17px; font-weight:700; letter-spacing:3px; text-transform:uppercase; outline:none; }
-  #lobbycode:focus { background:rgba(255,255,255,.08); box-shadow:0 0 14px -2px var(--hero); }
+  #lobbycode:focus, #lobbycode.focus { background:rgba(255,255,255,.08); box-shadow:0 0 14px -2px var(--hero); }
   #coderow .modebtn { flex:0 0 auto; border:2px solid var(--hero); border-radius:14px; padding:12px 20px; font-size:14px; }
   #codehint { margin-top:8px; font-size:12px; opacity:.7; letter-spacing:.5px; }
   #hcpanel { display:flex; margin-top:18px; border:2px solid var(--hero); border-radius:14px; overflow:hidden; background:rgba(10,12,18,.6); }
   #hcpanel button { pointer-events:auto; cursor:pointer; background:transparent; border:none; color:#eee;
     font-size:16px; font-weight:700; letter-spacing:2px; padding:13px 42px; }
-  #hcpanel button:hover { background:var(--hero); color:#10131a; }
+  #hcpanel button:hover, #hcpanel button.focus { background:var(--hero); color:#10131a; }
   /* player-controlled cousins get hero-sized health bars with their player tag */
   .sqrow.pc .sqwrap { width:210px; height:15px; border-radius:8px; }
   .sqrow.pc .sqname { font-size:12px; font-weight:700; }
@@ -317,6 +318,7 @@
   .bigbtn { margin-top:16px; pointer-events:auto; cursor:pointer; background:linear-gradient(180deg,#39c96f,#1e9e4f); color:#fff; border:none;
     font-size:20px; font-weight:700; letter-spacing:3px; padding:13px 46px; border-radius:14px; box-shadow:0 6px 0 #14733a, 0 10px 24px rgba(0,0,0,.5); }
   .bigbtn:active { transform:translateY(4px); box-shadow:0 2px 0 #14733a; }
+  .bigbtn.focus { filter:brightness(1.15); box-shadow:0 6px 0 #14733a, 0 0 20px rgba(57,201,111,.7); }
   #deathscreen h1 { color:#ff5b5b; text-shadow:0 0 24px rgba(255,60,60,.4); }
   /* the whole death screen speaks blob: lore, stats and the waiting line all wear the face */
   #deathlore, #waitmsg, #deathstats { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
@@ -344,8 +346,11 @@
     pointer-events:auto; cursor:pointer; transition:transform .12s, border-color .12s, background .12s;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   .card:hover { transform:translateY(-3px); background:rgba(255,255,255,.1); }
+  /* the pad's focus ring rides the hero colour so it never reads as the white "picked" state */
+  .card.focus { transform:translateY(-3px); background:rgba(255,255,255,.12); border-color:var(--hero); box-shadow:0 0 18px -2px var(--hero); }
   /* picked cousin reads as a clean white highlight, not a yellow glow */
   .card.sel { border-color:#fff; background:rgba(255,255,255,.14); box-shadow:0 0 18px rgba(255,255,255,.3); }
+  .card.sel.focus { border-color:#fff; box-shadow:0 0 18px rgba(255,255,255,.3), 0 0 22px -2px var(--hero); }
   .card .blobface { width:44px; height:40px; border-radius:48% 48% 42% 42%; margin:0 auto 6px; display:flex; justify-content:center; gap:7px; padding-top:11px; }
   .card .beye { width:9px; height:9px; background:#fff; border-radius:50%; box-shadow: inset -1px 2px 0 2px #222; }
   .card b { display:block; font-size:14px; letter-spacing:.5px; }

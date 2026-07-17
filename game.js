@@ -1466,10 +1466,10 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList) {
       break;
     }
   }
-  // parked vehicle pulled up beside the house — 40% a pickup, else sometimes a work van
+  // parked vehicle pulled up beside the house — 40% a pickup, rarely a work van
   if (rng() < 0.45) {
     const side = rng() < 0.5 ? -1 : 1;
-    const truck = rng() < 0.4, van = !truck && rng() < 0.3;
+    const truck = rng() < 0.4, van = !truck && rng() < 0.12;
     const cxr = bx + side * (w / 2 + (truck ? 3.2 : van ? 3.0 : 2.6)), czr = bz + (rng() - 0.5) * d;
     if (!onRoad(cxr, czr, 1)) makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6, truck, van });
   }
@@ -1561,7 +1561,10 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   const g = new THREE.Group();
   const truck = !!opts.truck;
   const van = !!opts.van && !truck; // a van is its own silhouette; truck wins a double-booking
-  const c = [0x7a3030, 0x30507a, 0x6a6a30, 0x555555, 0x8a6a2a, 0x3a6a5a][(rng() * 6) | 0];
+  // the palette roll always spends its rng so world gen stays deterministic either way;
+  // a roof-down van overrides it to matte black — the wrecked look the flip earns
+  const roll = [0x7a3030, 0x30507a, 0x6a6a30, 0x555555, 0x8a6a2a, 0x3a6a5a][(rng() * 6) | 0];
+  const c = opts.flipped && van ? 0x16171b : roll;
   // ride height up 25% across the fleet (body, cab, glass and tires all scaled together)
   const bodyW = truck ? 2.0 : van ? 1.9 : 1.8, bodyLen = truck ? 5.4 : van ? 4.8 : 4, bodyH = truck ? 0.78 : van ? 0.72 : 0.69;
   const bodyTop = bodyH + bodyH / 2;
@@ -1671,20 +1674,42 @@ function spotClearOf(x, z, r, colliders) {
 }
 function makePileup(rng, x, z, along, group, colliders) {
   const n = 3 + ((rng() * 3) | 0);
+  // exact footprints of this pileup's wrecks so far. spotClearOf reads a spun neighbour's
+  // stored LOCAL half-extents as if they were world-aligned, which undersells its corners —
+  // two wrecks could pass the check and still kiss body panels. Within the pileup (where
+  // spacing is tight and every yaw is dice) each new wreck runs a real oriented-box test.
+  const placed = [];
+  const clips = (a, b) => {
+    const dx = b.x - a.x, dz = b.z - a.z;
+    for (const r of [a, b]) {
+      const o = r === a ? b : a;
+      const c = Math.cos(r.yaw), s = Math.sin(r.yaw), oc = Math.cos(o.yaw), os = Math.sin(o.yaw);
+      for (const [ax, az, half] of [[c, -s, r.hw], [s, c, r.hl]]) {   // r's two face axes
+        const reach = Math.abs(oc * ax - os * az) * o.hw + Math.abs(os * ax + oc * az) * o.hl;
+        if (Math.abs(dx * ax + dz * az) > half + reach) return false; // a separating axis
+      }
+    }
+    return true;
+  };
   for (let i = 0; i < n; i++) {
     const off = (i - n / 2) * 4.6 + (rng() - 0.5) * 1.6;
     const jitter = (rng() - 0.5) * 5.6; // scattered across both lanes now that roads are two-way
     const px = along === 'z' ? x + jitter : x + off;
     const pz = along === 'z' ? z + off : z + jitter;
-    // a wreck half-buried in a shop wall reads as a bug, not a crash — skip that one and
-    // let the pileup be a car lighter. A car is ~4.4 long, so 2.4 covers it however it spun.
-    if (!spotClearOf(px, pz, 2.4, colliders)) continue;
-    makeCar(rng, px, pz, group, colliders, {
-      broken: true,
-      flipped: rng() < 0.3,
-      van: rng() < 0.28, // work vans crashed among the cars, some on their roofs
-      rotY: (along === 'z' ? 0 : Math.PI / 2) + (rng() - 0.5) * (rng() < 0.25 ? 2.5 : 0.5),
-    });
+    // trucks crashed among the cars now; vans are the rare sighting of the fleet
+    const truck = rng() < 0.18, van = !truck && rng() < 0.08;
+    const rotY = (along === 'z' ? 0 : Math.PI / 2) + (rng() - 0.5) * (rng() < 0.25 ? 2.5 : 0.5);
+    // half footprint by silhouette (car 1.8x4, van 1.9x4.8, truck 2.0x5.4) plus a hand of daylight
+    const hw = (truck ? 2.0 : van ? 1.9 : 1.8) / 2 + 0.15, hl = (truck ? 5.4 : van ? 4.8 : 4) / 2 + 0.15;
+    // a wreck half-buried in a shop wall (or another wreck) reads as a bug, not a crash —
+    // skip that one and let the pileup be a car lighter. The clearance grows with the
+    // silhouette: a car is ~4.4 long (2.4 covers it however it spun), a van 4.8 (2.7),
+    // a truck 5.4 (3.0) — so the longer bodies can never lie into a neighbour.
+    if (!spotClearOf(px, pz, truck ? 3.0 : van ? 2.7 : 2.4, colliders)) continue;
+    const spot = { x: px, z: pz, yaw: rotY, hw, hl };
+    if (placed.some(p => clips(p, spot))) continue;
+    makeCar(rng, px, pz, group, colliders, { broken: true, flipped: rng() < 0.3, truck, van, rotY });
+    placed.push(spot);
   }
 }
 
@@ -4629,6 +4654,36 @@ function menuActivate(el) {
   if (!el) return;
   if (el === codeEl) openVKeyboard();   // the code field pops the on-screen keyboard
   else el.click();
+  // picking a cousin card drops the focus straight onto the mode selector below, so the
+  // flow reads the way it plays: pick your cousin, then A again starts the game
+  if (el.classList.contains('card')) {
+    const i = menuFocusables().indexOf(document.getElementById('playbtn'));
+    if (i >= 0) setMenuFocus(i);
+  }
+}
+// 2D menu nav: from the focused element's centre, step to the nearest focusable in the
+// pressed direction by SCREEN geometry, not DOM order — so the cousin-card grid, the mode
+// buttons and the on-screen keyboard all move exactly the way the d-pad/stick points.
+// Nothing that way? Wrap to the farthest element on the opposite side, so a held
+// direction cycles instead of hitting a wall.
+function spatialNext(els, from, dx, dy) {
+  const cen = el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+  const f = cen(els[from]);
+  let best = -1, bestScore = Infinity, wrap = -1, wrapScore = Infinity;
+  els.forEach((el, i) => {
+    if (i === from) return;
+    const p = cen(el);
+    const fwd = (p.x - f.x) * dx + (p.y - f.y) * dy;                          // progress the way we pressed
+    const side = Math.abs((p.x - f.x) * dy) + Math.abs((p.y - f.y) * dx);     // drift off that axis
+    if (fwd > 0.5) {
+      const score = fwd + side * 2;
+      if (score < bestScore) { bestScore = score; best = i; }
+    } else {
+      const score = fwd + side * 2;   // most negative fwd with least drift = farthest behind
+      if (score < wrapScore) { wrapScore = score; wrap = i; }
+    }
+  });
+  return best >= 0 ? best : wrap;
 }
 function padMenuScreen(gp, dt, justPressed, ax, ay) {
   menuNavT -= dt;
@@ -4640,13 +4695,16 @@ function padMenuScreen(gp, dt, justPressed, ax, ay) {
   if (menuFocus >= els.length) menuFocus = 0;
   if (!els[menuFocus] || !els[menuFocus].classList.contains('focus')) setMenuFocus(menuFocus);
   const vk = !document.getElementById('vkeyboard').classList.contains('hidden');
-  const cols = vk ? 10 : 1;   // keyboard rows are ~10 wide, so up/down steps a whole row
-  let d = 0;
-  if (justPressed(14) || (ready && sx < 0)) d = -1;
-  else if (justPressed(15) || (ready && sx > 0)) d = 1;
-  else if (justPressed(12) || (ready && sy < 0)) d = -cols;
-  else if (justPressed(13) || (ready && sy > 0)) d = cols;
-  if (d) { setMenuFocus(menuFocus + d); menuNavT = 0.16; }
+  let dx = 0, dy = 0;
+  if (justPressed(14) || (ready && sx < 0)) dx = -1;
+  else if (justPressed(15) || (ready && sx > 0)) dx = 1;
+  else if (justPressed(12) || (ready && sy < 0)) dy = -1;
+  else if (justPressed(13) || (ready && sy > 0)) dy = 1;
+  if (dx || dy) {
+    const to = spatialNext(els, menuFocus, dx, dy);
+    if (to >= 0) setMenuFocus(to);
+    menuNavT = 0.16;
+  }
   if (justPressed(0)) menuActivate(menuFocusables()[menuFocus]);
   if (justPressed(1)) {   // B: close the keyboard, or hit the screen's back/menu button
     if (vk) closeVKeyboard();
@@ -8437,7 +8495,15 @@ function splashTick(dt) {
   // held off until the splash lets go of the frame)
   const gps = navigator.getGamepads ? navigator.getGamepads() : [];
   for (const gp of gps) {
-    if (gp && gp.buttons.some(bt => bt && bt.pressed)) { splashDismiss(); break; }
+    if (gp && gp.buttons.some(bt => bt && bt.pressed)) {
+      // a pad seen here is connected, whatever events did or didn't fire — adopt it so
+      // the menu polling actually runs once the splash lets go
+      if (gpIndex === null) gpIndex = gp.index;
+      // remember the held buttons: the press that wakes the splash must not ALSO count
+      // as a fresh A on the character select underneath
+      gp.buttons.forEach((bt, i) => { gpPrev[i] = !!(bt && bt.pressed); });
+      splashDismiss(); break;
+    }
   }
 }
 // paint the marquee's opening colours (Blingo) before the first frame
