@@ -3529,13 +3529,22 @@ function hurtCompanion(c, dmg) {
     toast(`${c.data.name.toUpperCase()} IS DOWN .ᐟ`);
   }
 }
-// haul a downed cousin back onto their feet at half health
-function reviveCousin(c) {
+// haul a downed cousin back onto their feet — a rescue is a TRANSFUSION now: half the
+// rescuer's current health goes with the pull, and the revived stand up with exactly
+// what it cost (the rescuer never drops below 1). `free` skips the cost for revives
+// that aren't anyone's arms doing the hauling (a joining player taking over a body).
+function reviveCousin(c, free) {
+  let pay = 0;
+  if (!free) {
+    pay = Math.max(1, Math.round(player.hp / 2));
+    player.hp = Math.max(1, player.hp - pay);
+  }
   // a player-controlled cousin lives on someone else's screen: they own the state, so
-  // ask them to stand up rather than pretending we did it here
+  // ask them to stand up rather than pretending we did it here — the transfusion rides along
   if (c.netP) {
-    if (c.netConn) { try { c.netConn.send({ t: 'revive' }); } catch (e) {} }
+    if (c.netConn) { try { c.netConn.send({ t: 'revive', hp: pay }); } catch (e) {} }
     c.downed = false;
+    c.hp = pay ? Math.min(pay, c.maxHp) : c.hp; // mirror it host-side until their next pose lands
     netSyncCousinBeacon(c);
     SFX.recruit();
     rumble(140, 0.5, 0.6);
@@ -3543,7 +3552,7 @@ function reviveCousin(c) {
     return;
   }
   c.downed = false;
-  c.hp = c.maxHp * 0.5;
+  c.hp = free ? c.maxHp * 0.5 : Math.min(pay, c.maxHp);
   c.blob.wob.rotation.x = 0;
   c.blob.wob.scale.set(1, 1, 1);
   if (c.beacon) { scene.remove(c.beacon); c.beacon = null; }
@@ -3642,10 +3651,14 @@ function goDown() {
   const me = COUSINS.find(c => c.id === selectedCousin);
   toast(`P${net.playerNum || 1} ${(me ? me.name : '').toUpperCase()} DOWN .ᐟ`, true);
 }
-function playerGetUp(byRescue) {
+// hp: what the rescuer's transfusion delivered — a rescued player stands up with exactly
+// the health it cost to haul them, not a flat half; the self-recovery keeps its 35%
+function playerGetUp(byRescue, hp) {
   if (!player.downed) return;
   player.downed = false; player.downT = 0;
-  player.hp = Math.max(1, Math.round(player.maxHp * (byRescue ? 0.5 : 0.35)));
+  player.hp = byRescue
+    ? clamp(Math.round(hp || player.maxHp * 0.5), 1, player.maxHp)
+    : Math.max(1, Math.round(player.maxHp * 0.35));
   if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
   playerBlob.wob.rotation.x = 0;
   SFX.recruit();
@@ -4529,7 +4542,6 @@ function respawnRun() {
   }
   netLeave(); startRun();
 }
-document.getElementById('respawnbtn').addEventListener('click', respawnRun);
 document.getElementById('retrybtn').addEventListener('click', respawnRun); // clients never fire this: their copy is pointer-events:none
 document.getElementById('dquitbtn').addEventListener('click', () => {
   document.getElementById('deathscreen').classList.add('hidden');
@@ -4593,12 +4605,13 @@ function finishDeath() {
   document.getElementById('deathstats').innerHTML = chips.map(([ic, val, lab]) =>
     `<div class="dchip">${DEATH_ICONS[ic]}<div><b>${val}</b><span>${lab}</span></div></div>`).join('');
   document.getElementById('deathtitle').textContent = deathFx.gameOver && net.role ? 'GAME OVER' : 'YOU GOT EATEN';
-  // a lobby that still has players online swaps the solo RESPAWN for the pause menu's
-  // fused pair: HOST RETRY (live for the host, greyed-waiting for a client) + QUIT TO MENU
+  // one fused pair on every death now, dressed in the fallen hero's colour: solo deaths
+  // read RETRY .ᐟ, a lobby game over reads HOST RETRY . . (live for the host, greyed-
+  // waiting for a client — the same read as the pause screen's waithost RESUME)
   const lobbyOver = deathFx.gameOver && !!net.role && (net.role === 'client' || net.conns.length > 0);
-  document.getElementById('respawnbtn').classList.toggle('hidden', lobbyOver);
-  document.getElementById('deathbtns').classList.toggle('hidden', !lobbyOver);
-  if (lobbyOver) document.getElementById('retrybtn').classList.toggle('waithost', net.role === 'client');
+  const rb = document.getElementById('retrybtn');
+  rb.textContent = lobbyOver ? 'HOST RETRY . .' : 'RETRY .ᐟ';
+  rb.classList.toggle('waithost', lobbyOver && net.role === 'client');
   document.getElementById('waitmsg').classList.add('hidden');
   document.getElementById('deathscreen').classList.remove('hidden');
 }
@@ -8458,7 +8471,7 @@ function wireHostConn(conn) {
       if (!c) { try { conn.send({ t: 'full' }); } catch (e) {} return; }
       const num = 1 + lobbyPlayers().length;
       c.netP = num; c.netConn = conn; c.netPose = null;
-      if (c.downed) reviveCousin(c);
+      if (c.downed) reviveCousin(c, true);   // a join-takeover is free: nobody's arms did the hauling
       if (!c.recruited) recruitCousin(c);   // the JOINED .ᐟ toast, beacon off — found like any cousin
       else toast(`PLAYER ${num} TOOK OVER ${c.data.name.toUpperCase()} .ᐟ`);
       net.conns.push(conn);
@@ -8621,7 +8634,7 @@ function netClientData(m, conn, peer, code) {
   } else if (m.t === 'hurt') {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
   } else if (m.t === 'revive') {
-    playerGetUp(true);       // someone walked over and hauled us up
+    playerGetUp(true, m.hp); // someone hauled us up — we inherit what the pull cost them
   } else if (m.t === 'gameover') {
     // the whole lobby is down: ride the same slow-motion fade the host is riding
     if (!player.dead && !deathFx.on) {

@@ -327,10 +327,6 @@
   #startscreen > p { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     font-size:17px; line-height:1.6; max-width:780px; }
   .screen p.lore { color:#ffd9a8; font-style:italic; }
-  .bigbtn { margin-top:16px; pointer-events:auto; cursor:pointer; background:linear-gradient(180deg,#39c96f,#1e9e4f); color:#fff; border:none;
-    font-size:20px; font-weight:700; letter-spacing:3px; padding:13px 46px; border-radius:14px; box-shadow:0 6px 0 #14733a, 0 10px 24px rgba(0,0,0,.5); }
-  .bigbtn:active { transform:translateY(4px); box-shadow:0 2px 0 #14733a; }
-  .bigbtn.focus { filter:brightness(1.15); box-shadow:0 6px 0 #14733a, 0 0 20px rgba(57,201,111,.7); }
   #deathscreen h1 { color:#ff5b5b; text-shadow:0 0 24px rgba(255,60,60,.4); }
   /* the whole death screen speaks blob: lore, stats and the waiting line all wear the face */
   #deathlore, #waitmsg, #deathstats { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
@@ -345,11 +341,12 @@
   /* fades gently in and out under the respawn button while a client waits on the host */
   #waitmsg { margin-top:10px; font-size:14px; color:var(--hero); animation:waitPulse 1.8s ease-in-out infinite; }
   #waitmsg.hidden { display:none; }
-  /* lobby game over: the pause menu's fused button pair, death-screen edition. The host's
-     HOST RETRY is live; a client's copy waits greyed on Player 1 (same read as the pause
-     screen's waithost RESUME); QUIT TO MENU always works. */
+  /* the death screen's button pair — the pause menu's fused design, worn on every death
+     now (solo included) in the fallen hero's own colour. Solo reads RETRY .ᐟ; a lobby
+     game over reads HOST RETRY . . (live for the host, greyed-waiting for a client, same
+     read as the pause screen's waithost RESUME); QUIT TO MENU always works. */
   #deathbtns { display:flex; margin-top:14px; border:2px solid var(--hero); border-radius:14px; overflow:hidden; width:min(430px, 84vw); }
-  #deathbtns.hidden, #respawnbtn.hidden { display:none; }
+  #deathbtns.hidden { display:none; }
   #deathbtns button { flex:1; pointer-events:auto; cursor:pointer; background:rgba(255,255,255,.05); border:none; color:#eee;
     font-size:15px; font-weight:700; letter-spacing:2px; padding:14px 0; }
   #deathbtns button:first-child { border-right:2px solid var(--hero); }
@@ -617,9 +614,8 @@
   <h1 id="deathtitle">YOU GOT EATEN</h1>
   <p class="lore" id="deathlore">The cousins will avenge you, blob-kind remembers. .</p>
   <div id="deathstats"></div>
-  <button class="bigbtn" id="respawnbtn">RESPAWN</button>
-  <div id="deathbtns" class="hidden">
-    <button id="retrybtn">HOST RETRY . .</button>
+  <div id="deathbtns">
+    <button id="retrybtn">RETRY .ᐟ</button>
     <button id="dquitbtn">QUIT TO MENU</button>
   </div>
   <p id="waitmsg" class="hidden">. . waiting for Player 1 .ᐟ</p>
