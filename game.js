@@ -5625,7 +5625,36 @@ function recruitCousin(c) {
   updateCousinHUD();
   rebuildSquadBars();
   maybeSpawnBoss();
+  // half of them say hello, half just fall in — so the greeting stays a moment rather
+  // than a formality. Beat late: the JOINED toast lands first, then they speak.
+  if (Math.random() < 0.5) c.helloT = 0.45;
 }
+// ---------- cousin battle personas ----------
+// Each cousin fights like themselves, not like a squad slot. These are the tells you'd
+// recognise from across the street: Blizzy's slide-hops closing the gap, Blingo bouncing
+// through a firefight, Blazo's leaping chop, Blomba picking birds out of the sky, Bloopy's
+// one word for a fallen boss, Blondie sweeping the ground clean and hopping back to formation.
+// Every quirk is cosmetic-plus: it changes how they move and when they act, never their
+// damage — the perks on the picker still own the numbers.
+const PERSONA = {
+  blizzy:  { slideCatchup: true },   // never merely walks back to you: slides, hops out of it
+  blingo:  { fightHops: true },      // can't stand still in a fight
+  blazo:   { leapChop: true },       // melee in hand? the swing comes down out of the air
+  blomba:  { crowShot: true },       // an armed Blomba cannot let a crow be
+  bloopy:  { bossNice: true },       // says the quiet part when a boss drops
+  blondie: { sweeper: true },        // wider loot reach, and hops home once she has it
+};
+function persona(c) { return (c.data && PERSONA[c.data.id]) || {}; }
+// a cousin's own voice: the emote bubble + ping everyone else's cousins get, fired at
+// their own head rather than the player's. Mirrored to the lobby so a client sees it too.
+function cousinEmote(c, i) {
+  if (i < 0) return;
+  spawnBubble(() => ({ x: c.pos.x, y: (c.y || 0) + 2.2, z: c.pos.z }), EMOTES[i] || '', c);
+  if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 26) play3d(c.pos.x, c.pos.z, () => SFX.pickup());
+  if (net.role === 'host' && typeof netBroadcast === 'function') netBroadcast({ t: 'cemote', c: c.data.id, e: i });
+}
+const HELLO_EMOTE = EMOTES.findIndex(e => e.startsWith('Hello'));
+const NICE_EMOTE = EMOTES.findIndex(e => e.startsWith('Nice'));
 // weapon-only loot roll (companions only ever grab guns from crates)
 function rollLootWeapon(rng) {
   for (let i = 0; i < 8; i++) { const id = rollLoot(rng); if (id !== 'ammo' && id !== 'medkit') return id; }
@@ -6213,7 +6242,18 @@ function updateCompanions(dt) {
       c.pos.z = player.pos.z + bkZ * (2 + i * 1.5);
       c.y = groundHeight(c.pos.x, c.pos.z); c.vy = 0; c.grounded = true;
     } else if (dist > 0.4) {
-      const sp = Math.min(dist > 8 ? 7.3 : dist > 2 ? 5.4 : 2.8, dist / dt);
+      // Blizzy (and Blondie heading home) don't jog a long gap — they drop into a slide and
+      // hop out of it, the same trick the hero uses to cover ground. The slide holds while
+      // there's ground to make up, then spends itself on a hop that lands near the slot.
+      const pq = persona(c);
+      if ((pq.slideCatchup || pq.sweeper) && c.grounded && !(c.slideT > 0) && !(c.slideCd > 0)
+          && dist > (pq.slideCatchup ? 5 : 7) && !c.downed) {
+        c.slideT = pq.slideCatchup ? 0.75 : 0.55;
+        c.slideCd = pq.slideCatchup ? 1.5 : 3.2;
+        if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 22) play3d(c.pos.x, c.pos.z, () => SFX.slide && SFX.slide());
+      }
+      const sliding = c.slideT > 0;
+      const sp = Math.min(sliding ? 10.5 : dist > 8 ? 7.3 : dist > 2 ? 5.4 : 2.8, dist / dt);
       const step = sp * dt;
       let nx = c.pos.x + dx / dist * step;
       let nz = c.pos.z + dz / dist * step;
@@ -6223,11 +6263,18 @@ function updateCompanions(dt) {
       if (c.grounded && dist > 1.1 && movedD < step * 0.4) { c.vy = 7.4; c.grounded = false; }
       c.pos.x = nx; c.pos.z = nz;
       if (dist > 1) {
-        c.walkPhase += dt * 10;
+        c.walkPhase += dt * (sliding ? 3 : 10);
         c.yaw = Math.atan2(dx, dz);
         moving = true;
       }
     }
+    // the slide's own clock: it ends in a hop, which is the whole point of sliding
+    if (c.slideT > 0) {
+      c.slideT -= dt;
+      if (c.slideT <= 0 && c.grounded) { c.vy = 7.2; c.grounded = false; c.hopT = 0.5; }
+    }
+    if (c.slideCd > 0) c.slideCd -= dt;
+    if (c.hopT > 0) c.hopT -= dt;
     // gravity: cousins stand on (and jump onto) the same tops we can
     const supY = supportTop(c.pos.x, c.pos.z, c.y);
     if (c.grounded) {
@@ -6239,14 +6286,30 @@ function updateCompanions(dt) {
       c.y += c.vy * dt;
       if (c.vy <= 0 && c.y <= supY) { c.y = supY; c.vy = 0; c.grounded = true; }
     }
-    // auto-loot: grab a gun from any crate we're standing next to
+    // auto-loot: grab a gun from any crate we're standing next to. Blondie is the family
+    // hoarder — her reach is wider than anyone's, and a crate that lands her a gun sends
+    // her hopping back to the slot with it rather than strolling.
+    const lootR = persona(c).sweeper ? 4.2 : 2.1;
     for (const cr of allCrates) {
       if (cr.opened) continue;
-      if (Math.hypot(cr.pos.x - c.pos.x, cr.pos.z - c.pos.z) < 2.1 && Math.abs(cr.pos.y - c.y) < 2.4) {
+      if (Math.hypot(cr.pos.x - c.pos.x, cr.pos.z - c.pos.z) < lootR && Math.abs(cr.pos.y - c.y) < 2.4) {
         companionLoot(c, cr);
+        if (persona(c).sweeper && c.grounded) { c.vy = 7.2; c.grounded = false; c.hopT = 0.5; }
         break;
       }
     }
+    // Blondie also works the trade line herself: any squadmate inside arm's reach who is
+    // still swinging melee gets handed a spare, without waiting on the player to call it
+    if (persona(c).sweeper && (c.sweepCd || 0) <= 0 && armedWithGun(c)) {
+      c.sweepCd = 1.4;
+      for (const o of companions) {
+        if (o === c || !o.recruited || o.downed || o.netP || armedWithGun(o)) continue;
+        if (Math.hypot(o.pos.x - c.pos.x, o.pos.z - c.pos.z) > 3.4) continue;
+        settleGunTrades();
+        break;
+      }
+    }
+    if (c.sweepCd > 0) c.sweepCd -= dt;
     // fight: swing or shoot at the nearest zombie with whatever we're carrying.
     // a trade lineup is at-ease — no targeting, eyes on the player until it breaks
     const cw = c.weapon || WEAPONS.pistol;
@@ -6258,6 +6321,36 @@ function updateCompanions(dt) {
       const d = Math.hypot(z.pos.x - c.pos.x, z.pos.z - c.pos.z);
       if (d < tD) { tD = d; tgt = z; }
     }
+    // the greeting from recruitCousin, a beat after the toast — and Bloopy's verdict on a
+    // fallen boss, on the same beat-late timer
+    if (c.helloT > 0) { c.helloT -= dt; if (c.helloT <= 0) cousinEmote(c, HELLO_EMOTE); }
+    if (c.niceT > 0) { c.niceT -= dt; if (c.niceT <= 0) cousinEmote(c, NICE_EMOTE); }
+    // Blingo fights on his toes: with something to shoot at, he won't keep both feet down
+    if (persona(c).fightHops && tgt && c.grounded && !cmd) {
+      c.hopCd = (c.hopCd || 0) - dt;
+      if (c.hopCd <= 0) { c.vy = 6.6; c.grounded = false; c.hopCd = 0.9 + Math.random() * 0.7; }
+    }
+    // an armed Blomba cannot let a crow be: no zombie needed, he'll take the shot on sight
+    if (persona(c).crowShot && armedWithGun(c) && c.shootCd <= 0 && !cmd) {
+      let bird = null, bD = 22;
+      for (const cw2 of crows) {
+        const d = Math.hypot(cw2.g.position.x - c.pos.x, cw2.g.position.z - c.pos.z);
+        if (d < bD) { bD = d; bird = cw2; }
+      }
+      // a zombie in his face always outranks a bird — the quirk is a habit, not a death wish
+      if (bird && (!tgt || tD > 6)) {
+        const gun = c.weapon;
+        c.shootCd = 0.75 + Math.random() * 0.3;
+        c.yaw = Math.atan2(bird.g.position.x - c.pos.x, bird.g.position.z - c.pos.z);
+        const sy2 = c.y + 1.0;
+        if (c.gunMesh && c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_cv);
+        else _cv.set(c.pos.x, sy2, c.pos.z);
+        spawnTracer(_cv.clone(), bird.g.position.clone());
+        killCrow(bird, (bird.g.position.x - c.pos.x) / bD, (bird.g.position.z - c.pos.z) / bD, (gun.dmg || 5) * 2);
+        game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
+        if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(gun));
+      }
+    }
     if (tgt) c.yaw = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
     else if (cmd === 'lineup' && !moving) c.yaw = Math.atan2(player.pos.x - c.pos.x, player.pos.z - c.pos.z);
     else if (cmd === 'wait' && !moving) c.yaw = Math.atan2(c.pos.x - squadCmd.ax, c.pos.z - squadCmd.az); // backs together, eyes out
@@ -6268,9 +6361,16 @@ function updateCompanions(dt) {
       if (cw.melee) {
         // melee cousins swing once the target shambles into reach
         if (tD < cw.range + 0.5) {
+          // Blazo doesn't chop from the floor: with a real weapon in hand he leaps and brings
+          // it down, and the landing hit is worth the wind-up. Fists don't earn the leap —
+          // the family's hot head needs something with a head of its own to swing.
+          const leap = persona(c).leapChop && cw.id !== 'fists';
+          if (leap && c.grounded) { c.vy = 6.9; c.grounded = false; }
           c.shootCd = 60 / cw.rpm + 0.2;
           c.meleeT = 0.16;
-          damageZombie(tgt, cw.dmg * 1.1, kx, kz, 2.2, { weapon: cw, dist: tD, isHead: false });
+          const air = leap && !c.grounded;
+          damageZombie(tgt, cw.dmg * (air ? 1.7 : 1.1), kx, kz, air ? 4.4 : 2.2, { weapon: cw, dist: tD, isHead: false });
+          if (air) meleeMoveGib(cw, tgt, kx, kz, true); // a leaping kill bursts the body, same as ours
           if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
         }
       } else {
@@ -6325,6 +6425,13 @@ function updateCompanions(dt) {
       b.arms[b.gunArm].rotation.x = lerp(b.arms[b.gunArm].rotation.x, target, k);
     }
     if (!c.grounded) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
+    // a slide has to LOOK like one from across the street: down on one hip, legs tucked
+    // ahead, trailing arm out for balance — otherwise it just reads as gliding fast
+    if (c.slideT > 0 && c.grounded) {
+      b.wob.rotation.x = 0.85;
+      b.legs[0].rotation.x = -1.15; b.legs[1].rotation.x = -0.75;
+      b.arms[b.offArm].rotation.x = -1.9;
+    } else b.wob.rotation.x = 0;
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
   }
@@ -6862,7 +6969,14 @@ function fireBossWave(z, n) {
   play3d(z.pos.x, z.pos.z, () => SFX.groan());
   shakeAmp = Math.max(shakeAmp, 0.2);
 }
+// Bloopy has exactly one review for a fallen boss, and it is not a long one. Any boss,
+// every time — provided he's actually out here to see it.
+function bossNice() {
+  const b = companions.find(c => persona(c).bossNice && c.recruited && !c.downed && !c.netP);
+  if (b) b.helloT = 0, b.niceT = 0.9;   // let the boss's own toast land first
+}
 function onBossDefeated(z) {
+  bossNice();
   if (z.isBoss3) {
     // the real end of it: with the Infected One down there is nothing left standing, and
     // THEN the block has earned its street party
@@ -8188,6 +8302,11 @@ function netClientData(m, conn, peer, code) {
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
+  } else if (m.t === 'cemote') {
+    // an AI cousin spoke on the host's side (hello on recruit, Bloopy on a boss): the
+    // squad AI doesn't run here, so the bubble only exists if the host tells us about it
+    const c = companions.find(x => x.data.id === m.c);
+    if (c) spawnBubble(() => ({ x: c.pos.x, y: (c.y || 0) + 2.2, z: c.pos.z }), EMOTES[m.e] || '', c);
   } else if (m.t === 'tradeW') {
     // the host settled a trade: what we gave leaves the kit, theirs takes its slot —
     // never overwritten back to this cousin's signature gear
@@ -8550,7 +8669,7 @@ player.pos.y = groundHeight(0, 0);
 playerBlob.root.position.copy(player.pos);
 window.__tagDbg = { updatePlayerTags, trackedActors, tagOccluded, spawnBoss2, darken, CRIMSON_HANDS };
 window.__dbg = {
-  player, game, zombies, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop, net,
+  player, game, zombies, crows, buildCrow, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop, net,
   openNearest: () => { const c = findNearCrate(); if (c) openCrate(c); },
   recruitNearest: () => { const c = findNearRecruit(); if (c) recruitCousin(c); },
   give: id => giveWeapon(id),
