@@ -4890,7 +4890,7 @@ function selfT(ox, oy, oz, dx, dy, dz) {
 // Throwing bare fists in mid-air commits you: the boots come out, you ride the dive to
 // the ground, and nothing else fires until you land. That commitment is the whole point —
 // an armed melee jump swing can be mashed at its rpm, this one costs you a jump each time.
-const DROPKICK_DMG = 13, DROPKICK_RANGE = 2.1, DROPKICK_KNOCK = 22;
+const DROPKICK_DMG = 13, DROPKICK_RANGE = 2.1, DROPKICK_KNOCK = 27.5;
 function startDropKick() {
   player.dropKick = true;
   player.dropKickHard = player.hopT > 0;   // launched out of a slide hop: the hard version
@@ -5008,10 +5008,10 @@ function fireWeapon() {
     player.swingDur = 60 / w.rpm * 0.9;   // the arc fills the weapon's own rpm gap
     player.swingT = player.swingDur;
     if (w.id === 'fists') {
-      // consecutive swings chain. The opener leads with the dominant hand — right for
-      // everyone, left for Blondie, since gunArm already carries the family handedness —
-      // and lands 6; the answering hand lands 7. Let the chain lapse and the next swing
-      // is a fresh 6 opener, so 6,7,6,7 is the reward for keeping it rolling.
+      // consecutive swings still trade hands — the opener leads with the dominant one
+      // (right for everyone, left for Blondie, gunArm carries the family handedness) and a
+      // lapsed chain re-opens on it — but that's animation now: damage no longer rides
+      // the chain, each ZOMBIE keeps its own 6,7,6,7 count (see the swing below).
       player.comboN = game.time - player.lastPunchT > COMBO_WINDOW ? 0 : player.comboN + 1;
       player.lastPunchT = game.time;
       player.meleeArm = player.comboN % 2 === 0 ? playerBlob.gunArm : playerBlob.offArm;
@@ -5023,10 +5023,12 @@ function fireWeapon() {
     for (const hit of hits) {
       const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z;
       const d = Math.hypot(dx, dz) || 1;
-      // fists land on the chain, not the hand: opener 6, answer 7. Melee ignores hero
-      // damage perks so the numbers stay true for everyone — the perks live on guns.
-      const base = w.id === 'fists' ? (player.comboN % 2 === 0 ? 6 : 7) : w.dmg;
-      const knock = (w.id === 'fists' ? 11 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
+      // fists land on the ZOMBIE, not the hand or the clock: each one takes 6 on its first
+      // punch, 7 on its next, 6 again — its own running count, so two zombies in one arc
+      // can be on different beats. Melee ignores hero damage perks so the numbers stay
+      // true for everyone — the perks live on guns.
+      const base = w.id === 'fists' ? ((hit.punchN = (hit.punchN | 0) + 1) % 2 ? 6 : 7) : w.dmg;
+      const knock = (w.id === 'fists' ? 5.5 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
       damageZombie(hit, base * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
         { weapon: w, dist: d, isHead: false });
       meleeMoveGib(w, hit, dx / d, dz / d, hop);
