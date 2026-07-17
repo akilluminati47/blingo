@@ -416,6 +416,9 @@
   .srow span { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; letter-spacing:.3px; }
   /* a row whose setting is actually doing something right now lights its own name */
   .srow.live span { color:var(--hero); }
+  /* a client's spawn rows belong to the host: greyed, untouchable, mirroring live */
+  .srow.locked { opacity:.4; pointer-events:none; }
+  .srow.locked .notches { pointer-events:none; }
   .notches { display:flex; gap:5px; pointer-events:auto; }
   .pip { width:20px; height:11px; border-radius:3px; background:rgba(255,255,255,.13); cursor:pointer;
     transition:background .1s, box-shadow .1s; }
@@ -429,6 +432,8 @@
   #pausebtns button:first-child { border-right:2px solid var(--hero); border-radius:0 0 0 16px; }
   #pausebtns button:last-child { border-radius:0 0 16px 0; }
   #pausebtns button:hover, #pausebtns button.focus { background:var(--hero); color:#10131a; }
+  /* the host holds the pause: a client's resume waits, greyed, until it lifts */
+  #pausebtns button.waithost { opacity:.45; pointer-events:none; }
 
   /* ---------- responsive: phones + tablets ---------- */
   /* narrow screens (portrait phones): tighter menus, one-column settings, slimmer HUD */

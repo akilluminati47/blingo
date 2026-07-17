@@ -982,8 +982,8 @@ function meleeSwing(p, ready, through) {
   if (p < 0.45) return lerp(cock, through, smooth((p - 0.2) / 0.25));             // whip through
   return lerp(through, ready, smooth((p - 0.45) / 0.55));                         // recover to rest
 }
-// armed melee rests HIGH now: weapon up over the shoulder — the old follow-through pose —
-// with the walk bob riding on it. A swing whips it from up here down into the dirt.
+// the raised follow-through pose: a swing parks the weapon up here for a 1s hold, then
+// the arm relaxes slowly back down to the low tip-skimming carry
 const MELEE_REST = -2.45;
 // how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
 // held-down punching always chains, but a real pause drops you back to a 6 opener.
@@ -4503,14 +4503,20 @@ function pauseGame() {
   if (!themeTimer) startTheme(selectedCousin); // hero music plays over the pause menu
   if (input.device === 'xbox' || input.device === 'ps') setPadFocus(0);
   else clearPadFocus();
+  updateHostPauseLock();
+  // the host's pause stops the world, so it stops the lobby: everyone sees the settings
+  // screen together and waits on the host's resume
+  if (net.role === 'host') netBroadcast({ t: 'hpause', on: 1 });
 }
 function resumeGame() {
   if (game.state !== 'paused') return;
+  if (net.role === 'client' && net.hostPaused) return; // the host holds the pause, not us
   pauseScreen.classList.add('hidden');
   document.body.classList.add('playing');
   game.state = 'playing';
   if (input.device === 'kbm') grabPointer();
   scheduleControlsFade();
+  if (net.role === 'host') netBroadcast({ t: 'hpause', on: 0 }); // the lobby resumes with us
 }
 function quitToMenu() {
   game.state = 'menu';
@@ -4568,9 +4574,17 @@ const SETTING_DEFS = [
 ];
 const settingsGrid = document.getElementById('settingsGrid');
 const rowEls = {};
-function saveNotches() { try { localStorage.setItem('blingo-notches', JSON.stringify(notches)); } catch (e) {} }
+function saveNotches() {
+  // a client's spawn rows are wearing the HOST's values — never let those persist as
+  // their own prefs (ownSpawnNotches holds theirs until netLeave restores them)
+  const out = { ...notches };
+  if (ownSpawnNotches) Object.assign(out, ownSpawnNotches);
+  try { localStorage.setItem('blingo-notches', JSON.stringify(out)); } catch (e) {}
+}
 function notchClickSfx(level) { initAudio(); tone(280 + level * 90, 0.05, 0.22, 'square'); }
 function setNotch(key, n, silent) {
+  // in a joined lobby the spawn dials belong to the HOST — a client's copies are read-only
+  if (net.role === 'client' && HOST_NOTCH_KEYS.includes(key)) return;
   n = clamp(Math.round(n), 0, 5);
   // "extra" means more than full: dialing up Extra Gore quietly fills the Gore bar first
   if (key === 'extraGore' && n > 0 && notches.gore < 5) setNotch('gore', 5, true);
@@ -4583,6 +4597,10 @@ function setNotch(key, n, silent) {
   refreshRow(key);
   if (key === 'gore') refreshRow('extraGore');
   if (!silent) notchClickSfx(n);
+  // the host turning a spawn dial updates every client's greyed copy live — even from
+  // the pause menu, where the periodic snapshot isn't flowing
+  if (net.role === 'host' && HOST_NOTCH_KEYS.includes(key))
+    netBroadcast({ t: 'notch', zs: notches.zombieSpawn, ls: notches.lootSpawn });
 }
 function nudgeNotch(key, dir) { setNotch(key, notches[key] + dir); }
 for (const [key, label] of SETTING_DEFS) {
@@ -4623,6 +4641,45 @@ function refreshRow(key) {
 }
 function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); }
 syncSettingsUI();
+
+// ---------- host-owned spawn settings + host pause (multiplayer) ----------
+// Zombies + Loot drive the SPAWNER, and in a lobby the host's world does all the
+// spawning — so those two dials are the host's alone. A client's copies grey out,
+// go read-only, and mirror the host's values live: they arrive with the welcome,
+// with every snapshot, and on a dedicated message the moment the host turns one.
+const HOST_NOTCH_KEYS = ['zombieSpawn', 'lootSpawn'];
+let ownSpawnNotches = null; // the client's own saved values, restored when they leave
+function lockSpawnRows(on) {
+  for (const k of HOST_NOTCH_KEYS) rowEls[k].classList.toggle('locked', on);
+}
+function applyHostNotches(zs, ls) {
+  if (net.role !== 'client') return;
+  if (!ownSpawnNotches) ownSpawnNotches = { zombieSpawn: notches.zombieSpawn, lootSpawn: notches.lootSpawn };
+  let changed = false;
+  for (const [k, v] of [['zombieSpawn', zs], ['lootSpawn', ls]]) {
+    if (!Number.isInteger(v)) continue;
+    const n = clamp(v, 0, 5);
+    if (n !== notches[k]) { notches[k] = n; refreshRow(k); changed = true; }
+  }
+  if (changed) syncDerived();  // no saveNotches: the host's dials are borrowed, not ours
+  lockSpawnRows(true);
+}
+function restoreOwnNotches() {
+  lockSpawnRows(false);
+  if (!ownSpawnNotches) return;
+  notches.zombieSpawn = ownSpawnNotches.zombieSpawn;
+  notches.lootSpawn = ownSpawnNotches.lootSpawn;
+  ownSpawnNotches = null;
+  syncDerived();
+  refreshRow('zombieSpawn'); refreshRow('lootSpawn');
+}
+// while the host holds the lobby paused, a client's RESUME button waits on them
+function updateHostPauseLock() {
+  const btn = document.getElementById('resumebtn');
+  const locked = net.role === 'client' && net.hostPaused;
+  btn.classList.toggle('waithost', locked);
+  btn.textContent = locked ? 'HOST PAUSED . .' : 'RESUME';
+}
 
 // ---------- gamepad menu navigation ----------
 let padFocus = 0, padNavT = 0;
@@ -5955,13 +6012,21 @@ function updatePlayer(dt) {
       if (sw >= 0) b.arms[player.meleeArm].rotation.x = meleeSwing(sw, b.arms[player.meleeArm].rotation.x, -2.5);
       else if (stumbling) { b.arms[0].rotation.x -= stumbleLean * 1.0; b.arms[1].rotation.x -= stumbleLean * 1.0; }
     } else {
-      // armed melee: rests raised over the shoulder (MELEE_REST + the walk bob), and a
-      // swing whips it from up there DOWN into the ground — the old carry frame's
-      // tip-skimming angle is reused as the strike's floor, so the blade ends the arc
-      // kissing the dirt however high we're standing
+      // armed melee: the WALK pose is the low carry again (tip skimming the dirt), but a
+      // swing leaves its mark — the follow-through parks the weapon raised over the
+      // shoulder for a beat (1s), then the arm relaxes slowly back down to the carry.
+      // Rapid swinging never lets it drop: each arc re-arms the hold, so a flurry rides
+      // high the whole way. The strike still whips DOWN, ending at the tip-skimming angle.
+      if (player.swingT > 0) player.meleeHoldT = 1.0;                       // the post-swing hold, re-armed by every arc
+      else player.meleeHoldT = Math.max(0, (player.meleeHoldT || 0) - dt);
+      const raiseTo = player.swingT > 0 || player.meleeHoldT > 0 ? 1 : 0;
+      const rk = raiseTo > (player.meleeRaise || 0) ? 6 : 1.6;              // snaps up with the swing, drifts down slow
+      player.meleeRaise = lerp(player.meleeRaise || 0, raiseTo, 1 - Math.exp(-rk * dt));
       const bob = Math.sin(player.walkPhase) * (moving ? 0.14 : 0.04);
       const reach = gunMesh ? gunMesh.userData.reach : 0.8;
-      const ready = MELEE_REST + bob - aimAmt * 0.25;
+      const carry = meleeCarryLift(-0.55 - aimAmt * 1.0 + bob,
+        player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
+      const ready = lerp(carry, MELEE_REST + bob * 0.5, player.meleeRaise);
       const strike = meleeCarryLift(-0.35,
         player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
       b.arms[b.gunArm].rotation.x = sw >= 0 ? meleeSwing(sw, ready, strike) : ready;
@@ -6216,12 +6281,20 @@ function updateCompanions(dt) {
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
-    // guns held levelled; melee rests raised like the hero's, and a swing buries the
-    // blade down at the dirt (the tip-skimming lift is the strike floor now)
+    // guns held levelled; melee walks in the low carry, buries the blade at the dirt on
+    // a swing, rides high for a beat after it, then relaxes back down — same as the hero
     if (!cw.melee) b.arms[b.gunArm].rotation.x = -Math.PI / 2;
-    else if (c.meleeT > 0) b.arms[b.gunArm].rotation.x = meleeCarryLift(
-      -0.35, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8);
-    else b.arms[b.gunArm].rotation.x = MELEE_REST + Math.sin(c.walkPhase) * (moving ? 0.14 : 0.04);
+    else {
+      if (c.meleeT > 0) c.meleeHoldT = 1;
+      else c.meleeHoldT = Math.max(0, (c.meleeHoldT || 0) - dt);
+      const reach = c.gunMesh ? c.gunMesh.userData.reach : 0.8;
+      const target = c.meleeT > 0
+        ? meleeCarryLift(-0.35, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), reach)
+        : c.meleeHoldT > 0 ? MELEE_REST
+        : meleeCarryLift(-0.55 + Math.sin(c.walkPhase) * (moving ? 0.14 : 0.04), (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), reach);
+      const k = 1 - Math.exp(-(c.meleeT > 0 ? 14 : c.meleeHoldT > 0 ? 8 : 1.6) * dt);
+      b.arms[b.gunArm].rotation.x = lerp(b.arms[b.gunArm].rotation.x, target, k);
+    }
     if (!c.grounded) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
     const wob = moving ? Math.sin(c.walkPhase * 2) * 0.04 : Math.sin(performance.now() * 0.002) * 0.015;
     b.wob.scale.set(1 + wob, 1 - wob, 1 + wob);
@@ -7752,7 +7825,8 @@ function updateFx(dt) {
 // the internet shared — strangers collided in them and dead peers squatted them.)
 const NET_SLOTS = 6;
 const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
-  ghosts: new Map(), actors: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '' };
+  ghosts: new Map(), actors: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '',
+  hostPaused: false };
 const lobbyHintEl = document.getElementById('lobbyhint');
 const lobbyListEl = document.getElementById('lobbylist');
 const codeEl = document.getElementById('lobbycode');
@@ -7889,7 +7963,9 @@ function wireHostConn(conn) {
       else toast(`PLAYER ${num} TOOK OVER ${c.data.name.toUpperCase()} .ᐟ`);
       net.conns.push(conn);
       conn.send({ t: 'welcome', n: num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
-        w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills });
+        w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
+        zs: notches.zombieSpawn, ls: notches.lootSpawn,       // the host's spawn dials
+        hp: game.state === 'paused' ? 1 : 0 });               // joined a held lobby: wait with it
       rebuildSquadBars();
     } else if (m.t === 'p') {
       const c = cousinByConn(conn);
@@ -7964,7 +8040,8 @@ function netHostTick(dt) {
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
     b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), // which one is up: clients dress the bar in his colours
-    ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0 }); // cleanup quota, so every screen runs the REMAIN readout
+    ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
+    zs: notches.zombieSpawn, ls: notches.lootSpawn }); // host's spawn dials, mirrored on every client's greyed rows
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
   const R = v => Math.round(v * 20) / 20;
@@ -8016,9 +8093,20 @@ function netClientData(m, conn, peer, code) {
     game.phase = m.ph; wxSet(m.w); applyEnvironment();
     game.time = m.tm; game.kills = m.k; hud.kills.textContent = m.k;
     player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
+    applyHostNotches(m.zs, m.ls);   // the host's spawn dials land on our greyed rows
+    if (m.hp) { net.hostPaused = true; pauseGame(); } // lobby is held: wait with it
     toast(`JOINED ${code.toUpperCase()} .ᐟ YOU ARE PLAYER ${m.n}`, true);
   } else if (m.t === 's') {
     netApplySnapshot(m);
+  } else if (m.t === 'notch') {
+    applyHostNotches(m.zs, m.ls);   // the host turned a spawn dial: our pips follow live
+  } else if (m.t === 'hpause') {
+    // the host's pause is the lobby's pause: the settings screen drops over everyone
+    // together, and only the host's resume lifts it
+    net.hostPaused = !!m.on;
+    updateHostPauseLock();
+    if (m.on && game.state === 'playing') pauseGame();
+    else if (!m.on && game.state === 'paused') resumeGame();
   } else if (m.t === 'hurt') {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
   } else if (m.t === 'revive') {
@@ -8100,6 +8188,7 @@ function netApplySnapshot(m) {
   // mirror the host's cleanup quota so the REMAIN readout ticks on every screen
   game.cleanup = (m.ct || 0) > 0; game.clearTarget = m.ct || 0; game.quotaN = m.cq || 0;
   updateQuotaHud();
+  applyHostNotches(m.zs, m.ls); // and the host's spawn dials, in case a change slipped past
   const seenA = new Set();
   for (const a of m.ac) {
     if (a.p === net.playerNum) continue;          // that's me
@@ -8195,7 +8284,9 @@ function netClientWorldTick(dt) {
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
     b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8
-      : (WEAPONS[g.wp] && WEAPONS[g.wp].melee ? MELEE_REST : -Math.PI / 2); // melee rides raised now
+      : (WEAPONS[g.wp] && WEAPONS[g.wp].melee
+        ? meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8)
+        : -Math.PI / 2);
     if (g.dn) {
       // downed players crawl on their belly, same read as the host's own view of them
       b.wob.rotation.x = 1.2;
@@ -8331,7 +8422,9 @@ function netLeave() {
   netScanStop();
   if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
   net.peer = null; net.role = null; net.conns = []; net.playerNum = 0; net.lobbyCode = '';
-  net.sentDead = false; net.barSig = '';
+  net.sentDead = false; net.barSig = ''; net.hostPaused = false;
+  restoreOwnNotches();     // the spawn rows go back to being theirs, ungreyed
+  updateHostPauseLock();
   for (const [nid] of [...net.ghosts]) netRemoveGhost(nid);
   for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
   for (const c of companions) { c.netP = null; c.netConn = null; c.netPose = null; }
@@ -8364,7 +8457,9 @@ function netPoseCompanion(c, dt) {
   b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
   b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
   b.arms[b.offArm].rotation.x = -swing * 0.7;
-  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee ? MELEE_REST : -Math.PI / 2; // melee rides raised now
+  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
+    ? meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8)
+    : -Math.PI / 2;
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
   if (c.downed) {
     b.wob.rotation.x = 1.2;
