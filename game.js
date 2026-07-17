@@ -123,10 +123,17 @@ function groundHeight(x, z) {
   for (const r of TOWN_RECTS) td = Math.min(td, rectDist(x, z, r));
   f = Math.min(f, smooth(clamp((td - 1) / 12, 0, 1))); // graded flat in town
   let g = base * (0.12 + 0.88 * f);
-  for (const p of flatPads) {
+  // roads trump pads: a house that spawned close enough for its pad (or apron) to lap
+  // onto the road corridor lets go of the ground there — fading back to full strength
+  // past the shoulder — so the tarmac never grows a grass hump over itself. (The road
+  // mesh and the grass sample this same function at different grids; any pad influence
+  // on the corridor shows up as green poking through the asphalt.)
+  const padHold = smooth(clamp((dr - 6.7) / 3, 0, 1));
+  if (padHold > 0) for (const p of flatPads) {
     const dOut = Math.max(Math.abs(x - p.x) - p.hw, Math.abs(z - p.z) - p.hd);
     if (dOut >= p.apron) continue;
-    g = dOut <= 0 ? p.y : lerp(p.y, g, smooth(dOut / p.apron));
+    const k = dOut <= 0 ? 0 : smooth(dOut / p.apron);
+    g = lerp(p.y, g, Math.max(k, 1 - padHold));
   }
   return g;
 }
@@ -5690,7 +5697,7 @@ const PERSONA = {
   blizzy:  { slideCatchup: true },   // never merely walks back to you: slides, hops out of it
   blingo:  { fightHops: true },      // can't stand still in a fight
   blazo:   { leapChop: true },       // melee in hand? the swing comes down out of the air
-  blomba:  { crowShot: true },       // an armed Blomba cannot let a crow be
+  blomba:  { crowShot: true, meleeReaper: true }, // guns: no crow is safe. Melee: a walking exclusion zone
   bloopy:  { bossNice: true },       // says the quiet part when a boss drops
   blondie: { sweeper: true },        // wider loot reach, and hops home once she has it
 };
@@ -6460,8 +6467,13 @@ function updateCompanions(dt) {
     if (tgt && c.shootCd <= 0) {
       const kx = (tgt.pos.x - c.pos.x) / tD, kz = (tgt.pos.z - c.pos.z) / tD;
       if (cw.melee) {
+        // Blomba with a melee weapon is a walking exclusion zone: the old Blob Lounge
+        // bouncer drops ANY regular walker that steps inside 6m, mid-stride, without the
+        // squad breaking step — the door policy travels with him. Bosses are above the
+        // policy and get the ordinary swing at ordinary reach.
+        const reaper = persona(c).meleeReaper && cw.id !== 'fists' && !tgt.isBoss;
         // melee cousins swing once the target shambles into reach
-        if (tD < cw.range + 0.5) {
+        if (tD < (reaper ? 6 : cw.range + 0.5)) {
           // Blazo doesn't chop from the floor: with a real weapon in hand he leaps and brings
           // it down, and the landing hit is worth the wind-up. Fists don't earn the leap —
           // the family's hot head needs something with a head of its own to swing.
@@ -6470,7 +6482,9 @@ function updateCompanions(dt) {
           c.shootCd = 60 / cw.rpm + 0.2;
           c.meleeT = 0.16;
           const air = leap && !c.grounded;
-          damageZombie(tgt, cw.dmg * (air ? 1.7 : 1.1), kx, kz, air ? 4.4 : 2.2, { weapon: cw, dist: tD, isHead: false });
+          // the reaper hit routes through damageZombie (not killZombie directly) so a
+          // net-ghost zombie's death still travels the host-authoritative path
+          damageZombie(tgt, reaper ? 9999 : cw.dmg * (air ? 1.7 : 1.1), kx, kz, air ? 4.4 : 2.2, { weapon: cw, dist: tD, isHead: false });
           if (air) meleeMoveGib(cw, tgt, kx, kz, true); // a leaping kill bursts the body, same as ours
           if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
         }
