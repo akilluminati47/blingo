@@ -4363,7 +4363,9 @@ function equipWeapon(id) {
   if (!player.owned.includes(id)) player.owned.push(id);
   // keep the loadout organised into slots: melee group first, then guns by tier
   player.owned.sort((a, b) => slotRank(a) - slotRank(b));
-  if (gunMesh) { player.reloading = 0; gunMesh.removeFromParent(); gunMesh = null; }
+  // any equip (crate pickup, skin swap, respawn) cuts a reload short — clear its banner too,
+  // or the "RELOADING . ." text is stranded on screen until the next reload finishes it
+  if (gunMesh) { player.reloading = 0; if (hud && hud.reloadmsg) hud.reloadmsg.style.opacity = 0; gunMesh.removeFromParent(); gunMesh = null; }
   if (!player.weapon.melee) {
     gunMesh = buildGunMesh(id);
     playerBlob.gunSocket.add(gunMesh);
@@ -4384,6 +4386,10 @@ function equipWeapon(id) {
 // cycle to the next weapon the player owns, with that gun's own switch sound
 function cycleWeapon(dir = 1) {
   if (player.dead || player.owned.length < 2) return;
+  // don't let a swap interrupt a reload mid-way (that's what stranded the "RELOADING . ."
+  // banner): the gun we're loading stays out, and we re-sound the reload cue so the input
+  // reads as "not yet — finishing the mag"
+  if (player.reloading > 0) { SFX.reload(); return; }
   let idx = player.owned.indexOf(player.weapon.id);
   if (idx < 0) idx = 0;
   idx = (idx + dir + player.owned.length) % player.owned.length;
@@ -7669,8 +7675,10 @@ function updateZombies(dt) {
     }
     const pDist = Math.hypot(player.pos.x - z.pos.x, player.pos.z - z.pos.z);
     // the leash scales with the live fog line, so a zombie only ever winks out well
-    // inside the haze — never in front of you on a clear long-draw day
-    if (pDist > scene.fog.far + (z.farBorn ? 46 : 26) && !z.isBoss) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
+    // inside the haze — never in front of you on a clear long-draw day. In a lobby it's the
+    // NEAREST player that holds the leash, not just the host, so a client roaming off on
+    // their own keeps their horde instead of watching it despawn around them.
+    if (nearestPlayerDist(z.pos.x, z.pos.z) > scene.fog.far + (z.farBorn ? 46 : 26) && !z.isBoss) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
 
     // boss: sleeps by the bank until approached, then sends waves at damage thresholds
     if (z.isBoss) {
@@ -7682,6 +7690,7 @@ function updateZombies(dt) {
         placeShadow(b, z.pos.x, z.pos.z);
         continue;
       }
+      if (bossShielded()) pulseBossShield(z, b, dt);   // blink invuln while its guards stand
     }
 
     // visible entrances instead of popping into view: clawing out of the dirt...
@@ -7704,7 +7713,7 @@ function updateZombies(dt) {
       b.root.position.set(z.pos.x, gy + 0.05, z.pos.z);
       b.root.rotation.x = -1.45;
       placeShadow(b, z.pos.x, z.pos.z);
-      if (pDist < 24) { z.state = 'wake'; z.emergeT = 0; }
+      if (nearestPlayerDist(z.pos.x, z.pos.z) < 24) { z.state = 'wake'; z.emergeT = 0; } // any player walking up wakes it, not only the host
       continue;
     }
     // an already-dead carcass: lies where it fell and never gets up. Crows feed on it and
@@ -7934,6 +7943,14 @@ function nearestPlayerDist(x, z) {
   for (const c of companions) if (c.netP) best = Math.min(best, Math.hypot(c.pos.x - x, c.pos.z - z));
   return best;
 }
+// where a fresh street spawn rings in — any human in the run is fair game, not just the host,
+// so a client wandering off on their own still draws a horde of their own rather than an empty
+// map. AI cousins ride the host's formation, so anchoring on the humans already covers them.
+function spawnAnchor() {
+  const anchors = [player.pos];
+  for (const c of companions) if (c.netP && !c.downed) anchors.push(c.pos);
+  return anchors[(Math.random() * anchors.length) | 0];
+}
 // step inside this of the churchyard and its ground starts giving up its dead (he wakes at 18)
 const CHURCHYARD_NEAR = 42;
 // The Crimson One asleep at the church, block already scoured: his ground is the only thing
@@ -7980,6 +7997,7 @@ function updateSpawner(dt) {
     // street takes over from here — during the vigil there is no street left to take over.
     if (vigil) return;
     const runner = Math.random() < 0.22; // far spawns already running our way
+    const anchor = spawnAnchor();         // ring in around SOME player, not always the host
     let x = 0, z = 0, ok = false;
     for (let tries = 0; tries < 8 && !ok; tries++) {
       const ang = Math.random() * TAU;
@@ -7987,8 +8005,8 @@ function updateSpawner(dt) {
       // notch and weather have set it to — so they always arrive out of the haze,
       // never pop into a clear sky
       const d = runner ? scene.fog.far + 6 + Math.random() * 28 : 32 + Math.random() * 22;
-      x = player.pos.x + Math.sin(ang) * d;
-      z = player.pos.z + Math.cos(ang) * d;
+      x = anchor.x + Math.sin(ang) * d;
+      z = anchor.z + Math.cos(ang) * d;
       [x, z] = resolveCollision(x, z, 0.5);
       // zombies never appear inside buildings on their own — and never on the park,
       // perimeter included: the jelly picnic ground stays spawn-free
@@ -8209,6 +8227,17 @@ function updateBossState(z) {
 // while any horned wave zombie stands, the boss takes no damage at all
 function bossShielded() {
   return zombies.some(zz => zz.hornWave && zz.state !== 'dying');
+}
+// a shielded boss (its wave guards still standing) blinks its invuln colour on a timer, so
+// the "can't hurt me yet" reads for the WHOLE lobby the same way — driven off the streamed
+// shield flag on clients, off bossShielded() on the host. Green, or white for the green
+// Infected One where green-on-green wouldn't show at all.
+function pulseBossShield(z, blob, dt) {
+  z._shieldT = (z._shieldT || 0) - dt;
+  if (z._shieldT <= 0) {
+    z._shieldT = 0.34;
+    flashBlob(blob, z.isBoss3 ? FLASH_WHITE : FLASH_GREEN);
+  }
 }
 // a spot on a shop's doorstep, clear of whatever's parked against it
 function shopDoorSpot() {
@@ -9634,12 +9663,14 @@ function netHostTick(dt) {
       c.blob.arms[c.blob.gunArm].rotation.x));
   }
   const zb = [];
+  const shielded = bossShielded();   // its wave guards are up: the boss is invuln right now
   for (const z of zombies) {
     if (!z.nid) z.nid = ++net.zid;
     zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
       st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' || z.state === 'corpse' ? 2 : 0),
       sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, gr: z.green ? 1 : 0, gh: z.goreHorn ? 1 : 0,
-      ho: (z.hornWave || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0, b3: z.isBoss3 ? 1 : 0 });
+      ho: (z.hornWave || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0, b3: z.isBoss3 ? 1 : 0,
+      sh: (z.isBoss && shielded) ? 1 : 0 }); // boss invuln flag → clients blink it the same
   }
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb, rc,
@@ -9979,7 +10010,7 @@ function netApplySnapshot(m) {
       net.ghosts.set(zs.i, g);
       zombies.push(g);              // lives in the same list so shots + crosshair see it
     }
-    g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st;
+    g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st; g.sh = !!zs.sh;
     if (zs.st === 1 && g.state !== 'dying') { g.state = 'dying'; g.deadT = 0; }
   }
   for (const [nid, g] of net.ghosts) {
@@ -10057,6 +10088,7 @@ function netClientWorldTick(dt) {
       b.legs[0].rotation.x = sw * 0.7; b.legs[1].rotation.x = -sw * 0.7;
       b.arms[0].rotation.x = -1.4 + sw * 0.25; b.arms[1].rotation.x = -1.4 - sw * 0.25;
     }
+    if (g.isBoss && g.sh) pulseBossShield(g, b, dt);   // mirror the host's invuln blink
     placeShadow(b, g.pos.x, g.pos.z);
     updateFlash(b, dt);
   }
@@ -10183,9 +10215,16 @@ function netFindNearRecruit() {
 // a client's own shots don't damage ghosts directly: local feedback + wire to the host
 function netClientShot(z, dmg, kx, kz, opts) {
   if (!z.nid) return;
-  spawnDamageNumber(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
-  spawnBlood(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, 1);
-  flashBlob(z.blob);
+  if (z.isBoss && z.sh) {
+    // hit a boss while its wave guards still stand: it shrugs — show the invuln colour, not
+    // blood, so a client reads "no damage" the same way the host does
+    flashBlob(z.blob, z.isBoss3 ? FLASH_WHITE : FLASH_GREEN);
+    spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, z.isBoss3 ? 0xffffff : 0x3ae06a, 3, 2.5, 0.3);
+  } else {
+    spawnDamageNumber(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
+    spawnBlood(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, 1);
+    flashBlob(z.blob);
+  }
   try {
     net.conns[0].send({ t: 'shot', id: z.nid, d: dmg, hd: !!opts.isHead, kx, kz,
       ds: opts.dist || 0, wid: (opts.weapon || {}).id });
