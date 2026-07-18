@@ -59,9 +59,11 @@
   #tradepact .tpbase { filter:grayscale(1) brightness(1.55) opacity(.38); }        /* greyed silhouette */
   #tradepact .tpfill { clip-path:inset(calc((1 - var(--fill,0)) * 100%) 0 0 0); }  /* colour rises with the hold */
   #tradepact .tparrow { color:#fff; font-size:22px; opacity:.7; text-shadow:0 1px 3px #000; }
+  /* one label slot: "{WEAPON} OFFER .ᐟ" while holding, flips to "ACCEPTED .ᐟ" in place on both
+     screens the instant it settles — same spot, so the change reads clean and coherent */
   #tradepact .tplabel { color:#fff; font-weight:800; letter-spacing:.06em; font-size:15px;
-    text-shadow:0 2px 6px #000, 0 0 12px var(--hero); opacity:0; transition:opacity .12s; }
-  #tradepact.accepted .tplabel { opacity:1; }
+    text-shadow:0 2px 6px #000, 0 0 12px var(--hero); opacity:.92; transition:transform .14s ease; }
+  #tradepact.accepted .tplabel { opacity:1; transform:scale(1.12); }
 
   #vignette { position:absolute; inset:0; background:radial-gradient(ellipse at center, transparent 55%, rgba(160,0,0,.55) 100%); opacity:0; transition:opacity .25s; }
 

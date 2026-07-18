@@ -6292,6 +6292,7 @@ const tpMe = { color: -1 }, tpThem = { color: -1 };
 tpMe.face = tradePactEl.querySelector('.tpme'); tpThem.face = tradePactEl.querySelector('.tpthem');
 tpMe.base = tpMe.face.querySelector('.tpbase'); tpMe.fill = tpMe.face.querySelector('.tpfill');
 tpThem.base = tpThem.face.querySelector('.tpbase'); tpThem.fill = tpThem.face.querySelector('.tpfill');
+const tpLabelEl = tradePactEl.querySelector('.tplabel');
 let tpAcceptT = 0;   // >0 while the ACCEPTED sting holds before the faces fade out under the chord
 function tpSetFace(slot, color, lookLeft) {
   if (slot.color === color) return;              // faceIcon mints a fresh data URL each call — cache by colour
@@ -6299,13 +6300,20 @@ function tpSetFace(slot, color, lookLeft) {
   const url = faceIcon(color, lookLeft);
   slot.base.src = url; slot.fill.src = url;
 }
-function tradePact(meColor, themColor, meFill, themFill, themLookLeft) {
+// the label the viewer sees for what's being put on the table for THEM: the partner's weapon
+// (what you'd receive), or a bare fist on either side = the whole dignified skin-and-kit swap
+function offerLabel(myW, themW) {
+  if (myW === 'fists' || themW === 'fists') return 'SKIN OFFER .ᐟ';
+  return `${WEAPONS[themW] ? WEAPONS[themW].name.toUpperCase() : 'WEAPON'} OFFER .ᐟ`;
+}
+function tradePact(meColor, themColor, meFill, themFill, themLookLeft, offerText) {
   if (tpAcceptT > 0) return;                      // the accept animation owns the widget until it fades
   tradePactEl.classList.remove('hidden', 'fade', 'accepted');
   tpSetFace(tpMe, meColor, selectedCousin === 'blondie');
   tpSetFace(tpThem, themColor, !!themLookLeft);
   tpMe.face.style.setProperty('--fill', meFill.toFixed(3));
   tpThem.face.style.setProperty('--fill', themFill.toFixed(3));
+  tpLabelEl.textContent = offerText || 'TRADE OFFER .ᐟ';   // the offer stands here until it's accepted
 }
 function tradePactHide() {
   if (tpAcceptT > 0) return;
@@ -6316,6 +6324,7 @@ function tradePactAccept() {
   tradePactEl.classList.remove('hidden', 'fade');
   tradePactEl.classList.add('accepted');
   tpMe.face.style.setProperty('--fill', '1'); tpThem.face.style.setProperty('--fill', '1');
+  tpLabelEl.textContent = 'ACCEPTED .ᐟ';           // flips in place — same slot the offer stood in
   tpAcceptT = 1.2;
   SFX.tradeAccept();                              // the soundoff chord from the end of the splash medley
 }
@@ -6392,7 +6401,8 @@ function updateHoldTrades(dt) {
   if (meSide) {
     const them = meSide === a ? b : a;
     tradePact(myCousinData().color, them.data.color,
-      meSide === a ? progA : progB, them === a ? progA : progB, them.data.id === 'blondie');
+      meSide === a ? progA : progB, them === a ? progA : progB, them.data.id === 'blondie',
+      offerLabel(player.weapon.id, sideWeapon(them)));
   } else tradePactHide();
 
   if (tradeHold.txT <= 0) {
@@ -6411,11 +6421,13 @@ function updateHoldTrades(dt) {
     if (b.c) b.c.skinOfferT = 0; // a settled trade spends the standing offer
   }
 }
-// stream one net side its own fill + its partner's, plus who the partner is (so the client can
-// colour + label the greyed face). The host paints its own pact directly and isn't streamed.
+const sideWeapon = e => e.self ? player.weapon.id : (e.c.weapon || WEAPONS.pistol).id;
+// stream one net side its own fill + its partner's, who the partner is (colour + grey the faces),
+// and the offer label THIS side reads. The host paints its own pact directly and isn't streamed.
 function tradeStreamSide(side, partner, meProg, themProg) {
   if (!side.c || !side.c.netConn) return;
-  try { side.c.netConn.send({ t: 'tradeP', me: meProg, them: themProg, tp: partner.p, tc: partner.data.id }); } catch (e) {}
+  try { side.c.netConn.send({ t: 'tradeP', me: meProg, them: themProg, tp: partner.p, tc: partner.data.id,
+    ol: offerLabel(sideWeapon(side), sideWeapon(partner)) }); } catch (e) {}
 }
 // tell the last-engaged net partners to clear their pact (the engagement dropped)
 function tradeClearStream() {
@@ -6444,8 +6456,25 @@ function executeHoldTrade(a, b) {
   bloopyTradeNice();
   return true;
 }
-// (the old one-sided netHandleTradeReq is gone — a human's weapon can only change hands through
+// (the old one-sided netHandleTradeReq is gone — a HUMAN's weapon can only change hands through
 //  the two-sided hold pact in updateHoldTrades, so there's no request path left to grab one.)
+// AI cousins, though, deal freely with anyone: a client taps to trade with an NPC and the host
+// settles it one-sided, exactly like the host's own findNearTrade/tradeWeapons. No consent — an
+// NPC isn't a real person. The requesting player gives their held weapon, takes the NPC's.
+function netHandleNpcTrade(conn, cid) {
+  const req = cousinByConn(conn);              // the requesting player's body on the host
+  if (!req || req.downed) return;
+  const reqW = (req.weapon || WEAPONS.pistol).id;
+  if (reqW === 'fists') return;                // a bare fist has nothing to trade an NPC but skin
+  const npc = companions.find(k => k.recruited && !k.netP && !k.downed && k.data.id === cid);
+  if (!npc || !npc.weapon || npc.weapon.id === 'fists' || npc.weapon.id === reqW) return;
+  if (Math.hypot(npc.pos.x - req.pos.x, npc.pos.z - req.pos.z) > 3.4) return;
+  const npcW = npc.weapon.id;
+  setCompanionWeapon(npc, reqW);               // the NPC takes the player's weapon
+  try { conn.send({ t: 'tradeW', w: npcW, took: reqW }); } catch (e) {} // the client equips the NPC's
+  toast(`P${req.netP} TRADED WITH ${npc.data.name.toUpperCase()}`);
+  bloopyTradeNice();
+}
 // ---------- the bare-skin trade (multiplayer cousin swap) ----------
 // When a settled hold-trade has a bare fist on either side, the two players trade
 // EVERYTHING — cousins, kits, wounds, spots. Player numbers and the lobby never move;
@@ -6490,8 +6519,7 @@ function executeSkinTrade(a, b) {
     c1.hp = Math.min(s2.hp, c1.maxHp); c2.hp = Math.min(s1.hp, c2.maxHp);
     toast(`P${a.p} ~ ${d2.name.toUpperCase()} .ᐟ P${b.p} ~ ${d1.name.toUpperCase()} .ᐟ`, true);
   }
-  SFX.tradePing();
-  rumble(120, 0.5, 0.5);
+  rumble(120, 0.5, 0.5);   // the ACCEPTED soundoff chord (pact) + swap theme carry the audio now
   bloopyTradeNice(); // even a whole-skin deal gets the one-word review
 }
 // re-dress a player-driven companion as a different cousin on a different spot — the
@@ -6999,13 +7027,17 @@ function updatePlayer(dt) {
     const dr = Math.hypot(recruitAny.pos.x - player.pos.x, recruitAny.pos.z - player.pos.z);
     if (dc <= dr) { nearRecruit = null; nearNetRecruit = null; } else nearCrate = null;
   }
-  let nearTrade = null, nearNetPlayer = null;
+  // AI cousins trade freely on one tap (findNearTrade for the host, netFindNearNpcTrade for a
+  // client). A player-run cousin instead lights the "hold to trade" prompt — that swap is gated
+  // behind the two-sided consent pact, so no human's kit moves without their held agreement.
+  let nearTrade = null, nearNpcTrade = null, nearNetPlayer = null;
   if (!blockLower && !nearCrate && !nearRecruit && !nearNetRecruit) {
     nearTrade = findNearTrade();
-    if (!nearTrade) nearNetPlayer = net.role === 'client' ? netFindNearPlayerAny()
-                                  : net.role === 'host'   ? findNearNetPlayer() : null;
+    if (!nearTrade && net.role === 'client') nearNpcTrade = netFindNearNpcTrade();
+    if (!nearTrade && !nearNpcTrade) nearNetPlayer = net.role === 'client' ? netFindNearPlayerAny()
+                                                   : net.role === 'host'   ? findNearNetPlayer() : null;
   }
-  const showPrompt = !!(nearDowned || nearNetDowned || nearCrate || nearRecruit || nearNetRecruit || nearTrade || nearNetPlayer);
+  const showPrompt = !!(nearDowned || nearNetDowned || nearCrate || nearRecruit || nearNetRecruit || nearTrade || nearNpcTrade || nearNetPlayer);
   const bareHand = player.weapon.id === 'fists'; // fists out: the trade on offer is your skin
   hud.prompttxt.textContent = nearDowned ? 'Pick up ' + nearDowned.data.name
     : nearNetDowned ? `Revive P${nearNetDowned.p} ${nearNetDowned.data.name}`
@@ -7014,6 +7046,7 @@ function updatePlayer(dt) {
     : nearNetRecruit ? 'Recruit ' + nearNetRecruit.data.name
     : nearTrade ? (bareHand ? `Offer skin to ${nearTrade.data.name}`
                             : `Trade for ${nearTrade.data.name}'s ${(nearTrade.weapon || WEAPONS.pistol).name}`)
+    : nearNpcTrade ? `Trade for ${nearNpcTrade.name}'s ${WEAPONS[nearNpcTrade.wp] ? WEAPONS[nearNpcTrade.wp].name : 'weapon'}`
     : nearNetPlayer ? `Hold to trade with P${nearNetPlayer.p} ${nearNetPlayer.name}` : '';
   hud.prompt.classList.toggle('hidden', !showPrompt || input.device === 'touch');
   if (isTouch) hud.btnInteract.style.display = showPrompt ? 'flex' : 'none';
@@ -7024,6 +7057,7 @@ function updatePlayer(dt) {
     else if (nearRecruit) recruitCousin(nearRecruit);
     else if (nearNetRecruit) { try { net.conns[0].send({ t: 'recruitReq', c: nearNetRecruit.data.id }); } catch (e) {} }
     else if (nearTrade) tradeWeapons(nearTrade);
+    else if (nearNpcTrade) { try { net.conns[0].send({ t: 'npcTradeReq', c: nearNpcTrade.c }); } catch (e) {} } // NPCs deal freely
     else if (nearNetPlayer) {
       // no one-sided grab off another human: a tap just names it — HOLDING interact is what
       // reaches out (the hold auto-fires your trade emote and fills the consent pact)
@@ -9660,6 +9694,8 @@ function wireHostConn(conn) {
     } else if (m.t === 'tradeReq') {
       // legacy one-sided melee grab — no longer honoured. Taking a weapon off another human now
       // requires the two-sided hold pact (updateHoldTrades), so a lone request settles nothing.
+    } else if (m.t === 'npcTradeReq') {
+      netHandleNpcTrade(conn, m.c);   // AI cousins deal freely, no consent needed
     } else if (m.t === 'cswapKit') {
       // the reply half of a bare-skin trade: this player's old kit, bound for their partner
       const c = cousinByConn(conn);
@@ -10003,7 +10039,7 @@ function netClientData(m, conn, peer, code) {
     // the host's read of the consent pact from MY seat: my own fill, my partner's fill, and who
     // they are (player num + cousin id) so I can colour and grey the two faces. Rendered in
     // netClientTick; also kept as net.tradeP/PT so the skin-nudge still knows a ring is answering.
-    net.tp = { me: m.me || 0, them: m.them || 0, tp: m.tp || 0, tc: m.tc, t: performance.now() };
+    net.tp = { me: m.me || 0, them: m.them || 0, tp: m.tp || 0, tc: m.tc, ol: m.ol, t: performance.now() };
     net.tradeP = Math.max(m.me || 0, m.them || 0); net.tradePT = performance.now();
   } else if (m.t === 'tradeAcc') {
     tradePactAccept();   // both faces filled — the ACCEPTED sting + soundoff chord on our screen too
@@ -10254,7 +10290,7 @@ function netClientWorldTick(dt) {
   const tp = net.tp;
   if (tp && performance.now() - tp.t < 400 && (tp.me > 0.02 || tp.them > 0.02)) {
     const them = COUSINS.find(k => k.id === tp.tc) || COUSINS[0];
-    tradePact(myCousinData().color, them.color, tp.me, tp.them, them.id === 'blondie');
+    tradePact(myCousinData().color, them.color, tp.me, tp.them, them.id === 'blondie', tp.ol);
   } else tradePactHide();
 }
 // the local-input half: only meaningful while you're actually playing, so it's gated behind
@@ -10332,6 +10368,22 @@ function netFindNearPlayerAny() {
     const dx = g.blob.root.position.x - player.pos.x, dz = g.blob.root.position.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = { p: g.p, name: g.data.name }; }
+  }
+  return best;
+}
+// client-side: the nearest AI cousin (no player number) we're close to AND facing, holding a
+// different weapon than us. NPCs deal freely — no consent pact — so this is a plain one-tap
+// swap request the host settles, same as the host's own findNearTrade/tradeWeapons.
+function netFindNearNpcTrade() {
+  const myW = player.weapon.id;
+  if (myW === 'fists' || !WEAPONS[myW]) return null;   // a bare fist has nothing to trade an NPC but skin
+  let best = null, bestD = 2.4;
+  const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
+  for (const [, g] of net.actors) {
+    if (g.p || g.dn || !g.wp || g.wp === 'fists' || g.wp === myW) continue;
+    const dx = g.blob.root.position.x - player.pos.x, dz = g.blob.root.position.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = { c: g.data.id, name: g.data.name, wp: g.wp }; }
   }
   return best;
 }
