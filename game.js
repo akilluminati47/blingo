@@ -1215,7 +1215,7 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   // collect skin meshes for red damage flash
   const skinList = [];
   root.traverse(o => { if (o.isMesh && o.material !== shadowMat) skinList.push({ mesh: o, mat: o.material }); });
-  return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, shadow, stainCount, skinList, flashT: 0,
+  return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, mouth, shadow, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
 }
 // keep a blob's shadow pinned flat under its centre, projected onto whatever surface
@@ -1418,31 +1418,52 @@ function windowPane(rng, w, h) {
 // dissolves the boarded window with it, exactly as if it were one solid panel. (Without
 // this the boards, being their own meshes, stayed opaque and hung in the air.)
 const WIN_W = 1.2, WIN_H = 0.9, WIN_SILL = 1.05;
+// ONE welded wall slab with the porthole cut clean through it — a single extruded mesh
+// built from a rectangle-with-a-hole, so when the peek fades it there's a single translucent
+// surface and no seams (the old four-box build showed every join the instant it went
+// see-through). Absolute world-Y is baked into the shape; the mesh only carries x/z.
+function holedWallMesh(len, h, y0, t, wallC, horiz) {
+  const bottom = y0 - 0.6, top = y0 + h;
+  const sillY = y0 + WIN_SILL, headY = y0 + WIN_SILL + WIN_H;
+  const shape = new THREE.Shape();
+  shape.moveTo(-len / 2, bottom); shape.lineTo(len / 2, bottom);
+  shape.lineTo(len / 2, top);     shape.lineTo(-len / 2, top);
+  shape.closePath();
+  const hole = new THREE.Path();
+  hole.moveTo(-WIN_W / 2, sillY); hole.lineTo(WIN_W / 2, sillY);
+  hole.lineTo(WIN_W / 2, headY);  hole.lineTo(-WIN_W / 2, headY);
+  hole.closePath();
+  shape.holes.push(hole);
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: t, bevelEnabled: false });
+  geo.translate(0, 0, -t / 2);         // centre the thickness on the wall plane
+  const m = new THREE.Mesh(geo, mat(wallC));
+  ownMat(m);                           // private clone so the fade never touches other walls
+  if (!horiz) m.rotation.y = Math.PI / 2; // swing the along-axis onto z for a wall that runs in z
+  return m;
+}
 function wallWithWindow(group, colliders, x, z, horiz, len, t, h, y0, wallC, variant, shell, outDir = 1) {
   const topY = y0 + h;                 // walls span y0-0.6 .. y0+h, like every house wall
   const headY = y0 + WIN_SILL + WIN_H; // top of the opening
   const jambLen = (len - WIN_W) / 2;
   const peekMats = [];                 // every piece of this wall, faded as one
-  // Four slabs, but sized to OVERLAP so no seam shows around the hole: the sill and
-  // header run the full wall width, and the jambs run the FULL wall height (not just the
-  // opening's) — so each jamb is a solid column the horizontal runs bury their ends in.
-  // The only gap left is the window itself, and every meeting edge sits inside solid
-  // geometry rather than on a visible join. [length, box height, box centre y, offset]
-  const slabs = [
+  // physics only — four invisible slab colliders ring the hole (sill, header, two jambs),
+  // sized to overlap so nothing slips a corner. Being colliders, not meshes, they add no
+  // seam; the single welded slab above is the whole visible wall.
+  const slabCols = [
     [len, WIN_SILL + 0.6, y0 + (WIN_SILL - 0.6) / 2, 0],                       // sill run (full width)
     [len, topY - headY, (topY + headY) / 2, 0],                                // header run (full width)
     [jambLen, h + 0.6, y0 + h / 2 - 0.3, -(WIN_W + jambLen) / 2],              // jambs (FULL height)
     [jambLen, h + 0.6, y0 + h / 2 - 0.3, (WIN_W + jambLen) / 2],
   ];
-  for (const [sl, sh, sy, off] of slabs) {
+  for (const [sl, sh, sy, off] of slabCols) {
     if (sl <= 0.01 || sh <= 0.01) continue;
     const sx = horiz ? x + off : x, sz = horiz ? z : z + off;
-    const m = box(horiz ? sl : t, sh, horiz ? t : sl, wallC);
-    m.position.set(sx, sy, sz);
-    group.add(m);
     colliders.push(aabb(sx, sz, horiz ? sl / 2 : t / 2, horiz ? t / 2 : sl / 2, sh, sy - sh / 2));
-    peekMats.push(ownMat(m));
   }
+  const wall = holedWallMesh(len, h, y0, t, wallC, horiz);
+  wall.position.set(x, 0, z);
+  group.add(wall);
+  peekMats.push(wall.material);
   if (variant > 0) { // boarded over: planks nailed across the opening, past its edges
     const wood = [0x6a4a2c, 0x7a5836, 0x5c3f24];
     const midY = y0 + WIN_SILL + WIN_H / 2;
@@ -4404,7 +4425,10 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     state: mode === 'grave' ? 'emerge' : mode === 'sleeper' ? 'sleep' : mode === 'corpse' ? 'corpse' : 'chase',
     attackT: 0, deadT: 0, walkPhase: Math.random() * 10,
     groanT: Math.random() * 6, scale,
-    brainExposed: brain, blind, stepT: Math.random(),
+    brainExposed: brain, blind, droopy, stepT: Math.random(),
+    // head-animation pool: twitches, double-takes and (straight-brow ones) a mouth gape —
+    // fired off headT, jumped by a blind repath (repathed). See runHeadAnim.
+    headT: Math.random() * 2.5, headAnim: null, repathed: false,
     bleeding: wounded, dripT: 0, purple, red, green, goreHorn, biteMult: (red || green) ? 1.35 : 1,
     mode, emergeT: 0, hornWave: !!opts.horns, // NOTE: goreHorn deliberately never sets hornWave — it never shields a boss
     farBorn: mode === 'runner', // runners live on a longer leash — they were born out past the fog
@@ -7441,6 +7465,55 @@ function inTruckBed(px, pz, py) {
   }
   return false;
 }
+// ---------- zombie head-animation pool ----------
+// zombie mouths are built box(0.2, 0.1, 0.05) at head-local y -0.16; the gape grows that
+// box downward (top edge stays put) and trembles, so it reads as a jaw dropping open
+const ZMOUTH_BASE_Y = -0.16, ZMOUTH_BASE_SY = 0.1;
+function pickHeadAnim(z, engaging) {
+  const r = Math.random();
+  // straight-brow walkers gape now and then — the jaw sagging open, trembling, then shut
+  if (!z.droopy && r < (engaging ? 0.3 : 0.16)) return { type: 'gape', t: 0, dur: 1.1 + Math.random() * 1.4 };
+  if (r < 0.5) return { type: 'twitch', t: 0, dur: 0.22 + Math.random() * 0.12 }; // a single sharp neck jerk
+  if (r < 0.82) return { type: 'shake', t: 0, dur: 0.4 };                          // a fast flurry of them
+  return { type: 'double', t: 0, dur: 0.6 };                                       // a look-away double-take
+}
+// drive one zombie's head/mouth for the frame: run the current pool animation (or, when idle,
+// roll for the next). Damaged and actively-lunging walkers pull from it constantly so they
+// never hold a dead stare; blind ones snap a double-take the instant they repath.
+function runHeadAnim(z, b, dt, engaging) {
+  const head = b.head, mouth = b.mouth;
+  if (z.blind && z.repathed) { z.repathed = false; z.headAnim = { type: 'double', t: 0, dur: 0.6 }; z.headT = 1.4 + Math.random() * 2; }
+  let rx = 0, ry = 0, rz = 0, grow = 0;
+  const a = z.headAnim;
+  if (a) {
+    a.t += dt;
+    const p = a.t / a.dur, e = 1 - p;
+    if (a.type === 'twitch') { ry = Math.sin(a.t * 46) * 0.14 * e; rx = Math.sin(a.t * 40) * 0.07 * e; }
+    else if (a.type === 'shake') { ry = Math.sin(a.t * 30) * 0.22 * e; rz = Math.cos(a.t * 30) * 0.06 * e; }
+    else if (a.type === 'double') { ry = Math.sin(p * Math.PI) * (p < 0.5 ? 0.5 : -0.28); rx = Math.sin(p * Math.PI) * 0.08; }
+    else if (a.type === 'gape') {
+      const openAmt = Math.min(a.t / 0.35, (a.dur - a.t) / 0.3, 1); // ease open, hold, ease shut
+      grow = Math.max(openAmt, 0) * (1.6 + Math.sin(a.t * 22) * 0.28); // gape + a size tremble
+      ry = Math.sin(a.t * 17) * 0.05 * Math.max(openAmt, 0);          // a neck twitch riding it
+    }
+    if (a.t >= a.dur) z.headAnim = null;
+  } else if (!z.isBoss) {
+    z.headT -= dt;
+    if (z.headT <= 0) {
+      const wants = z.bleeding || engaging || (!z.droopy && Math.random() < 0.7);
+      if (wants) { z.headAnim = pickHeadAnim(z, engaging); z.headT = (engaging ? 0.45 : z.bleeding ? 1.0 : 2.0) + Math.random() * (engaging ? 0.6 : 2); }
+      else z.headT = 1.5 + Math.random() * 2.5;
+    }
+  }
+  head.rotation.x = rx;
+  head.rotation.y = ry;
+  head.rotation.z = Math.sin(z.walkPhase * 0.5) * 0.18 + rz; // keep the base walk head-sway
+  if (mouth) {
+    const sy = ZMOUTH_BASE_SY * (1 + grow);
+    mouth.scale.y = sy;
+    mouth.position.y = ZMOUTH_BASE_Y - (sy - ZMOUTH_BASE_SY) / 2; // grow the LOWER edge; top stays put
+  }
+}
 function updateZombies(dt) {
   for (let i = zombies.length - 1; i >= 0; i--) {
     const z = zombies[i];
@@ -7541,7 +7614,9 @@ function updateZombies(dt) {
       } else wander = true;
       if (wander) {
         z.wanderT -= dt;
-        if (z.wanderT <= 0) { z.wanderT = 2.5 + Math.random() * 4; z.wanderYaw = Math.random() * TAU; }
+        // fresh bearing = a repath: the blind one snaps its head around in a double-take,
+        // reading a room it can't see (runHeadAnim jumps the queue on this flag)
+        if (z.wanderT <= 0) { z.wanderT = 2.5 + Math.random() * 4; z.wanderYaw = Math.random() * TAU; z.repathed = true; }
         tx = z.pos.x + Math.sin(z.wanderYaw) * 6;
         tz = z.pos.z + Math.cos(z.wanderYaw) * 6;
       }
@@ -7618,11 +7693,14 @@ function updateZombies(dt) {
       z.stepT -= dt * z.speed;
       if (z.stepT <= 0) { z.stepT = 0.55; if (pDist < 22) play3d(z.pos.x, z.pos.z, () => SFX.step(false)); }
     }
-    // idle claw-wave: it's near the prey (a wall between them, or pressed as tight as the
-    // horde will let it, or ringing a rooftop) but can't close — reach and paw instead of
-    // standing frozen. reachT ramps the pose in/out so it never snaps on
+    // engaging: right on top of the prey, between lunges — it leans in clawing (and its head
+    // works, below) instead of walking up and freezing dead until the bite timer comes round
+    const engaging = !z.isBoss && preyDist < 2.2 && z.attackT < 0.55;
+    // idle claw-wave: near the prey (a wall between them, pressed as tight as the horde will
+    // let it, ringing a rooftop, or leaning in for a bite) but not closing — reach and paw
+    // instead of standing frozen. reachT ramps the pose in/out so it never snaps on
     const reaching = !z.isBoss && z.attackT < 0.5 &&
-      (surrounding || ((z.blocked || (dist <= 1.6 && preyDist > 1.9)) && preyDist < 7));
+      (surrounding || engaging || ((z.blocked || (dist <= 1.6 && preyDist > 1.9)) && preyDist < 7));
     z.reachT = clamp((z.reachT || 0) + (reaching ? 1 : -1) * dt * 4, 0, 1);
     if (z.reachT > 0.01) z.clawPhase = (z.clawPhase || 0) + dt * 6;
     z.attackT -= dt;
@@ -7713,7 +7791,8 @@ function updateZombies(dt) {
     b.wob.rotation.x = 0.15 + lunge * 0.9;
     const wobble = sw * 0.05;
     b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
-    b.head.rotation.z = Math.sin(z.walkPhase * 0.5) * 0.18;
+    // head + jaw: twitches, double-takes and gapes off the pool (keeps the base walk-sway)
+    runHeadAnim(z, b, dt, engaging);
   }
 }
 
