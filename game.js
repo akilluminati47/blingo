@@ -3964,7 +3964,7 @@ let tabTitle = null;
 // settings UI is built at load and reads net.role for the gore-horde notch glow, well before
 // the lobby code runs — a later const would still be in its temporal dead zone at that point.
 const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
-  ghosts: new Map(), actors: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '',
+  ghosts: new Map(), actors: new Map(), recruits: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '',
   hostPaused: false, hostGoreHorde: false };
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
@@ -6866,22 +6866,27 @@ function updatePlayer(dt) {
   const blockLower = nearDowned || nearNetDowned;
   nearCrate = blockLower ? null : findNearCrate();
   nearRecruit = blockLower ? null : findNearRecruit();
-  if (nearCrate && nearRecruit) {
+  // a client can sign up the streamed recruit-beacon cousins too (host owns the squad, so
+  // it's a request) — treated exactly like a local recruit for prompt + priority
+  let nearNetRecruit = (!blockLower && net.role === 'client') ? netFindNearRecruit() : null;
+  const recruitAny = nearRecruit || nearNetRecruit;   // crate vs. whichever recruit is closer
+  if (nearCrate && recruitAny) {
     const dc = Math.hypot(nearCrate.pos.x - player.pos.x, nearCrate.pos.z - player.pos.z);
-    const dr = Math.hypot(nearRecruit.pos.x - player.pos.x, nearRecruit.pos.z - player.pos.z);
-    if (dc <= dr) nearRecruit = null; else nearCrate = null;
+    const dr = Math.hypot(recruitAny.pos.x - player.pos.x, recruitAny.pos.z - player.pos.z);
+    if (dc <= dr) { nearRecruit = null; nearNetRecruit = null; } else nearCrate = null;
   }
   let nearTrade = null, nearNetTrade = null;
-  if (!blockLower && !nearCrate && !nearRecruit) {
+  if (!blockLower && !nearCrate && !nearRecruit && !nearNetRecruit) {
     nearTrade = findNearTrade();
     if (!nearTrade && net.role === 'client') nearNetTrade = netFindNearTrade();
   }
-  const showPrompt = !!(nearDowned || nearNetDowned || nearCrate || nearRecruit || nearTrade || nearNetTrade);
+  const showPrompt = !!(nearDowned || nearNetDowned || nearCrate || nearRecruit || nearNetRecruit || nearTrade || nearNetTrade);
   const bareHand = player.weapon.id === 'fists'; // fists out: the trade on offer is your skin
   hud.prompttxt.textContent = nearDowned ? 'Pick up ' + nearDowned.data.name
     : nearNetDowned ? `Revive P${nearNetDowned.p} ${nearNetDowned.data.name}`
     : nearCrate ? 'Open Crate'
     : nearRecruit ? 'Recruit ' + nearRecruit.data.name
+    : nearNetRecruit ? 'Recruit ' + nearNetRecruit.data.name
     : nearTrade ? (bareHand ? `Offer skin to ${(nearTrade.netP ? 'P' + nearTrade.netP + ' ' : '') + nearTrade.data.name}`
                             : `Trade for ${nearTrade.data.name}'s ${(nearTrade.weapon || WEAPONS.pistol).name}`)
     : nearNetTrade ? (bareHand ? `Offer skin to P${nearNetTrade.p} ${nearNetTrade.data.name}`
@@ -6893,6 +6898,7 @@ function updatePlayer(dt) {
     else if (nearNetDowned) { try { net.conns[0].send({ t: 'reviveReq', p: nearNetDowned.p }); } catch (e) {} }
     else if (nearCrate) openCrate(nearCrate);
     else if (nearRecruit) recruitCousin(nearRecruit);
+    else if (nearNetRecruit) { try { net.conns[0].send({ t: 'recruitReq', c: nearNetRecruit.data.id }); } catch (e) {} }
     else if (nearTrade) tradeWeapons(nearTrade);
     else if (nearNetTrade) {
       // a tap with a bare fist names the offer; the swap itself is the two-sided hold
@@ -6910,7 +6916,7 @@ function updatePlayer(dt) {
   // player's bar is colour-coded to the cousin we picked; it pulses red when critical
   hud.health.style.background = player.colorHex || '#2ecc71';
   hud.health.classList.toggle('low', hpFrac <= 0.25);
-  hud.healthTxt.innerHTML = Math.ceil(player.hp) + ' HP <span class="pnum">| Player 1</span>';
+  hud.healthTxt.innerHTML = Math.ceil(player.hp) + ` HP <span class="pnum">| Player ${net.playerNum || 1}</span>`;
   updateSquadBars();
   hud.vignette.style.opacity = player.hp < 40 ? (1 - player.hp / 40) * 0.9 :
     (game.time - player.lastHurtT < 0.4 && game.time > player.lastHurtT ? 0.7 : 0);
@@ -9513,6 +9519,13 @@ function wireHostConn(conn) {
       }
     } else if (m.t === 'reviveReq') {
       netHandleReviveReq(conn, m.p | 0);
+    } else if (m.t === 'recruitReq') {
+      // a client walked up to a waiting cousin: recruit it into the shared squad if they're
+      // actually next to it. It lands on every screen through the next snapshot (drops out of
+      // rc, joins ac) and the recruit beacon clears everywhere.
+      const rq = cousinByConn(conn);
+      const c = companions.find(k => k.data.id === m.c && !k.recruited && !k.netP);
+      if (c && rq && Math.hypot(c.pos.x - rq.pos.x, c.pos.z - rq.pos.z) < 4) recruitCousin(c);
     } else if (m.t === 'dead') {
       netFreeCousin(conn, false);
     } else if (m.t === 'leave') {
@@ -9608,6 +9621,13 @@ function netHostTick(dt) {
   const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
     playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed,
     playerBlob.arms[playerBlob.gunArm].rotation.x)];
+  // the remaining cousins still waiting to be found: streamed so every client sees the same
+  // recruit beacons the host does and can walk one up themselves (netFindNearRecruit)
+  const rc = [];
+  for (const c of companions) {
+    if (c.recruited) continue;
+    rc.push({ c: c.data.id, x: R(c.pos.x), z: R(c.pos.z) });
+  }
   for (const c of companions) {
     if (!c.recruited) continue;
     ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed,
@@ -9619,10 +9639,10 @@ function netHostTick(dt) {
     zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
       st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' || z.state === 'corpse' ? 2 : 0),
       sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, gr: z.green ? 1 : 0, gh: z.goreHorn ? 1 : 0,
-      ho: (z.hornWave || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0 });
+      ho: (z.hornWave || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0, b3: z.isBoss3 ? 1 : 0 });
   }
   const boss = bossState.boss;
-  netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb,
+  netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb, rc,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
     b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), // which one is up: clients dress the bar in his colours
     ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
@@ -9913,6 +9933,29 @@ function netApplySnapshot(m) {
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
   updatePauseLobby();   // the slots readout follows the actor list live, even mid-pause
+  // the remaining cousins still waiting out there: mirror the host's recruit beacons so a
+  // client sees (and can walk up) every cousin left to find. A standing cousin blob under a
+  // coloured shaft; recruiting one drops it from the next snapshot (netClientWorldTick
+  // animates them; netFindNearRecruit lets a client claim one).
+  const seenR = new Set();
+  for (const r of (m.rc || [])) {
+    seenR.add(r.c);
+    let g = net.recruits.get(r.c);
+    if (!g) {
+      const cd = COUSINS.find(c => c.id === r.c) || COUSINS[0];
+      const blob = buildBlob({ color: cd.color, gunHand: r.c === 'blondie' ? 'left' : 'right' });
+      scene.add(blob.root);
+      const beacon = makeBeacon(cd.color, 0.28);
+      scene.add(beacon);
+      g = { blob, beacon, data: cd, pos: new THREE.Vector3(r.x, 0, r.z), walkPhase: Math.random() * 9 };
+      net.recruits.set(r.c, g);
+    }
+    g.pos.x = r.x; g.pos.z = r.z;
+  }
+  for (const [id, g] of net.recruits) if (!seenR.has(id)) {
+    scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); scene.remove(g.beacon);
+    net.recruits.delete(id);
+  }
   const seenZ = new Set();
   for (const zs of m.zb) {
     seenZ.add(zs.i);
@@ -9920,9 +9963,9 @@ function netApplySnapshot(m) {
     if (!g) {
       // bosses wear their own livery: without this they fell through to a random
       // zombie colour, so a joiner met a differently-coloured monster than the host
-      const color = zs.bo ? (zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
+      const color = zs.bo ? (zs.b3 ? BOSS_INFECTED : zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
         : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
-      const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b2 ? CRIMSON_HANDS : 0 });
+      const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b3 ? INFECTED_HANDS : zs.b2 ? CRIMSON_HANDS : 0 });
       if (zs.ho || zs.bo) for (const s of [-1, 1]) {
         const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
         horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
@@ -9930,7 +9973,7 @@ function netApplySnapshot(m) {
         blob.head.add(horn);
       }
       scene.add(blob.root);
-      g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2,
+      g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2, isBoss3: !!zs.b3,
         state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false,
         purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh };
       net.ghosts.set(zs.i, g);
@@ -10016,6 +10059,21 @@ function netClientWorldTick(dt) {
     }
     placeShadow(b, g.pos.x, g.pos.z);
     updateFlash(b, dt);
+  }
+  // the waiting cousins: idle sway under a slow-turning, breathing beacon — the same read
+  // the host gives them (see the unrecruited branch of updateCompanions)
+  for (const [, g] of net.recruits) {
+    const b = g.blob;
+    const gy = groundHeight(g.pos.x, g.pos.z);
+    b.root.position.set(g.pos.x, gy, g.pos.z);
+    b.wob.scale.y = 1 + Math.sin(performance.now() * 0.002 + g.walkPhase) * 0.03;
+    b.root.rotation.y = Math.sin(performance.now() * 0.0006 + g.walkPhase) * 0.6;
+    b.arms[b.gunArm].rotation.x = -Math.PI / 2;
+    b.arms[b.offArm].rotation.x = -0.1;
+    placeShadow(b, g.pos.x, g.pos.z, gy);
+    g.beacon.position.set(g.pos.x, gy + BEACON_Y, g.pos.z);
+    g.beacon.material.opacity = 0.2 + Math.sin(performance.now() * 0.003) * 0.1;
+    g.beacon.rotation.y += dt * 0.5;
   }
   netRefreshClientBars();
   // fires the moment hp hits zero, paused or not — the host should never be kept waiting
@@ -10112,6 +10170,16 @@ function netFindNearDowned() {
   }
   return best;
 }
+// an unrecruited cousin (streamed recruit beacon) close enough for a CLIENT to sign up. The
+// host owns the squad, so a tap just asks; the recruit lands on every screen at once.
+function netFindNearRecruit() {
+  let best = null, bestD = 3.2;   // matches the host's findNearRecruit reach
+  for (const [, g] of net.recruits) {
+    const d = Math.hypot(g.pos.x - player.pos.x, g.pos.z - player.pos.z);
+    if (d < bestD) { bestD = d; best = g; }
+  }
+  return best;
+}
 // a client's own shots don't damage ghosts directly: local feedback + wire to the host
 function netClientShot(z, dmg, kx, kz, opts) {
   if (!z.nid) return;
@@ -10141,6 +10209,7 @@ function netLeave() {
   updateHostPauseLock();
   for (const [nid] of [...net.ghosts]) netRemoveGhost(nid);
   for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
+  for (const [id, g] of [...net.recruits]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); scene.remove(g.beacon); net.recruits.delete(id); }
   for (const c of companions) { c.netP = null; c.netConn = null; c.netPose = null; c.netHold = 0; c.netTok = null; }
   net.leaving = false;
 }
