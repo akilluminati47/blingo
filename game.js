@@ -688,7 +688,11 @@ const SFX = {
     else if (id === 'rifle') { noiseBurst(0.04, 900, 0.3); tone(400, 0.05, 0.28, 'square', 260); setTimeout(() => tone(300, 0.06, 0.3, 'square', 200), 90); }
     else if (id === 'smg') { tone(680, 0.03, 0.26, 'square', 520); setTimeout(() => tone(560, 0.03, 0.26, 'square', 440), 60); setTimeout(() => tone(760, 0.03, 0.24, 'square', 600), 120); }
     else if (id === 'pistol') { tone(760, 0.04, 0.28, 'square', 560); setTimeout(() => tone(600, 0.05, 0.3, 'square', 440), 80); }
-    else { noiseBurst(0.05, 320, 0.25); } // fists: soft whoosh
+    // fists and armed melee each get their own switch cue, so swapping between the two is
+    // audibly different: bare hands crack the knuckles; a melee weapon rings + hefts in the grip
+    else if (id === 'fists') { noiseBurst(0.03, 420, 0.22); tone(220, 0.045, 0.2, 'square', 150); setTimeout(() => tone(170, 0.05, 0.2, 'square', 110), 75); }
+    else if (w && w.melee) { noiseBurst(0.045, 760, 0.28); tone(540, 0.06, 0.24, 'triangle', 360); setTimeout(() => { noiseBurst(0.04, 300, 0.3); tone(340, 0.07, 0.26, 'sawtooth', 220); }, 95); }
+    else { noiseBurst(0.05, 320, 0.25); } // anything else (e.g. the FPV toggle): soft whoosh
   },
   crate() { tone(300, 0.1, 0.3, 'triangle', 500); setTimeout(() => tone(600, 0.15, 0.3, 'triangle', 900), 100); },
   pickup() { tone(500, 0.08, 0.25, 'sine', 800); },
@@ -895,7 +899,7 @@ const WEAPONS = {
   axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 31, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
   pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 5, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14, fRange: 14 },
   smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 2, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1, fRange: 9 },
-  rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 5, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, skullcrack: true, fRange: 30 },
+  rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 5, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, armSever: true, skullcrack: true, fRange: 30 },
   shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 2, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true, fRange: 7 },
   magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [140, 1, 0.75],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18 },
   sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 22,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [260, 1, 1],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
@@ -966,6 +970,12 @@ function buildGunMesh(id) {
     const body = box(0.09, 0.13, 0.72, 0x3b3e45); body.position.set(0, 0.05, -0.2); g.add(body);
     const magz = box(0.07, 0.2, 0.11, c); magz.position.set(0, -0.1, -0.1); magz.rotation.x = 0.3; g.add(magz);
     const stock = box(0.08, 0.12, 0.2, c); stock.position.set(0, 0.02, 0.2); g.add(stock);
+    // short barrel tube off the front end — the round leaves ITS tip now (muzzle anchor below)
+    const barrel = cyl(0.03, 0.033, 0.28, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.71); g.add(barrel);
+    // a very small V-notch sight tab on the front half of the tube: a low block topped by two
+    // uprights splayed into a V — an open notch to line a mark up through
+    const sightBase = box(0.05, 0.02, 0.05, 0x101216); sightBase.position.set(0, 0.10, -0.78); g.add(sightBase);
+    for (const s of [-1, 1]) { const post = box(0.013, 0.05, 0.03, 0x141619); post.position.set(0.02 * s, 0.13, -0.78); post.rotation.z = -0.5 * s; g.add(post); }
   } else if (id === 'sniper') {
     // long-barrelled marksman rifle with a proper scope + lens
     const body = box(0.08, 0.12, 1.15, c); body.position.set(0, 0.05, -0.42); g.add(body);
@@ -987,7 +997,7 @@ function buildGunMesh(id) {
     // muzzle anchors track the geometry above: the magnum's rides out with its bigger frame,
     // the AA-12's sits at the tip of its short barrel rather than a pump's long one
     const tip = { pistol: [0.05, -0.3], magnum: [0.05 * MAGNUM_BIG, -0.3 * MAGNUM_BIG], smg: [0.04, -0.42],
-      shotgun: [0.06, -0.72], rifle: [0.05, -0.58], sniper: [0.06, -1.14] }[id];
+      shotgun: [0.06, -0.72], rifle: [0.06, -0.84], sniper: [0.06, -1.14] }[id]; // rifle muzzle rides at the new barrel tip
     if (tip) {
       const muz = new THREE.Group();
       muz.position.set(0, tip[0], tip[1]);
@@ -5865,8 +5875,12 @@ function fireWeapon() {
     return;
   }
   if (player.reloading > 0) return;
-  if (player.clip <= 0) { SFX.dry(); tryReload(); return; }
+  // empty AND nothing left to load: just the dry click. The reload is kicked off by the
+  // last round leaving the mag (below), not by a wasted trigger pull on zero.
+  if (player.clip <= 0) { SFX.dry(); return; }
   player.clip--;
+  // the last round out of the mag starts the reload on its own
+  if (player.clip === 0) tryReload();
   game.shots = (game.shots | 0) + 1; // the death screen counts every round you spent
   player.lastShotT = game.time;
   // gunshots are loud: blind zombies home in on this spot
@@ -6094,8 +6108,12 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
     stainBody(b.wob, b.stainCount, localAng + (Math.random() - 0.5) * 0.6, -0.1 + Math.random() * 0.55, 1);
   }
 
-  // limb dismemberment — a direct hit on an arm/leg severs that exact limb; otherwise it's a body-shot chance
-  if (!isHead && !z.isBoss && w && w.dismember) {
+  // the assault rifle takes an arm clean off in a single hit: a round that catches an arm
+  // severs it outright, no roll (armSever). Legs and body shots still go through the chance.
+  if (w && w.armSever && !isHead && !z.isBoss && limb && limb.kind === 'arm' && !b.armGone[limb.idx]) {
+    blowLimb(z, kx, kz, limb);
+  } else if (!isHead && !z.isBoss && w && w.dismember) {
+    // limb dismemberment — a direct hit on an arm/leg severs that exact limb; else a body-shot chance
     const base = limb ? 0.9 : 0.55;
     if (Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : base)) blowLimb(z, kx, kz, limb);
   }
@@ -6515,6 +6533,18 @@ function setCompanionWeapon(c, id) {
   if (c.gunMesh) c.gunMesh.removeFromParent();
   c.gunMesh = id === 'fists' ? null : buildGunMesh(id); // melee models show in their fist too
   if (c.gunMesh) c.blob.gunSocket.add(c.gunMesh);
+  // ammo, tracked like the player's inventory: a gun ships with a full load (mag + reserve);
+  // melee and bare fists never run dry. When this hits zero the cousin drops the gun.
+  c.gunAmmo = WEAPONS[id].melee ? Infinity : (WEAPONS[id].mag + WEAPONS[id].ammo);
+}
+// a cousin's gun runs dry mid-fight: they drop the empty iron and fall back to bare hands,
+// and the squad's own loot + trade rules re-arm them from the next crate. (Player-run
+// cousins keep their own count on their own screen — this only fires for AI ones.)
+function cousinDropEmptyGun(c) {
+  if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 26) play3d(c.pos.x, c.pos.z, () => SFX.dry());
+  const was = c.weapon.name;
+  setCompanionWeapon(c, 'fists');
+  toast(`${c.data.name.toUpperCase()} EMPTIED THE ${was.toUpperCase()} — BARE-KNUCKLE NOW`);
 }
 // a companion opens a crate it walked up to and equips whatever gun it finds
 // every cousin dreams of one specific gun; spare finds flow to whoever still swings melee
@@ -7333,7 +7363,9 @@ function updateCompanions(dt) {
           spawnTracer(_cv.clone(), bird.g.position.clone());
           killCrow(bird, (bird.g.position.x - c.pos.x) / bD, (bird.g.position.z - c.pos.z) / bD, (gun.dmg || 5) * 2);
           game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
+          c.gunAmmo = (c.gunAmmo ?? Infinity) - 1; // a crow round comes off the same count
           if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(gun));
+          if ((c.gunAmmo ?? Infinity) <= 0) cousinDropEmptyGun(c);
         }
       }
     }
@@ -7398,6 +7430,10 @@ function updateCompanions(dt) {
         // leaves the instant the barrel actually crosses the mark
         c.shootCd = (cw.auto ? 0.32 : cw.id === 'shotgun' ? 0.6 : 0.7) + Math.random() * 0.15;
         c.lastShotT = game.time; // drives the recoil kick on the gun arm, below
+        c.gunAmmo = (c.gunAmmo ?? Infinity) - 1; // spend a round; empties handled after the shot
+        // even a cousin misses: mostly a range thing (a close mark is a sure thing, a far one
+        // isn't), with a touch more spray from a full-auto gun. Capped so they still earn their keep.
+        const miss = Math.random() < Math.min(0.32, 0.03 + tD * 0.011 + (cw.auto ? 0.04 : 0));
         // cousin gunfire rings out just as loud as ours: blind zombies home in on it too
         game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
         const sy = c.y + 1.0;
@@ -7420,12 +7456,18 @@ function updateCompanions(dt) {
           const hx = c.pos.x + ddx * tWall, hy = sy + ddy * tWall, hz = c.pos.z + ddz * tWall;
           spawnTracer(_cv.clone(), new THREE.Vector3(hx, hy, hz));
           spawnParticles(hx, hy, hz, 0x9a9a8a, 3, 2, 0.3);
+        } else if (miss) {
+          // a clean miss: the rounds sail wide of the mark and hit nothing
+          const shots = cw.id === 'shotgun' ? 3 : 1;
+          const ma = Math.random() * TAU, mo = 0.8 + Math.random() * 1.1;
+          for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(aimX + Math.cos(ma) * mo + (Math.random() - 0.5) * s, zy + (Math.random() - 0.5) * 0.5, aimZ + Math.sin(ma) * mo + (Math.random() - 0.5) * s));
         } else {
           const shots = cw.id === 'shotgun' ? 3 : 1;
           for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(aimX + (Math.random() - 0.5) * s, zy, aimZ + (Math.random() - 0.5) * s));
           damageZombie(tgt, (cw.dmg || 5) * 1.25 * shots * rangeFactor(cw, tD), kx, kz, 1, { weapon: cw, dist: tD, isHead: false });
         }
         if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
+        if ((c.gunAmmo ?? Infinity) <= 0) cousinDropEmptyGun(c); // out of ammo: drop the empty gun
       }
     }
     b.root.position.set(c.pos.x, c.y, c.pos.z);
