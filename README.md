@@ -16,6 +16,21 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - Seamless horizon rendering on a stable geometry clipmap: LOD ground rings run dense near the camera out past the fog line, the draw-distance setting scales live chunks and fog together so nothing ever pops in, and the town-center skyline stays visible as a fog-free silhouette landmark from any distance, with sky-high cousin beacons and always-on player/boss chevrons to steer home by
 - An opening splash of rushing stars where the six cousins take turns rotating under their name and XXL chevron, in sync with the tab title. Any click, key, button, or tap wakes the audio with a six-motif opening medley (at your remembered volume) and drops you into the cousin picker
 
+## Cousin Melee Weapons
+
+Every cousin starts with their own signature melee (infinite swings, close-range bonus). Speed is swing rate; damage is per hit.
+
+| Cousin | Weapon | Range | Speed | Damage |
+| --- | --- | --- | --- | --- |
+| Blingo | Slugger Bat | 3.4m | 130 rpm | 19 |
+| Blazo | Fire Axe | 3.2m | 96 rpm | 31 |
+| Blizzy | Katana | 3.7m | 175 rpm | 27 |
+| Blomba | Sledgehammer | 3.1m | 72 rpm | 39 (58 in her hands) |
+| Bloopy | Lead Pipe | 3.1m | 150 rpm | 16 |
+| Blondie | Machete | 3.2m | 155 rpm | 23 |
+
+Blomba is the family melee tank: any melee she swings hits half again as hard, and her kills come apart instead of just falling over.
+
 ## Join a Lobby or play Solo
 
 - https://blingo.pages.dev
