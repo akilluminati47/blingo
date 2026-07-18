@@ -34,4 +34,4 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - Pause: Esc or P / Start / on-screen pause button
 - View: V / Select / on-screen button
 
-  *Xbox controller example for gamepads Playstation also supported .ᐟ
+  *Xbox controller example for gamepads, Playstation & Nintendo also supported .ᐟ

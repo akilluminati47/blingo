@@ -3162,7 +3162,11 @@ touchLayer.addEventListener('touchcancel', touchEnd);
 // --- gamepad ---
 addEventListener('gamepadconnected', e => {
   gpIndex = e.gamepad.index;
-  input.gamepadKind = /dual|playstation|054c|ps4|ps5/i.test(e.gamepad.id) ? 'ps' : 'xbox';
+  const id = e.gamepad.id;
+  // Nintendo's vendor id is 057e (Switch Pro pad + Joy-Cons); fall back to name matches
+  input.gamepadKind =
+    /057e|switch|joy-?con|nintendo/i.test(id) ? 'switch' :
+    /dual|playstation|054c|ps4|ps5/i.test(id) ? 'ps' : 'xbox';
 });
 addEventListener('gamepaddisconnected', e => { if (gpIndex === e.gamepad.index) gpIndex = null; });
 const gpPrev = {};
@@ -3253,6 +3257,7 @@ const ICON = {
   kbm: p => `icons/kbm/${p}.png`,
   xbox: p => `icons/xbox/${p}.png`,
   ps: p => `icons/ps/${p}.png`,
+  switch: p => `icons/switch/${p}.png`,
   touch: p => `icons/touch/${p}.png`,
 };
 const CONTROL_SCHEMES = {
@@ -3265,6 +3270,7 @@ const CONTROL_SCHEMES = {
       [['kbm', 'mouse_right'], 'Zoom / ADS'],
       [['kbm', 'keyboard_f'], 'Swap weapon'],
       ['V', 'First / Third view'],
+      [['kbm', 'keyboard_escape'], 'Pause'],
       [['kbm', 'mouse_scroll'], 'Cam distance'],
       [['kbm', 'keyboard_e'], 'Interact'],
       [['kbm', 'keyboard_r'], 'Reload'],
@@ -3283,7 +3289,8 @@ const CONTROL_SCHEMES = {
       [['xbox', 'xbox_rt'], 'Shoot'],
       [['xbox', 'xbox_lt'], 'Zoom / ADS'],
       [['xbox', 'xbox_button_color_y'], 'Swap weapon'],
-      ['Select', 'First / Third view'],
+      [['xbox', 'xbox_button_view'], 'First / Third view'],
+      [['xbox', 'xbox_button_menu'], 'Pause'],
       [['xbox', 'xbox_button_color_x'], 'Interact'],
       [['xbox', 'xbox_button_color_b'], 'Reload'],
       [['xbox', 'xbox_button_color_a'], 'Jump'],
@@ -3300,7 +3307,8 @@ const CONTROL_SCHEMES = {
       [['ps', 'playstation_trigger_r2'], 'Shoot'],
       [['ps', 'playstation_trigger_l2'], 'Zoom / ADS'],
       [['ps', 'playstation_button_triangle'], 'Swap weapon'],
-      ['Share', 'First / Third view'],
+      [['ps', 'playstation_button_share'], 'First / Third view'],
+      [['ps', 'playstation_button_options'], 'Pause'],
       [['ps', 'playstation_button_square'], 'Interact'],
       [['ps', 'playstation_button_circle'], 'Reload'],
       [['ps', 'playstation_button_cross'], 'Jump'],
@@ -3308,6 +3316,27 @@ const CONTROL_SCHEMES = {
       [['ps', 'playstation_stick_side_r'], 'Slide (R3)'],
     ],
     prompt: ['ps', 'playstation_button_square'],
+  },
+  switch: {
+    name: 'Nintendo Switch Controller',
+    // Same positional button indices as the others, but Nintendo swaps the A/B and X/Y
+    // LABELS versus Xbox: bottom is B, right is A, left is Y, top is X. So each glyph shows
+    // the label that's physically under your thumb, while the action stays the same.
+    rows: [
+      [['switch', 'switch_stick_l'], 'Move'],
+      [['switch', 'switch_stick_r'], 'Look'],
+      [['switch', 'switch_button_zr'], 'Shoot'],
+      [['switch', 'switch_button_zl'], 'Zoom / ADS'],
+      [['switch', 'switch_button_x'], 'Swap weapon'],
+      [['switch', 'switch_button_minus'], 'First / Third view'],
+      [['switch', 'switch_button_plus'], 'Pause'],
+      [['switch', 'switch_button_y'], 'Interact'],
+      [['switch', 'switch_button_a'], 'Reload'],
+      [['switch', 'switch_button_b'], 'Jump'],
+      [['switch', 'switch_stick_side_l'], 'Sprint (L3)'],
+      [['switch', 'switch_stick_side_r'], 'Slide (R3)'],
+    ],
+    prompt: ['switch', 'switch_button_y'],
   },
   touch: {
     name: 'Touch',
@@ -4646,7 +4675,7 @@ function pauseGame() {
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   if (!themeTimer) startTheme(selectedCousin); // hero music plays over the pause menu
-  if (input.device === 'xbox' || input.device === 'ps') setPadFocus(0);
+  if (input.device === 'xbox' || input.device === 'ps' || input.device === 'switch') setPadFocus(0);
   else clearPadFocus();
   updateHostPauseLock();
   // the host's pause stops the world, so it stops the lobby: everyone sees the settings
