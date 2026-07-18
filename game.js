@@ -7327,6 +7327,7 @@ function updateCompanions(dt) {
         if (Math.abs(angDiff(b.root.rotation.y, wantYaw)) < 0.12) {
           const gun = c.weapon;
           c.shootCd = 0.75 + Math.random() * 0.3;
+          c.lastShotT = game.time; // recoil kick on the crow shot too
           if (c.gunMesh && c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_cv);
           else _cv.set(c.pos.x, sy2, c.pos.z);
           spawnTracer(_cv.clone(), bird.g.position.clone());
@@ -7336,7 +7337,19 @@ function updateCompanions(dt) {
         }
       }
     }
-    if (tgt) c.yaw = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
+    // lead a moving mark a hair so the barrel tracks ACROSS it instead of trailing behind —
+    // capped tight so the round still lands on the body, never out past its shoulder. Only a
+    // gun leads (melee closes the gap itself); the hit still lands on the mark, this only
+    // aims the swing and the tracer, so a lead never turns into a phantom miss.
+    const gunAim = !!tgt && !(c.weapon || WEAPONS.pistol).melee;
+    let aimX = tgt ? tgt.pos.x : 0, aimZ = tgt ? tgt.pos.z : 0;
+    if (gunAim) {
+      let ox = (tgt.vX || 0) * 0.14, oz = (tgt.vZ || 0) * 0.14;
+      const ol = Math.hypot(ox, oz);
+      if (ol > 0.6) { ox = ox / ol * 0.6; oz = oz / ol * 0.6; }
+      aimX += ox; aimZ += oz;
+    }
+    if (tgt) c.yaw = Math.atan2(aimX - c.pos.x, aimZ - c.pos.z);
     else if (cmd === 'lineup' && !moving) c.yaw = Math.atan2(player.pos.x - c.pos.x, player.pos.z - c.pos.z);
     else if (cmd === 'wait' && !moving) c.yaw = Math.atan2(c.pos.x - squadCmd.ax, c.pos.z - squadCmd.az); // backs together, eyes out
     else if (cmd === 'guard' && !moving) c.yaw = Math.atan2(c.pos.x - player.pos.x, c.pos.z - player.pos.z); // watch your flanks
@@ -7345,8 +7358,9 @@ function updateCompanions(dt) {
     // arm actually points at what's being shot, and never loose a round until the body
     // has swung round to face it — the shot leaves along the barrel, not out of a hip
     // mid-turn like the old instant-fire did
-    if (tgt && !(c.weapon || WEAPONS.pistol).melee) {
-      const wantP = Math.atan2((tgt.blob.root.position.y + 0.7 * tgt.scale) - (c.y + 1.0), tD);
+    if (gunAim) {
+      const aimHD = Math.hypot(aimX - c.pos.x, aimZ - c.pos.z);
+      const wantP = Math.atan2((tgt.blob.root.position.y + 0.7 * tgt.scale) - (c.y + 1.0), aimHD);
       c.aimPitch = lerp(c.aimPitch || 0, wantP, 1 - Math.exp(-14 * dt));
     } else c.aimPitch = lerp(c.aimPitch || 0, 0, 1 - Math.exp(-6 * dt));
     const facingTgt = !!tgt && Math.abs(angDiff(b.root.rotation.y, c.yaw)) < 0.12;
@@ -7383,12 +7397,14 @@ function updateCompanions(dt) {
         // ranged holds fire until the swing-round completes (facingTgt) — the round
         // leaves the instant the barrel actually crosses the mark
         c.shootCd = (cw.auto ? 0.32 : cw.id === 'shotgun' ? 0.6 : 0.7) + Math.random() * 0.15;
+        c.lastShotT = game.time; // drives the recoil kick on the gun arm, below
         // cousin gunfire rings out just as loud as ours: blind zombies home in on it too
         game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
         const sy = c.y + 1.0;
         const zy = tgt.blob.root.position.y + 0.7 * tgt.scale;
-        // cousin bullets obey the same walls, cars and crates ours do
-        let ddx = tgt.pos.x - c.pos.x, ddy = zy - sy, ddz = tgt.pos.z - c.pos.z;
+        // cousin bullets obey the same walls, cars and crates ours do — fired at the LED
+        // aim point so the tracer tracks across a moving mark (damage still lands on it)
+        let ddx = aimX - c.pos.x, ddy = zy - sy, ddz = aimZ - c.pos.z;
         const dl = Math.hypot(ddx, ddy, ddz);
         ddx /= dl; ddy /= dl; ddz /= dl;
         let tWall = rayGround(c.pos.x, sy, c.pos.z, ddx, ddy, ddz, dl + 4);
@@ -7406,7 +7422,7 @@ function updateCompanions(dt) {
           spawnParticles(hx, hy, hz, 0x9a9a8a, 3, 2, 0.3);
         } else {
           const shots = cw.id === 'shotgun' ? 3 : 1;
-          for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(tgt.pos.x + (Math.random() - 0.5) * s, zy, tgt.pos.z + (Math.random() - 0.5) * s));
+          for (let s = 0; s < shots; s++) spawnTracer(_cv.clone(), new THREE.Vector3(aimX + (Math.random() - 0.5) * s, zy, aimZ + (Math.random() - 0.5) * s));
           damageZombie(tgt, (cw.dmg || 5) * 1.25 * shots * rangeFactor(cw, tD), kx, kz, 1, { weapon: cw, dist: tD, isHead: false });
         }
         if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
@@ -7419,10 +7435,14 @@ function updateCompanions(dt) {
     b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
     // guns point where the shots go: level in the carry, pitched up/down the aim angle
-    // while a mark is tracked (same 0.8 arm-lag the hero's own aim uses); melee walks in
-    // the low carry, buries the blade at the dirt on a swing, rides high for a beat
-    // after it, then relaxes back down — same as the hero
-    if (!cw.melee) b.arms[b.gunArm].rotation.x = -Math.PI / 2 - (c.aimPitch || 0) * 0.8;
+    // while a mark is tracked (same 0.8 arm-lag the hero's own aim uses), plus the same
+    // 0.35 recoil snap the hero gets for ~0.09s after a shot; melee walks in the low
+    // carry, buries the blade at the dirt on a swing, rides high for a beat after it,
+    // then relaxes back down — same as the hero
+    if (!cw.melee) {
+      b.arms[b.gunArm].rotation.x = -Math.PI / 2 - (c.aimPitch || 0) * 0.8;
+      if (game.time - (c.lastShotT || -9) < 0.09) b.arms[b.gunArm].rotation.x += 0.35;
+    }
     else {
       if (c.meleeT > 0) c.meleeHoldT = 1;
       else c.meleeHoldT = Math.max(0, (c.meleeHoldT || 0) - dt);
@@ -7544,6 +7564,9 @@ function updateZombies(dt) {
   for (let i = zombies.length - 1; i >= 0; i--) {
     const z = zombies[i];
     const b = z.blob;
+    // where it was before this frame moved it — the squad's gunners lead its motion off
+    // the smoothed velocity we derive from this (vX/vZ), computed at the bottom of the loop
+    const _vpx = z.pos.x, _vpz = z.pos.z;
     updateFlash(b, dt);
     // knockback rides on after the hit, corpses included — walls still stop a body
     if (z.kvx || z.kvz) {
@@ -7819,6 +7842,10 @@ function updateZombies(dt) {
     b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
     // head + jaw: twitches, double-takes and gapes off the pool (keeps the base walk-sway)
     runHeadAnim(z, b, dt, engaging);
+    // smoothed ground velocity (only chase walkers reach here) — what the gunners lead
+    const inv = 1 / Math.max(dt, 0.001);
+    z.vX = lerp(z.vX || 0, (z.pos.x - _vpx) * inv, 0.25);
+    z.vZ = lerp(z.vZ || 0, (z.pos.z - _vpz) * inv, 0.25);
   }
 }
 
