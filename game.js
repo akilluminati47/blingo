@@ -969,13 +969,20 @@ function buildGunMesh(id) {
   } else if (id === 'rifle') {
     const body = box(0.09, 0.13, 0.72, 0x3b3e45); body.position.set(0, 0.05, -0.2); g.add(body);
     const magz = box(0.07, 0.2, 0.11, c); magz.position.set(0, -0.1, -0.1); magz.rotation.x = 0.3; g.add(magz);
-    const stock = box(0.08, 0.12, 0.2, c); stock.position.set(0, 0.02, 0.2); g.add(stock);
-    // short barrel tube off the front end — the round leaves ITS tip now (muzzle anchor below)
-    const barrel = cyl(0.03, 0.033, 0.28, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.71); g.add(barrel);
-    // a very small V-notch sight tab on the front half of the tube: a low block topped by two
-    // uprights splayed into a V — an open notch to line a mark up through
-    const sightBase = box(0.05, 0.02, 0.05, 0x101216); sightBase.position.set(0, 0.10, -0.78); g.add(sightBase);
-    for (const s of [-1, 1]) { const post = box(0.013, 0.05, 0.03, 0x141619); post.position.set(0.02 * s, 0.13, -0.78); post.rotation.z = -0.5 * s; g.add(post); }
+    const stock = box(0.08, 0.12, 0.28, c); stock.position.set(0, 0.02, 0.24); g.add(stock); // stock lengthened a touch
+    // longer barrel tube off the front end — the round leaves ITS tip now (muzzle anchor below)
+    const barrel = cyl(0.03, 0.033, 0.4, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.76); g.add(barrel);
+    // one sight tab on the front half of the tube: a single upright plate with just a tiny
+    // V divot notched out of its top-centre — no side tangs, one cut-out piece
+    const sShape = new THREE.Shape();
+    sShape.moveTo(-0.025, 0); sShape.lineTo(0.025, 0); sShape.lineTo(0.025, 0.05);
+    sShape.lineTo(0.008, 0.05); sShape.lineTo(0, 0.035); sShape.lineTo(-0.008, 0.05); sShape.lineTo(-0.025, 0.05);
+    sShape.closePath();
+    const sGeo = new THREE.ExtrudeGeometry(sShape, { depth: 0.02, bevelEnabled: false });
+    sGeo.translate(0, 0, -0.01);
+    const sight = new THREE.Mesh(sGeo, mat(0x101216));
+    sight.position.set(0, 0.09, -0.86);
+    g.add(sight);
   } else if (id === 'sniper') {
     // long-barrelled marksman rifle with a proper scope + lens
     const body = box(0.08, 0.12, 1.15, c); body.position.set(0, 0.05, -0.42); g.add(body);
@@ -997,7 +1004,7 @@ function buildGunMesh(id) {
     // muzzle anchors track the geometry above: the magnum's rides out with its bigger frame,
     // the AA-12's sits at the tip of its short barrel rather than a pump's long one
     const tip = { pistol: [0.05, -0.3], magnum: [0.05 * MAGNUM_BIG, -0.3 * MAGNUM_BIG], smg: [0.04, -0.42],
-      shotgun: [0.06, -0.72], rifle: [0.06, -0.84], sniper: [0.06, -1.14] }[id]; // rifle muzzle rides at the new barrel tip
+      shotgun: [0.06, -0.72], rifle: [0.06, -0.96], sniper: [0.06, -1.14] }[id]; // rifle muzzle rides at the new barrel tip
     if (tip) {
       const muz = new THREE.Group();
       muz.position.set(0, tip[0], tip[1]);
