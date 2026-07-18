@@ -3840,7 +3840,7 @@ const CONTROL_SCHEMES = {
       [['kbm', 'mouse_left'], 'Shoot'],
       [['kbm', 'mouse_right'], 'Zoom / ADS'],
       [['kbm', 'keyboard_f'], 'Swap weapon'],
-      ['V', 'First / Third view'],
+      [['kbm', 'keyboard_v'], 'First / Third view'],
       [['kbm', 'keyboard_escape'], 'Pause'],
       [['kbm', 'mouse_scroll'], 'Cam distance'],
       [['kbm', 'keyboard_e'], 'Interact'],
@@ -3848,7 +3848,7 @@ const CONTROL_SCHEMES = {
       [['kbm', 'keyboard_space'], 'Jump'],
       [['kbm', 'keyboard_shift'], 'Sprint'],
       [['kbm', 'keyboard_ctrl'], 'Slide'],
-      ['Tab', 'Emote wheel (hold)'],
+      [['kbm', 'keyboard_tab'], 'Emote wheel (hold)'],
     ],
     prompt: ['kbm', 'keyboard_e'],
   },
@@ -5173,14 +5173,14 @@ function respawnRun() {
     // 'restart' resets their end, 'welcome' re-binds it (in order, on a reliable pipe)
     const held = net.conns.map(conn => {
       const c = companions.find(k => k.netConn === conn);
-      return { conn, num: (c && c.netP) || 0, cousin: c && c.data.id };
+      return { conn, num: (c && c.netP) || 0, cousin: c && c.data.id, tok: c && c.netTok };
     });
     startRun();
     for (const h of held) {
       if (!h.num) continue;
       const c = companions.find(k => k.data.id === h.cousin && !k.netP) || companions.find(k => !k.netP);
       if (!c) continue;
-      c.netP = h.num; c.netConn = h.conn; c.netPose = null;
+      c.netP = h.num; c.netConn = h.conn; c.netPose = null; c.netTok = h.tok || null; c.netHold = 0;
       if (!c.recruited) recruitCousin(c);
       try {
         h.conn.send({ t: 'restart' });
@@ -6858,23 +6858,28 @@ function updatePlayer(dt) {
     }
   }
 
-  // interact: downed squadmates outrank crates + recruits
+  // interact: downed squadmates outrank crates + recruits. On a client the downed teammate
+  // is an actor ghost (netNearDowned), not a companion, but it earns the same top priority —
+  // so the touch interact button pops for a rescue exactly like it does over a crate.
   const nearDowned = findNearDowned();
-  nearCrate = nearDowned ? null : findNearCrate();
-  nearRecruit = nearDowned ? null : findNearRecruit();
+  const nearNetDowned = (!nearDowned && net.role === 'client') ? netFindNearDowned() : null;
+  const blockLower = nearDowned || nearNetDowned;
+  nearCrate = blockLower ? null : findNearCrate();
+  nearRecruit = blockLower ? null : findNearRecruit();
   if (nearCrate && nearRecruit) {
     const dc = Math.hypot(nearCrate.pos.x - player.pos.x, nearCrate.pos.z - player.pos.z);
     const dr = Math.hypot(nearRecruit.pos.x - player.pos.x, nearRecruit.pos.z - player.pos.z);
     if (dc <= dr) nearRecruit = null; else nearCrate = null;
   }
   let nearTrade = null, nearNetTrade = null;
-  if (!nearDowned && !nearCrate && !nearRecruit) {
+  if (!blockLower && !nearCrate && !nearRecruit) {
     nearTrade = findNearTrade();
     if (!nearTrade && net.role === 'client') nearNetTrade = netFindNearTrade();
   }
-  const showPrompt = !!(nearDowned || nearCrate || nearRecruit || nearTrade || nearNetTrade);
+  const showPrompt = !!(nearDowned || nearNetDowned || nearCrate || nearRecruit || nearTrade || nearNetTrade);
   const bareHand = player.weapon.id === 'fists'; // fists out: the trade on offer is your skin
   hud.prompttxt.textContent = nearDowned ? 'Pick up ' + nearDowned.data.name
+    : nearNetDowned ? `Revive P${nearNetDowned.p} ${nearNetDowned.data.name}`
     : nearCrate ? 'Open Crate'
     : nearRecruit ? 'Recruit ' + nearRecruit.data.name
     : nearTrade ? (bareHand ? `Offer skin to ${(nearTrade.netP ? 'P' + nearTrade.netP + ' ' : '') + nearTrade.data.name}`
@@ -6885,6 +6890,7 @@ function updatePlayer(dt) {
   if (isTouch) hud.btnInteract.style.display = showPrompt ? 'flex' : 'none';
   if (input.interact) {
     if (nearDowned) reviveCousin(nearDowned);
+    else if (nearNetDowned) { try { net.conns[0].send({ t: 'reviveReq', p: nearNetDowned.p }); } catch (e) {} }
     else if (nearCrate) openCrate(nearCrate);
     else if (nearRecruit) recruitCousin(nearRecruit);
     else if (nearTrade) tradeWeapons(nearTrade);
@@ -9294,6 +9300,10 @@ function faceIcon(color, lookLeft) {
 // only people you hand it to can knock. (This replaced four fixed ids that everyone on
 // the internet shared — strangers collided in them and dead peers squatted them.)
 const NET_SLOTS = 6;
+// how long the host holds a dropped player's seat (number + cousin) before it falls back to
+// squad AI. Long enough to cover a phone sleeping / a tunnel, short enough that a real quit
+// doesn't strand the slot (a deliberate quit sends 'leave' and frees it immediately anyway).
+const RECON_GRACE_MS = 60000;
 // net is declared far earlier (near selectedCousin) so the settings UI, which builds at load
 // and reads net.role for the gore-horde glow, can reach it before this block runs.
 const lobbyHintEl = document.getElementById('lobbyhint');
@@ -9413,6 +9423,25 @@ function wireHostConn(conn) {
       try { conn.send({ t: 'info', code: net.lobbyCode, players: lobbyPlayers() }); } catch (e) {}
       setTimeout(() => { try { conn.close(); } catch (e) {} }, 600);
     } else if (m.t === 'hi') {
+      // a reconnecting player reclaims their EXACT seat by token — even if the host hasn't
+      // seen the old link drop yet (still stale-open) or is already holding it on grace.
+      // This is what stops a slept phone from walking back in as a brand-new, higher number.
+      if (m.tok) {
+        const mine = companions.find(k => k.netP && k.netTok && k.netTok === m.tok);
+        if (mine) {
+          if (mine.netConn && mine.netConn !== conn) { try { mine.netConn.close(); } catch (e) {} net.conns = net.conns.filter(x => x !== mine.netConn); }
+          mine.netConn = conn; mine.netHold = 0; mine.netPose = null;
+          if (!net.conns.includes(conn)) net.conns.push(conn);
+          conn.send({ t: 'welcome', n: mine.netP, cousin: mine.data.id, x: mine.pos.x, z: mine.pos.z,
+            w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
+            zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0,
+            hp: game.state === 'paused' ? 1 : 0, resumed: 1 });
+          toast(`PLAYER ${mine.netP} RECONNECTED .ᐟ`);
+          rebuildSquadBars();
+          updatePauseLobby();
+          return;
+        }
+      }
       if (lobbyPlayers().length >= NET_SLOTS || game.state === 'menu') { try { conn.send({ t: 'full' }); } catch (e) {} return; }
       // their preferred cousin is their pick: take it if it's still free (recruit it if
       // it was only a beacon). If it's already taken, fall back — but favour a cousin the
@@ -9431,7 +9460,7 @@ function wireHostConn(conn) {
       const taken = new Set(lobbyPlayers().map(p => p.n));
       let num = 2;
       while (taken.has(num)) num++;
-      c.netP = num; c.netConn = conn; c.netPose = null;
+      c.netP = num; c.netConn = conn; c.netPose = null; c.netTok = m.tok || null; c.netHold = 0;
       if (c.downed) reviveCousin(c, true);   // a join-takeover is free: nobody's arms did the hauling
       if (!c.recruited) recruitCousin(c);   // the JOINED .ᐟ toast, beacon off — found like any cousin
       else toast(`PLAYER ${num} TOOK OVER ${c.data.name.toUpperCase()} .ᐟ`);
@@ -9482,12 +9511,77 @@ function wireHostConn(conn) {
         if (to === 'host') applySwapKit(m.kit);
         else { try { to.send({ t: 'cswapKit', kit: m.kit }); } catch (e) {} }
       }
+    } else if (m.t === 'reviveReq') {
+      netHandleReviveReq(conn, m.p | 0);
     } else if (m.t === 'dead') {
       netFreeCousin(conn, false);
+    } else if (m.t === 'leave') {
+      // a deliberate quit / tab-close: free the seat NOW so the number + cousin can be
+      // inherited straight away, and mark the conn so the close that follows is a no-op
+      conn._left = true;
+      netFreeCousin(conn, true);
     }
   });
-  conn.on('close', () => netFreeCousin(conn, true));
-  conn.on('error', () => netFreeCousin(conn, true));
+  conn.on('close', () => netHostConnGone(conn));
+  conn.on('error', () => netHostConnGone(conn));
+}
+// a client's connection dropped. If they said 'leave' it's already handled. Otherwise it
+// might just be a phone that slept or a tunnel that blinked — hold their seat (number +
+// cousin, counted as taken) for a grace window so they can reconnect straight back into it.
+// netHostTick sweeps holds that never come back.
+function netHostConnGone(conn) {
+  if (conn._left) return;                       // already freed by an explicit leave
+  const c = cousinByConn(conn);
+  net.conns = net.conns.filter(k => k !== conn);
+  if (!c) return;
+  c.netConn = null; c.netPose = null;
+  c.netHold = performance.now() + RECON_GRACE_MS; // reserved, not freed — see netSweepHolds
+  toast(`PLAYER ${c.netP} DROPPED, HOLDING THEIR SEAT .ᐟ`);
+  rebuildSquadBars();
+  updatePauseLobby();
+}
+// free any reserved seat whose grace ran out with no reconnect — only now does the cousin
+// fall back to squad AI and the number open up for a fresh joiner
+function netSweepHolds() {
+  const now = performance.now();
+  for (const c of companions) {
+    if (c.netP && !c.netConn && c.netHold && now > c.netHold) {
+      const num = c.netP;
+      c.netP = null; c.netHold = 0; c.netTok = null; c.netPose = null;
+      c.hp = Math.max(c.hp, c.maxHp * 0.5);
+      toast(`PLAYER ${num} LEFT, ${c.data.name.toUpperCase()} REJOINS THE SQUAD`);
+      rebuildSquadBars();
+      updatePauseLobby();
+    }
+  }
+}
+// the transfusion revive, requested by a client hauling up a downed teammate. The cost comes
+// out of the RESCUING client (not the host), and whoever they lift — another player, or the
+// host's own body — stands with exactly what it cost.
+function netHandleReviveReq(conn, p) {
+  const rescuer = cousinByConn(conn);
+  if (!rescuer || rescuer.downed) return;
+  const pay = Math.max(1, Math.round((rescuer.hp || 1) / 2));
+  const charge = () => {
+    rescuer.hp = Math.max(1, (rescuer.hp || 1) - pay);
+    if (rescuer.netConn) { try { rescuer.netConn.send({ t: 'reviveCost', hp: pay }); } catch (e) {} }
+  };
+  if (p === 1) {
+    if (!player.downed || Math.hypot(player.pos.x - rescuer.pos.x, player.pos.z - rescuer.pos.z) > 3.2) return;
+    charge();
+    playerGetUp(true, pay);
+    toast(`P${rescuer.netP} REVIVED THE HOST`);
+  } else {
+    const target = companions.find(k => k.netP === p && k.downed);
+    if (!target || Math.hypot(target.pos.x - rescuer.pos.x, target.pos.z - rescuer.pos.z) > 3.2) return;
+    charge();
+    target.downed = false;
+    target.hp = Math.min(pay, target.maxHp);
+    if (target.netConn) { try { target.netConn.send({ t: 'revive', hp: pay }); } catch (e) {} }
+    netSyncCousinBeacon(target);
+    rebuildSquadBars();
+    toast(`P${rescuer.netP} REVIVED P${p}`);
+  }
 }
 // a player left or died: their cousin snaps back to squad AI
 function netFreeCousin(conn, gone) {
@@ -9495,7 +9589,7 @@ function netFreeCousin(conn, gone) {
   net.conns = net.conns.filter(k => k !== conn);
   if (!c) return;
   const num = c.netP;
-  c.netP = null; c.netConn = null; c.netPose = null;
+  c.netP = null; c.netConn = null; c.netPose = null; c.netHold = 0; c.netTok = null;
   c.hp = Math.max(c.hp, c.maxHp * 0.5);
   if (gone) toast(`PLAYER ${num} LEFT, ${c.data.name.toUpperCase()} REJOINS THE SQUAD`);
   rebuildSquadBars();
@@ -9503,6 +9597,7 @@ function netFreeCousin(conn, gone) {
 }
 // 10Hz world snapshot to every client
 function netHostTick(dt) {
+  netSweepHolds();   // let go of any reserved seat whose reconnect window has lapsed
   net.txT -= dt;
   if (net.txT > 0 || !net.conns.length) return;
   net.txT = 0.1;
@@ -9542,6 +9637,87 @@ function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar) {
     ar: ar == null ? undefined : Math.round(ar * 100) / 100 }; // gun-arm angle, finer grain than position
 }
 
+// --- reconnect: a client that drops (phone sleeps, tunnel blinks) soft-pauses and dials
+// back into its HELD seat instead of being kicked to the menu. The host reserves that seat
+// for RECON_GRACE_MS (netHostConnGone); the client keeps trying for the same window. ---
+const reconnEl = document.getElementById('reconnecting');
+// a stable per-browser id the host recognises us by, so our exact player number + cousin
+// come back on reconnect rather than the host minting a fresh (higher) slot
+function clientToken() {
+  let t = null;
+  try { t = localStorage.getItem('blingo_tok'); } catch (e) {}
+  if (!t) {
+    t = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { localStorage.setItem('blingo_tok', t); } catch (e) {}
+  }
+  return t;
+}
+function clientConnLost() {
+  if (net.role !== 'client' || net.leaving || net.reconnecting) return;
+  beginReconnect();
+}
+function beginReconnect() {
+  net.reconnecting = true;
+  net.reconStart = performance.now();
+  net.reconUnavail = 0;
+  // soft-pause: freeze the world behind the banner instead of tearing down to the menu
+  if (game.state === 'playing') {
+    game.state = 'paused';
+    document.body.classList.remove('playing');
+    if (document.pointerLockElement === canvas) document.exitPointerLock();
+  }
+  setBlurMute(true);
+  reconnEl.classList.remove('hidden');
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} net.peer = null; }
+  net.conns = [];
+  reconnectAttempt();
+}
+function endReconnect() {
+  net.reconnecting = false;
+  clearTimeout(net.reconTimer); net.reconTimer = null;
+  reconnEl.classList.add('hidden');
+}
+function giveUpReconnect() { endReconnect(); showHostClosed(); }
+function scheduleReconnect() {
+  if (!net.reconnecting) return;
+  clearTimeout(net.reconTimer);
+  net.reconTimer = setTimeout(reconnectAttempt, 2500);
+}
+function reconnectAttempt() {
+  if (!net.reconnecting) return;
+  if (performance.now() - net.reconStart > RECON_GRACE_MS) { giveUpReconnect(); return; }
+  const code = net.lobbyCode;
+  let peer;
+  try { peer = new Peer(undefined, { debug: 0 }); } catch (e) { scheduleReconnect(); return; }
+  const retry = () => {
+    if (!net.reconnecting) return;   // already back in: never touch the live peer
+    try { peer.destroy(); } catch (e) {}
+    scheduleReconnect();
+  };
+  const giveT = setTimeout(retry, 4500);   // no welcome in time → next attempt
+  peer.on('open', () => {
+    const conn = peer.connect(lobbyId(code), { reliable: true });
+    conn.on('open', () => { try { conn.send({ t: 'hi', cousin: selectedCousin, tok: clientToken() }); } catch (e) {} });
+    conn.on('data', m => {
+      if (net.reconnecting) {
+        if (m.t === 'full') { clearTimeout(giveT); retry(); return; }   // seat not back yet — try again
+        if (m.t === 'welcome') { clearTimeout(giveT); endReconnect(); }  // reclaimed: welcome re-syncs us
+      }
+      netClientData(m, conn, peer, code);
+    });
+    conn.on('close', () => { if (net.reconnecting) retry(); else clientConnLost(); });
+    conn.on('error', () => { if (net.reconnecting) retry(); else clientConnLost(); });
+  });
+  peer.on('error', e => {
+    clearTimeout(giveT);
+    // the lobby id simply not existing means the host is truly gone: bail fast rather than
+    // spinning out the whole grace window
+    if (e && e.type === 'peer-unavailable' && ++net.reconUnavail >= 2) { giveUpReconnect(); return; }
+    retry();
+  });
+}
+document.getElementById('reconquit').addEventListener('click', () => { endReconnect(); quitToMenu(); });
+
 // --- joining ---
 function joinLobby(rawCode) {
   const code = normCode(rawCode);
@@ -9551,13 +9727,16 @@ function joinLobby(rawCode) {
   const peer = new Peer(undefined, { debug: 0 });
   peer.on('open', () => {
     const conn = peer.connect(lobbyId(code), { reliable: true });
-    conn.on('open', () => conn.send({ t: 'hi', cousin: selectedCousin }));
+    conn.on('open', () => conn.send({ t: 'hi', cousin: selectedCousin, tok: clientToken() }));
     conn.on('data', m => netClientData(m, conn, peer, code));
-    conn.on('close', () => { if (net.role === 'client' && !net.leaving) showHostClosed(); });
-    conn.on('error', () => { if (net.role === 'client' && !net.leaving) showHostClosed(); });
+    // a live session that drops soft-pauses and reconnects (clientConnLost) rather than
+    // dumping to the menu; a failure BEFORE welcome (role still null) just no-ops here and
+    // the peer.on('error') hint below explains a bad code
+    conn.on('close', () => clientConnLost());
+    conn.on('error', () => clientConnLost());
   });
   peer.on('error', e => {
-    if (net.role === 'client') { if (!net.leaving) showHostClosed(); return; }
+    if (net.role === 'client') { clientConnLost(); return; }
     // a typo'd code is the common case here, so name it rather than blaming the service
     lobbyHintEl.textContent = e.type === 'peer-unavailable'
       ? `Nobody is hosting ${code.toUpperCase()} . .`
@@ -9586,7 +9765,7 @@ function netClientData(m, conn, peer, code) {
     player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
     applyHostNotches(m.zs, m.ls, m.hg);   // the host's spawn dials + gore-horde land on our greyed rows
     if (m.hp) { net.hostPaused = true; pauseGame(); } // lobby is held: wait with it
-    toast(`JOINED ${code.toUpperCase()} .ᐟ YOU ARE PLAYER ${m.n}`, true);
+    toast(m.resumed ? `RECONNECTED .ᐟ YOU ARE PLAYER ${m.n}` : `JOINED ${code.toUpperCase()} .ᐟ YOU ARE PLAYER ${m.n}`, true);
   } else if (m.t === 's') {
     netApplySnapshot(m);
   } else if (m.t === 'notch') {
@@ -9602,6 +9781,12 @@ function netClientData(m, conn, peer, code) {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
   } else if (m.t === 'revive') {
     playerGetUp(true, m.hp); // someone hauled us up — we inherit what the pull cost them
+  } else if (m.t === 'reviveCost') {
+    // we hauled a downed teammate up: the transfusion comes out of us (never below 1)
+    player.hp = Math.max(1, player.hp - (m.hp | 0));
+    SFX.recruit();
+    rumble(120, 0.4, 0.5);
+    toast('YOU REVIVED A TEAMMATE .ᐟ');
   } else if (m.t === 'gameover') {
     // the whole lobby is down: ride the same slow-motion fade the host is riding
     if (!player.dead && !deathFx.on) {
@@ -9914,6 +10099,19 @@ function netFindNearTrade() {
   }
   return best;
 }
+// a downed teammate (another player's ghost, or the host's) close enough for a CLIENT to
+// haul up. The client only knows players as actor ghosts, so findNearDowned (which walks
+// companions) never sees them — this is the client's own reach check. The host owns the
+// actual revive; a tap just asks for it.
+function netFindNearDowned() {
+  let best = null, bestD = 2.8;
+  for (const [, g] of net.actors) {
+    if (!g.p || !g.dn) continue;
+    const d = Math.hypot(g.blob.root.position.x - player.pos.x, g.blob.root.position.z - player.pos.z);
+    if (d < bestD) { bestD = d; best = g; }
+  }
+  return best;
+}
 // a client's own shots don't damage ghosts directly: local feedback + wire to the host
 function netClientShot(z, dmg, kx, kz, opts) {
   if (!z.nid) return;
@@ -9928,15 +10126,22 @@ function netClientShot(z, dmg, kx, kz, opts) {
 // tear down whatever multiplayer state exists (safe to call any time)
 function netLeave() {
   net.leaving = true;
+  if (net.reconnecting) endReconnect();   // stop any in-flight reconnect attempts + banner
   netScanStop();
-  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+  // a deliberate leave tells the host to free our seat NOW so the number + cousin can be
+  // inherited immediately — that's what separates a real quit from a phone that just slept.
+  // Send first, then destroy the peer a beat later so the message actually flushes.
+  const dyingPeer = net.peer;
+  if (net.role === 'client' && net.conns[0]) { try { net.conns[0].send({ t: 'leave', tok: clientToken() }); } catch (e) {} }
   net.peer = null; net.role = null; net.conns = []; net.playerNum = 0; net.lobbyCode = '';
   net.sentDead = false; net.barSig = ''; net.hostPaused = false;
+  net.reconnecting = false;
+  if (dyingPeer) setTimeout(() => { try { dyingPeer.destroy(); } catch (e) {} }, 150);
   restoreOwnNotches();     // the spawn rows go back to being theirs, ungreyed
   updateHostPauseLock();
   for (const [nid] of [...net.ghosts]) netRemoveGhost(nid);
   for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
-  for (const c of companions) { c.netP = null; c.netConn = null; c.netPose = null; }
+  for (const c of companions) { c.netP = null; c.netConn = null; c.netPose = null; c.netHold = 0; c.netTok = null; }
   net.leaving = false;
 }
 // the host vanished mid-run: everyone gets walked back out gracefully
@@ -9984,7 +10189,12 @@ function netPoseCompanion(c, dt) {
   placeShadow(b, c.pos.x, c.pos.z, c.y);
   updateFlash(b, dt);
 }
-addEventListener('beforeunload', () => { if (net.peer) { try { net.peer.destroy(); } catch (e) {} } });
+// a genuine tab close / navigate-away frees the seat right away (best-effort — mobile screen
+// sleep fires visibilitychange/pagehide, NOT beforeunload, so it stays a reconnect, not a leave)
+addEventListener('beforeunload', () => {
+  if (net.role === 'client' && net.conns[0]) { try { net.conns[0].send({ t: 'leave', tok: clientToken() }); } catch (e) {} }
+  if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+});
 
 // ---------- boot ----------
 refreshControlsBar();
