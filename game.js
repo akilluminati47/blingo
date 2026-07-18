@@ -972,16 +972,26 @@ function buildGunMesh(id) {
     const stock = box(0.08, 0.12, 0.28, c); stock.position.set(0, 0.02, 0.24); g.add(stock); // stock lengthened a touch
     // longer barrel tube off the front end — the round leaves ITS tip now (muzzle anchor below)
     const barrel = cyl(0.03, 0.033, 0.4, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.76); g.add(barrel);
-    // one sight tab on the front half of the tube: a single upright plate with just a tiny
-    // V divot notched out of its top-centre — no side tangs, one cut-out piece
+    // one sight tab on the front half of the tube, welded on like an upside-down U: two legs
+    // drop past the barrel's sides so the piece straddles the tube, an arch bridges over the
+    // top, and a tiny V divot is notched from the top-centre — still one cut-out piece
     const sShape = new THREE.Shape();
-    sShape.moveTo(-0.025, 0); sShape.lineTo(0.025, 0); sShape.lineTo(0.025, 0.05);
-    sShape.lineTo(0.008, 0.05); sShape.lineTo(0, 0.035); sShape.lineTo(-0.008, 0.05); sShape.lineTo(-0.025, 0.05);
-    sShape.closePath();
+    sShape.moveTo(-0.045, -0.045);  // bottom of the left leg (outer)
+    sShape.lineTo(-0.045, 0.05);    // up the left outer edge
+    sShape.lineTo(-0.008, 0.05);    // across the top to the divot
+    sShape.lineTo(0, 0.036);        // down into the little V
+    sShape.lineTo(0.008, 0.05);     // back up out of it
+    sShape.lineTo(0.045, 0.05);     // across to the right outer top
+    sShape.lineTo(0.045, -0.045);   // down the right outer edge to the right leg's foot
+    sShape.lineTo(0.034, -0.045);   // in under the right leg
+    sShape.lineTo(0.034, 0.008);    // up the inner edge to the arch underside
+    sShape.lineTo(-0.034, 0.008);   // across the underside of the arch (clears the barrel top)
+    sShape.lineTo(-0.034, -0.045);  // down the inner edge of the left leg
+    sShape.closePath();             // back along the left leg's foot
     const sGeo = new THREE.ExtrudeGeometry(sShape, { depth: 0.02, bevelEnabled: false });
     sGeo.translate(0, 0, -0.01);
     const sight = new THREE.Mesh(sGeo, mat(0x101216));
-    sight.position.set(0, 0.09, -0.86);
+    sight.position.set(0, 0.085, -0.86);  // arch underside kisses the barrel top; legs saddle its sides
     g.add(sight);
   } else if (id === 'sniper') {
     // long-barrelled marksman rifle with a proper scope + lens
@@ -6919,8 +6929,14 @@ function updatePlayer(dt) {
   player.aiming = (input.aim || input.aimPad || input.aimTouch) && !player.dead;
   player.aimT = lerp(player.aimT, player.aiming ? 1 : 0, 1 - Math.exp(-11 * dt));
   player.fpvT = lerp(player.fpvT, player.fpv ? 1 : 0, 1 - Math.exp(-12 * dt));
-  // hide our own head only in first person so it doesn't block the view
-  b.head.visible = player.fpvT < 0.55;
+  // in first person, drop the parts of our own avatar that would fill the view: the head,
+  // the belly (torso ball) and the feet (both legs). The arms stay — the gun rides the gun
+  // arm as the viewmodel, so it has to keep drawing. Same cheap visibility toggle the head
+  // uses (the playerBodyMats opacity fade only feeds the sniper scope's b.root cutoff).
+  const fpBody = player.fpvT < 0.55;
+  b.head.visible = fpBody;
+  b.body.visible = fpBody;
+  for (const hip of b.legs) hip.visible = fpBody;
   // down the sniper scope the whole avatar melts away so it never crosses the eyepiece —
   // it fades OUT as the scope comes up (matched to the scope overlay's aimT>0.55 onset) and
   // snaps back the instant we come off the scope. The gun rides the same fade as a hard
