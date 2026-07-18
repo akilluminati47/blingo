@@ -8566,7 +8566,7 @@ function netFreeCousin(conn, gone) {
   const num = c.netP;
   c.netP = null; c.netConn = null; c.netPose = null;
   c.hp = Math.max(c.hp, c.maxHp * 0.5);
-  if (gone) toast(`PLAYER ${num} LEFT — ${c.data.name.toUpperCase()} REJOINS THE SQUAD`);
+  if (gone) toast(`PLAYER ${num} LEFT, ${c.data.name.toUpperCase()} REJOINS THE SQUAD`);
   rebuildSquadBars();
   updatePauseLobby();   // and tick back down the moment they leave, pause menu open or not
 }
