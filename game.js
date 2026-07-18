@@ -99,7 +99,16 @@ const TOWN_RECTS = [
   [69, 32, 96, 40],     // east lot connector, out to the x=100 road
   [-15, 18, 10, 26],    // west lot connector, out to the x=-20 road
   [16, 68, 62, 94],    // old church + spiked graveyard, just north of the plaza
+  [112, -56, 146, -28], // the jelly park, down the block from the civic pair's side road
+  [108, -10, 128, 8],   // Red's Chili corner plot, across main street from the park
+  [107, -102, 137, -74], // the Blob Lounge grounds, far down the side road the other way
 ];
+// The park keeps its perimeter sacred: no zombie ever spawns on it (they may still
+// wander in chasing you, which is exactly the picnic-crashing the plaque deserves).
+const PARK = { x0: 112, z0: -56, x1: 146, z1: -28 };
+function inPark(x, z, m = 0) {
+  return x > PARK.x0 - m && x < PARK.x1 + m && z > PARK.z0 - m && z < PARK.z1 + m;
+}
 function rectDist(x, z, r) {
   const dx = Math.max(r[0] - x, 0, x - r[2]);
   const dz = Math.max(r[1] - z, 0, z - r[3]);
@@ -1903,6 +1912,10 @@ function buildChunk(cx, cz) {
 // the hollow chunk house whose footprint contains (x,z), or null — keeps spawns
 // outdoors and lets zombies respect doorways instead of pressing through walls
 function buildingAt(x, z) {
+  // the permanent enterable town buildings (the Blob Lounge) answer first
+  for (const bld of townBuildings) {
+    if (Math.abs(x - bld.x) <= bld.hw && Math.abs(z - bld.z) <= bld.hd) return bld;
+  }
   const ccx = Math.round(x / CHUNK), ccz = Math.round(z / CHUNK);
   for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
     const ch = chunks.get(chunkKey(ccx + dx, ccz + dz));
@@ -2029,7 +2042,8 @@ function nearbyColliders(x, z) {
     const ch = chunks.get(chunkKey(ccx + dx, ccz + dz));
     if (ch) out.push(...ch.colliders);
   }
-  if (x > -50 && x < 140 && z > -70 && z < 100) out.push(...townColliders);
+  // box covers the whole permanent build now: town core, park, chili corner, Blob Lounge
+  if (x > -50 && x < 160 && z > -112 && z < 110) out.push(...townColliders);
   return out;
 }
 function resolveCollision(x, z, r, y) {
@@ -2172,6 +2186,7 @@ function rayGround(ox, oy, oz, dx, dy, dz, maxT) {
 // ---------- town (built once, persistent) ----------
 const townGroup = new THREE.Group();
 const townCrates = [];
+const townBuildings = []; // permanent enterable buildings (the Blob Lounge) — buildingAt checks these too
 let fountainFx = null; // animated water on the plaza fountain — filled in buildTown, run by updateFountain
 
 // ---------- town skyline silhouettes ----------
@@ -2651,6 +2666,11 @@ function lampLitFor(h, W) {
 
 function buildTown() {
   const rng = mulberry32(9001);
+  // the east side's poured pads go in before ANY terrain samples heights: the Blob
+  // Lounge needs a dead-flat floor and the chili stand a level counter, so both
+  // register like makeBuilding does — pad first, every mesh after answers to it
+  flatPads.push({ x: 122, z: -88, hw: 14, hd: 7.6, apron: 2.2, y: groundHeight(122, -88) });
+  flatPads.push({ x: 117, z: -1, hw: 8, hd: 6, apron: 2.0, y: groundHeight(117, -1) });
   // persistent low-res ground apron under the whole town footprint. Chunks only
   // stream in near the player, so without this the always-visible town buildings
   // sit on transparent void when seen from far away. Sunk slightly below the
@@ -2879,6 +2899,417 @@ function buildTown() {
   // old books-driveway kerb lamps are gone: the lot's own floods light that approach now, and
   // the four that survived the lot cull just stood stranded at its south edge.)
   for (const lx of [16, 30, 58, 70]) if (!lotIsFloodlit(lx, 50)) makeStreetLamp(lx, 50, townGroup);
+
+  // the east side: jelly park, Red's Chili and the Blob Lounge, strung down the
+  // side road the town hall and courthouse share
+  buildPark(rng);
+  buildChiliStand(rng);
+  buildBlobLounge(rng);
+}
+
+// ---------- the jelly park ----------
+// Down the block from the courthouse and town hall, across their side road: a manicured
+// square of grass where nothing spawns and the butterflies never left. Trees planted in
+// rows (a gardener clearly survived long enough to care), rock arrangements, picnic
+// tables, flower beds — and the town's granite thank-you to its First Immune.
+const parkFlowers = []; // world spots the butterflies drift between
+function makeFlowerBed(rng, cx, cz, r, n) {
+  const petal = [0xff6fa8, 0xffd84a, 0xffffff, 0xb06fff, 0xff8c42];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * TAU + rng() * 0.7, d = r * (0.35 + rng() * 0.65);
+    const x = cx + Math.sin(a) * d, z = cz + Math.cos(a) * d;
+    const y0 = groundHeight(x, z);
+    const stem = cyl(0.016, 0.024, 0.34, 0x3f6a33, 5);
+    stem.position.set(x, y0 + 0.17, z);
+    townGroup.add(stem);
+    const head = ball(0.085, petal[(rng() * petal.length) | 0]);
+    head.scale.y *= 0.7;
+    head.position.set(x, y0 + 0.36, z);
+    townGroup.add(head);
+    const eye = ball(0.04, 0xffe9a0);
+    eye.position.set(x, y0 + 0.41, z);
+    townGroup.add(eye);
+    parkFlowers.push({ x, y: y0 + 0.44, z });
+  }
+}
+function makePicnicTable(x, z, rotY) {
+  const y0 = groundHeight(x, z);
+  const g = new THREE.Group();
+  const wood = 0x8a6a42, woodDk = 0x745634;
+  const top = box(2.2, 0.09, 1.0, wood); top.position.y = 0.76; g.add(top);
+  for (const s of [-1, 1]) {
+    const bench = box(2.2, 0.07, 0.34, woodDk); bench.position.set(0, 0.45, s * 0.82); g.add(bench);
+    for (const e of [-0.85, 0.85]) {
+      const leg = box(0.09, 0.76, 0.09, woodDk); leg.position.set(e, 0.38, s * 0.5); leg.rotation.x = s * 0.5; g.add(leg);
+      const bleg = box(0.08, 0.45, 0.08, woodDk); bleg.position.set(e, 0.22, s * 0.82); g.add(bleg);
+    }
+  }
+  g.position.set(x, y0, z);
+  g.rotation.y = rotY;
+  townGroup.add(g);
+  townColliders.push(aabb(x, z, 1.15, 1.0, 0.8, y0, rotY));
+}
+// the massive granite Blingo — the town's own blob, five metres of stone jelly,
+// bat over his shoulder, googly eyes carved forever mid-boggle
+function buildBlingoStatue(x, z) {
+  const y0 = groundHeight(x, z);
+  const granite = 0x8f939b, graniteDk = 0x6d7178, granitePale = 0xb9bdc4;
+  // paved apron + two-step plinth
+  const pave = terrainDisc(6.4, 22, x, z, mat(0x9a948a), 0.05);
+  townGroup.add(pave);
+  const step = box(6.2, 0.4, 6.2, 0xaaa49a); step.position.set(x, y0 + 0.2, z); townGroup.add(step);
+  const plinth = box(4.6, 1.3, 4.6, graniteDk); plinth.position.set(x, y0 + 1.05, z); townGroup.add(plinth);
+  const lip = box(5.0, 0.22, 5.0, granite); lip.position.set(x, y0 + 1.75, z); townGroup.add(lip);
+  const py = y0 + 1.86; // top of the pedestal — the blob stands here
+  // feet, body, head: the family silhouette, upscaled and petrified
+  for (const s of [-1, 1]) {
+    const foot = ball(0.62, graniteDk); foot.scale.set(1, 0.55, 1.3);
+    foot.position.set(x + s * 0.85, py + 0.3, z - 0.15); townGroup.add(foot);
+  }
+  const body = ball(1.85, granite); body.scale.set(1.05, 1.15, 1);
+  body.position.set(x, py + 2.2, z); townGroup.add(body);
+  const head = ball(1.25, granite); head.scale.set(1.06, 1, 1.02);
+  head.position.set(x, py + 4.6, z); townGroup.add(head);
+  // he faces the side road (west), eyes forever on the town he took back
+  for (const s of [-1, 1]) {
+    const eye = ball(0.34, granitePale); eye.scale.z = 0.55;
+    eye.position.set(x - 1.02, py + 4.75, z + s * 0.48); eye.rotation.y = Math.PI / 2;
+    townGroup.add(eye);
+    const pupil = ball(0.15, graniteDk);
+    pupil.position.set(x - 1.24, py + 4.7, z + s * 0.44); townGroup.add(pupil);
+  }
+  const smile = box(0.55, 0.09, 0.1, graniteDk);
+  smile.position.set(x - 1.18, py + 4.15, z); smile.rotation.y = Math.PI / 2; townGroup.add(smile);
+  // right arm hoists the granite slugger over the shoulder; left rests on the belly
+  const armR = ball(0.5, graniteDk); armR.scale.set(0.7, 1.5, 0.7);
+  armR.position.set(x + 0.6, py + 3.6, z + 1.55); armR.rotation.x = -0.5; townGroup.add(armR);
+  const bat = cyl(0.16, 0.3, 2.6, granite, 9);
+  bat.position.set(x + 0.7, py + 4.9, z + 2.05); bat.rotation.x = 0.8; townGroup.add(bat);
+  const armL = ball(0.48, graniteDk); armL.scale.set(0.7, 1.2, 0.7);
+  armL.position.set(x - 0.5, py + 2.3, z - 1.6); armL.rotation.x = 0.5; townGroup.add(armL);
+  // the foot plaque: a lectern stand at the base, BEST JELLY in the family's goopy face
+  const post = box(0.5, 0.85, 0.14, graniteDk);
+  post.position.set(x - 3.4, y0 + 0.42, z); post.rotation.y = Math.PI / 2; townGroup.add(post);
+  const plaque = textPlate('BEST JELLY', 1.9, 0.5, '#3c3428', '#e8d9a8');
+  plaque.position.set(x - 3.45, y0 + 1.0, z);
+  plaque.rotation.y = -Math.PI / 2; plaque.rotation.x = -0.42;
+  townGroup.add(plaque);
+  townColliders.push(aabb(x, z, 2.55, 2.55, 2.1, y0));
+  townColliders.push(aabb(x - 3.4, z, 0.12, 0.3, 1.05, y0));
+}
+// the corner sign: an arrow plate aimed up the side road at the family chili stand
+function makeParkSign(x, z, txt, yaw) {
+  const y0 = groundHeight(x, z);
+  for (const s of [-1, 1]) {
+    const post = cyl(0.055, 0.07, 2.2, 0x5a4a34, 7);
+    post.position.set(x + Math.cos(yaw) * s * 1.05, y0 + 1.1, z - Math.sin(yaw) * s * 1.05);
+    townGroup.add(post);
+  }
+  const plate = textPlate(txt, 2.6, 0.65, '#421511', '#ffe2b0');
+  plate.position.set(x, y0 + 1.95, z);
+  plate.rotation.y = yaw;
+  townGroup.add(plate);
+  townColliders.push(aabb(x, z, 1.1, 0.16, 2.1, y0, yaw));
+}
+function buildPark(rng) {
+  const cx = (PARK.x0 + PARK.x1) / 2, cz = (PARK.z0 + PARK.z1) / 2; // (129, -42)
+  // manicured rows: leafy trees pace the two street edges at even intervals, an
+  // evergreen squaring off each corner — planted, not sprouted
+  for (let z = PARK.z0 + 3; z <= PARK.z1 - 3; z += 6) makeTree(rng, PARK.x0 + 2.5, z, townGroup, townColliders);
+  for (let x = PARK.x0 + 8; x <= PARK.x1 - 3; x += 6) makeTree(rng, x, PARK.z1 - 2.5, townGroup, townColliders);
+  for (const [ex, ez] of [[PARK.x0 + 2.5, PARK.z0 + 2.5], [PARK.x1 - 2.5, PARK.z0 + 2.5], [PARK.x1 - 2.5, PARK.z1 - 2.5]])
+    makeEvergreen(rng, ex, ez, townGroup, townColliders);
+  // hedge line down the two quiet edges
+  for (let x = PARK.x0 + 4; x <= PARK.x1 - 2; x += 4.5) makeBush(rng, x, PARK.z0 + 1.6, townGroup, rng() < 0.3);
+  for (let z = PARK.z0 + 6; z <= PARK.z1 - 4; z += 4.5) makeBush(rng, PARK.x1 - 1.6, z, townGroup, rng() < 0.3);
+  // rock arrangements: three deliberate clusters, big stones ringed by small ones
+  for (const [rx, rz] of [[118, -52], [140.5, -51], [141.5, -31.5]]) {
+    makeRock(rng, rx, rz, townGroup, townColliders, true);
+    makeRock(rng, rx + 1.1, rz + 0.4, townGroup, townColliders, true);
+    for (let i = 0; i < 3; i++) makeRock(rng, rx + (rng() - 0.5) * 2.8, rz + (rng() - 0.5) * 2.8, townGroup, townColliders, false);
+  }
+  // picnic tables, angled like people actually dragged them
+  makePicnicTable(120.5, -37, 0.4);
+  makePicnicTable(137.5, -47.5, -0.7);
+  makePicnicTable(139, -37.5, 1.2);
+  // flower beds — the butterflies' whole world
+  makeFlowerBed(rng, 119.5, -46.5, 1.9, 11);
+  makeFlowerBed(rng, 135.5, -42, 1.7, 10);
+  makeFlowerBed(rng, 124.5, -31.8, 1.8, 10);
+  makeFlowerBed(rng, 131, -51.5, 1.6, 9);
+  // the man himself, centre of the lawn
+  buildBlingoStatue(cx, cz);
+  // two park lamps so the statue reads at dusk
+  makeStreetLamp(122, -42, townGroup, 3.6);
+  makeStreetLamp(136, -42, townGroup, 3.6);
+  // the corner sign by the crossing, arrow aimed up the side road at Red's
+  makeParkSign(113.5, -29.5, '< RED\'S CHILI', Math.PI + 0.6);
+  buildButterflies();
+}
+
+// ---------- butterflies ----------
+// small ones, park property: each picks a flower, flutters over, sits with slow wings,
+// then moves along. Two triangle wings on a crumb of a body — cheap enough to always tick.
+const butterflies = [];
+const BFLY_COLORS = [0xfff3f3, 0xffd84a, 0xff9a3d, 0xa8d8ff, 0xffb0d8];
+function buildButterflies() {
+  if (!parkFlowers.length) return;
+  const wingGeo = new THREE.PlaneGeometry(0.16, 0.11);
+  for (let i = 0; i < 9; i++) {
+    const g = new THREE.Group();
+    const bmat = new THREE.MeshBasicMaterial({ color: BFLY_COLORS[i % BFLY_COLORS.length], side: THREE.DoubleSide });
+    const wings = [];
+    for (const s of [-1, 1]) {
+      const hinge = new THREE.Group();
+      const w = new THREE.Mesh(wingGeo, bmat);
+      w.position.x = s * 0.09;
+      hinge.add(w);
+      hinge.rotation.x = -Math.PI / 2; // wings lie flat, flap around the body line
+      g.add(hinge);
+      wings.push(hinge);
+    }
+    const body = box(0.025, 0.02, 0.1, 0x2e2a24);
+    g.add(body);
+    const f = parkFlowers[(Math.random() * parkFlowers.length) | 0];
+    g.position.set(f.x, f.y + 0.05, f.z);
+    townGroup.add(g);
+    butterflies.push({ g, wings, tgt: f, phase: Math.random() * TAU,
+      sitT: Math.random() * 3, speed: 1.1 + Math.random() * 0.9, yaw: 0 });
+  }
+}
+function updateButterflies(dt) {
+  for (const b of butterflies) {
+    b.phase += dt * (b.sitT > 0 ? 5 : 22); // lazy fan on the flower, a blur in the air
+    const flap = Math.sin(b.phase) * (b.sitT > 0 ? 0.5 : 1.05);
+    b.wings[0].rotation.z = flap;
+    b.wings[1].rotation.z = -flap;
+    if (b.sitT > 0) { b.sitT -= dt; continue; }
+    const dx = b.tgt.x - b.g.position.x, dz = b.tgt.z - b.g.position.z;
+    const ty = b.tgt.y + 0.05 + Math.sin(b.phase * 0.13) * 0.3; // drifting bob on the way
+    const dy = ty - b.g.position.y;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.12) { // landed: settle onto the bloom and fan
+      b.g.position.set(b.tgt.x, b.tgt.y + 0.05, b.tgt.z);
+      b.sitT = 1.8 + Math.random() * 3.2;
+      const next = parkFlowers[(Math.random() * parkFlowers.length) | 0];
+      b.tgt = next;
+      continue;
+    }
+    b.yaw = Math.atan2(dx, dz);
+    b.g.rotation.y = b.yaw;
+    const step = Math.min(d, b.speed * dt);
+    b.g.position.x += (dx / d) * step;
+    b.g.position.z += (dz / d) * step;
+    b.g.position.y += clamp(dy, -1.4 * dt, 1.4 * dt);
+  }
+}
+
+// ---------- Red's Chili ----------
+// The corner plot up the side road from the park sign: Blazo's championship chili stand,
+// rebuilt in loving detail down to the disaster on the ground. A cabana roof with spoons
+// swinging from the fringe, the big pot up on the counter, bowls stacked and waiting —
+// and the horde's review spilled across the tarmac: one pot nearly licked clean on the
+// ground, one knocked flat, chili everywhere. RED'S CHILI overhead in the goopy face,
+// civic-plate sized, because the town hall never made anything this good.
+const chiliMat = mat(0x7a2412);
+function makeChiliPot(x, z, r, h, opts = {}) {
+  const y0 = groundHeight(x, z) + (opts.lift || 0);
+  const iron = mat(0x2e3238, { side: THREE.DoubleSide });
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.82, h, 12, 1, true), iron);
+  const bottom = new THREE.Mesh(new THREE.CircleGeometry(r * 0.82, 12), iron);
+  bottom.rotation.x = Math.PI / 2;
+  bottom.position.y = -h / 2 + 0.01;
+  pot.add(bottom);
+  for (const s of [-1, 1]) { // stub handles
+    const hd = box(0.3, 0.05, 0.05, 0x1e2226);
+    hd.position.set(s * r, h * 0.32, 0);
+    pot.add(hd);
+  }
+  if (opts.fill !== undefined) { // chili surface, at whatever height is left in it
+    const chili = new THREE.Mesh(new THREE.CircleGeometry(r * 0.9, 12),
+      new THREE.MeshLambertMaterial({ color: 0x8a2f1a, emissive: 0x1e0602, emissiveIntensity: 0.4 }));
+    chili.rotation.x = -Math.PI / 2;
+    chili.position.y = -h / 2 + Math.max(0.03, h * opts.fill);
+    pot.add(chili);
+  }
+  if (opts.tipped) {
+    pot.rotation.z = Math.PI / 2 - 0.06;
+    pot.rotation.y = opts.yaw || 0;
+    pot.position.set(x, y0 + r * 0.86, z);
+  } else {
+    pot.position.set(x, y0 + h / 2, z);
+  }
+  townGroup.add(pot);
+  townColliders.push(aabb(x, z, r * (opts.tipped ? 1.2 : 0.95), r * 0.95, opts.tipped ? r * 1.7 : h, y0));
+  return pot;
+}
+function buildChiliStand(rng) {
+  const sx = 117, sz = -2;       // heart of the corner plot, facing the crossing
+  const y0 = groundHeight(sx, sz);
+  const wood = 0x7a5230, woodDk = 0x64431f;
+  // four posts and the cabana roof: two tan slabs pitched into a ridge, straw-fringed
+  for (const [px, pz] of [[-3.1, -2.3], [3.1, -2.3], [-3.1, 2.3], [3.1, 2.3]]) {
+    const post = cyl(0.09, 0.12, 2.9, woodDk, 7);
+    post.position.set(sx + px, y0 + 1.45, sz + pz);
+    townGroup.add(post);
+    townColliders.push(aabb(sx + px, sz + pz, 0.14, 0.14, 2.9, y0));
+  }
+  const straw = mat(0xc9a55a), strawDk = mat(0xb08d44);
+  for (const s of [-1, 1]) {
+    const slab = new THREE.Mesh(BOX, straw);
+    slab.scale.set(7.6, 0.1, 3.1);
+    slab.position.set(sx, y0 + 3.25, sz + s * 1.45);
+    slab.rotation.x = s * 0.38;
+    townGroup.add(slab);
+  }
+  const ridge = new THREE.Mesh(BOX, strawDk);
+  ridge.scale.set(7.7, 0.12, 0.5);
+  ridge.position.set(sx, y0 + 3.82, sz);
+  townGroup.add(ridge);
+  // straw fringe strips swinging under the eaves, alternating shades
+  for (let i = 0; i < 12; i++) {
+    const fx = sx - 3.5 + i * 0.64;
+    for (const s of [-1, 1]) {
+      const strip = new THREE.Mesh(BOX, i % 2 ? straw : strawDk);
+      strip.scale.set(0.5, 0.34, 0.06);
+      strip.position.set(fx, y0 + 2.72, sz + s * 2.95);
+      townGroup.add(strip);
+    }
+  }
+  // the counter runs the front (road side), a shorter return up the west flank
+  const counter = box(5.6, 0.95, 0.7, wood);
+  counter.position.set(sx, y0 + 0.475, sz - 1.7);
+  townGroup.add(counter);
+  townColliders.push(aabb(sx, sz - 1.7, 2.8, 0.35, 0.95, y0));
+  const ret = box(0.7, 0.95, 2.6, wood);
+  ret.position.set(sx - 2.45, y0 + 0.475, sz - 0.1);
+  townGroup.add(ret);
+  townColliders.push(aabb(sx - 2.45, sz - 0.1, 0.35, 1.3, 0.95, y0));
+  // the big cooking pot up on the counter, full and steaming-adjacent; ladle leaned in
+  makeChiliPot(sx + 1.3, sz - 1.7, 0.55, 0.75, { fill: 0.85, lift: 0.95 });
+  const ladle = cyl(0.02, 0.02, 0.8, 0xb9bdc4, 6);
+  ladle.position.set(sx + 1.05, y0 + 2.05, sz - 1.62);
+  ladle.rotation.z = 0.5;
+  townGroup.add(ladle);
+  // the stack of bowls beside it
+  for (let i = 0; i < 5; i++) {
+    const bowl = cyl(0.22, 0.15, 0.1, i % 2 ? 0xd8cdb8 : 0xcabfa8, 10);
+    bowl.position.set(sx - 0.9, y0 + 1.0 + i * 0.085, sz - 1.68);
+    townGroup.add(bowl);
+  }
+  // spoons hanging off the front fringe on strings, swap-meet style
+  for (let i = 0; i < 5; i++) {
+    const hx = sx - 2.2 + i * 1.1;
+    const string = cyl(0.008, 0.008, 0.34, 0x4a4438, 4);
+    string.position.set(hx, y0 + 2.42, sz - 2.95);
+    townGroup.add(string);
+    const handle = box(0.035, 0.24, 0.02, 0xb9bdc4);
+    handle.position.set(hx, y0 + 2.14, sz - 2.95);
+    townGroup.add(handle);
+    const head = ball(0.055, 0xb9bdc4);
+    head.scale.z = 0.55;
+    head.position.set(hx, y0 + 2.0, sz - 2.95);
+    townGroup.add(head);
+  }
+  // the disaster: chili slicked over the ground out front, a nearly-empty pot on the
+  // tarmac side, and one knocked flat with its mouth to the street
+  townGroup.add(terrainDisc(1.5, 16, sx - 0.6, sz - 4.1, chiliMat, 0.055));
+  townGroup.add(terrainDisc(0.9, 12, sx + 1.7, sz - 4.8, chiliMat, 0.055));
+  townGroup.add(terrainDisc(0.6, 10, sx - 2.6, sz - 4.6, chiliMat, 0.055));
+  for (let i = 0; i < 8; i++) { // chunks in the sauce (beans, hopefully)
+    const bit = ball(0.05 + rng() * 0.04, 0x8a2f1a);
+    const bx2 = sx - 0.8 + (rng() - 0.5) * 3.4, bz2 = sz - 4.2 + (rng() - 0.5) * 1.6;
+    bit.position.set(bx2, groundHeight(bx2, bz2) + 0.08, bz2);
+    townGroup.add(bit);
+  }
+  makeChiliPot(sx + 2.9, sz - 4.3, 0.6, 0.85, { fill: 0.18 });          // a little left at the bottom
+  makeChiliPot(sx - 3.4, sz - 4.0, 0.55, 0.8, { tipped: true, yaw: 0.9 }); // kicked over, empty
+  const dribble = terrainDisc(0.5, 9, sx - 4.15, sz - 4.35, chiliMat, 0.055); // what rolled out of it
+  townGroup.add(dribble);
+  // the signage: civic-plate sized RED'S CHILI riding two masts over the ridge,
+  // faced square down the side road so the park corner reads it end-on
+  for (const s of [-1, 1]) {
+    const mast = cyl(0.09, 0.11, 1.6, woodDk, 7);
+    mast.position.set(sx + s * 2.6, y0 + 4.4, sz);
+    townGroup.add(mast);
+  }
+  const sign = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
+  sign.position.set(sx, y0 + 5.1, sz);
+  sign.rotation.y = Math.PI; // face the main-street crossing the park sign points from
+  townGroup.add(sign);
+  const signBack = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
+  signBack.position.set(sx, y0 + 5.1, sz + 0.02);
+  townGroup.add(signBack); // readable coming down the road from the north too
+}
+
+// ---------- the Blob Lounge ----------
+// Blomba's old workplace, far down the side road the other way from all of it: a
+// triple-wide hall you can actually fight inside, every wall lined with stocked
+// shelves. The loot run of the map, if you can hold the room.
+function buildBlobLounge(rng) {
+  const bx = 122, bz = -88, w = 26, d = 13, h = 4.2;
+  const y0 = groundHeight(bx, bz);
+  const wallC = 0x584a66; // lounge purple, like the bouncer who kept its door
+  const t = 0.35;
+  const shell = [];
+  const peekSlab = m => shell.push({ mats: [ownMat(m)], box: townColliders[townColliders.length - 1], op: 1, want: 1 });
+  // north wall faces the park: double-door gap dead centre
+  const gap = 2.6, segLen = (w - gap) / 2;
+  for (const s of [-1, 1]) {
+    const m = box(segLen, h + 0.6, t, wallC);
+    m.position.set(bx + s * (gap / 2 + segLen / 2), y0 + h / 2 - 0.3, bz + d / 2);
+    townGroup.add(m);
+    townColliders.push(aabb(bx + s * (gap / 2 + segLen / 2), bz + d / 2, segLen / 2, t / 2, h + 0.6, y0 - 0.6));
+    peekSlab(m);
+  }
+  // south wall solid; east + west flanks solid
+  const south = box(w, h + 0.6, t, wallC);
+  south.position.set(bx, y0 + h / 2 - 0.3, bz - d / 2);
+  townGroup.add(south);
+  townColliders.push(aabb(bx, bz - d / 2, w / 2, t / 2, h + 0.6, y0 - 0.6));
+  peekSlab(south);
+  for (const s of [-1, 1]) {
+    const m = box(t, h + 0.6, d, wallC);
+    m.position.set(bx + s * w / 2, y0 + h / 2 - 0.3, bz);
+    townGroup.add(m);
+    townColliders.push(aabb(bx + s * w / 2, bz, t / 2, d / 2, h + 0.6, y0 - 0.6));
+    peekSlab(m);
+  }
+  // windows along the front so the shelves glint at passers-by
+  for (const wx of [-8, 8]) {
+    const win = windowPane(rng, 1.6, 1.1);
+    win.position.set(bx + wx, y0 + h * 0.5, bz + d / 2 + 0.03);
+    townGroup.add(win);
+  }
+  const floor = box(w, 0.6, d, 0x453a4e);
+  floor.position.set(bx, y0 - 0.24, bz);
+  townGroup.add(floor);
+  townColliders.push(aabb(bx, bz, w / 2 - t, d / 2 - t, 0.56, y0 - 0.5));
+  const roofPeek = addRoof(townGroup, bx, y0 + h - 0.05, bz, w, d, rng, townColliders, wallC);
+  if (roofPeek) shell.push(roofPeek);
+  // the loot: shelving lined up along every wall, the way she left the stockroom.
+  // Each rolls its crates through makeShelf like any chunk house shelf would.
+  for (const sx of [-10, -5.2, -0.4, 4.4, 9.2])
+    makeShelf(rng, bx + sx, bz - d / 2 + 0.85, 0, townGroup, townColliders, townCrates, y0 + 0.06);
+  for (const sz of [-3.4, 0.4]) {
+    makeShelf(rng, bx - w / 2 + 0.85, bz + sz, Math.PI / 2, townGroup, townColliders, townCrates, y0 + 0.06);
+    makeShelf(rng, bx + w / 2 - 0.85, bz + sz, Math.PI / 2, townGroup, townColliders, townCrates, y0 + 0.06);
+  }
+  for (const sx of [-8.6, 8.6]) // flanking the door, angled in like a proper entryway
+    makeShelf(rng, bx + sx, bz + d / 2 - 0.85, Math.PI, townGroup, townColliders, townCrates, y0 + 0.06);
+  // a floor crate or two loose in the middle of the room
+  makeCrate(rng, bx - 2.5, y0 + 0.08, bz - 1, townGroup, townColliders, townCrates, false, true);
+  makeCrate(rng, bx + 3.5, y0 + 0.08, bz + 1.5, townGroup, townColliders, townCrates, false, true);
+  // her name over the door, lounge-lit, with a lamp either side
+  const sign = textPlate('BLOB LOUNGE', 6.5, 1.5, '#241a2e', '#d8a8ff');
+  sign.position.set(bx, y0 + h + 0.55, bz + d / 2 + 0.08);
+  townGroup.add(sign);
+  makeStreetLamp(bx - 4.5, bz + d / 2 + 2.2, townGroup, 3.6);
+  makeStreetLamp(bx + 4.5, bz + d / 2 + 2.2, townGroup, 3.6);
+  // register it enterable: zombies path the door gap, the shell fades for the peek
+  townBuildings.push({ x: bx, z: bz, hw: w / 2 + 0.5, hd: d / 2 + 0.5, shell,
+    doorX: bx, doorZ: bz + d / 2, doorOutX: bx, doorOutZ: bz + d / 2 + 2.2,
+    roofY: y0 + h - 0.05 + d * 0.32, ridgeHW: Math.max(1, w / 2 - 0.6) });
 }
 
 // ---------- input ----------
@@ -3456,14 +3887,30 @@ function makeBeacon(color, opacity) {
 
 // true when nothing solid overlaps a character-sized circle at (x,z): keeps spawns out
 // of cars, rocks, shelf-filled corners and the sealed town facades (which sit in town)
-function spawnSpotClear(x, z) {
-  if (inTown(x, z, 2)) return false;
+function spotOpenFor(x, z) {
   const gy = groundHeight(x, z);
   for (const c of nearbyColliders(x, z)) {
     if (Math.abs(x - c.x) < c.hw + 0.55 && Math.abs(z - c.z) < c.hd + 0.55 && gy < c.y1 - 0.2) return false;
   }
   return true;
 }
+function spawnSpotClear(x, z) {
+  if (inTown(x, z, 2)) return false;
+  return spotOpenFor(x, z);
+}
+// Everyone waits where their story says they would. Blingo at the foot of his own
+// granite likeness, Blazo back at the family chili stand, Blomba outside her lounge,
+// Bloopy by the radio shop he rebuilt. Blizzy is the scout: always the farthest out of
+// all six — and her bearing rides on Blondie's roll. Blondie wanders somewhere far on a
+// fresh random bearing every run, and Blizzy scouts the OPPOSITE side of the map from
+// wherever the hoarder ended up: different sides always, and twice the run-to-run
+// volatility for the one cousin who'd hate to be predictable.
+const COUSIN_HOMES = {
+  blingo: [129, -37.5],  // the statue lawn — his beacon rises over his own monument
+  blazo:  [119.5, 2.5],  // Red's Chili, one plot up the road the park sign points
+  blomba: [122, -79.5],  // the Blob Lounge doorstep, far side of it all
+  bloopy: [69.5, -31],   // beside the RADIO shop
+};
 function scatterCousins() {
   for (const c of companions) {
     scene.remove(c.blob.root);
@@ -3472,18 +3919,36 @@ function scatterCousins() {
   }
   companions.length = 0;
   recruitCounter = 0;
+  // Blondie's roll happens first so Blizzy can take the opposite bearing
+  const blondieAng = Math.random() * TAU;
+  const blondieDist = 85 + Math.random() * 45;
   let i = 0;
   for (const data of COUSINS) {
     if (data.id === selectedCousin) continue;
     // cousins wait on open land, roads or inside the enterable hollow houses — never
     // wedged into cars, rocks, shelves or the sealed town buildings
     let x = 0, z = 0;
-    for (let tries = 0; tries < 24; tries++) {
-      const ang = i * (TAU / 5) + Math.random() * 0.8;
-      const dist = 65 + i * 18 + Math.random() * 25;
-      x = Math.sin(ang) * dist; z = Math.cos(ang) * dist;
-      [x, z] = resolveCollision(x, z, 0.6);
-      if (spawnSpotClear(x, z)) break;
+    const home = COUSIN_HOMES[data.id];
+    if (home) {
+      // homebodies: land on the doorstep, drifting only as far as blocked ground demands.
+      // These spots sit inside town rects, so only the collider check gates them.
+      for (let tries = 0; tries < 24; tries++) {
+        const jit = 1 + tries * 0.45;
+        x = home[0] + (Math.random() - 0.5) * jit;
+        z = home[1] + (Math.random() - 0.5) * jit;
+        [x, z] = resolveCollision(x, z, 0.6);
+        if (spotOpenFor(x, z)) break;
+      }
+    } else {
+      const far = data.id === 'blizzy';
+      for (let tries = 0; tries < 24; tries++) {
+        // Blondie: her own fresh bearing. Blizzy: 180 degrees off it, half again as deep.
+        const ang = (far ? blondieAng + Math.PI : blondieAng) + (Math.random() - 0.5) * 0.5;
+        const dist = far ? blondieDist * 1.5 + 25 + Math.random() * 20 : blondieDist + Math.random() * 12;
+        x = Math.sin(ang) * dist; z = Math.cos(ang) * dist;
+        [x, z] = resolveCollision(x, z, 0.6);
+        if (spawnSpotClear(x, z)) break;
+      }
     }
     const blob = buildBlob({ color: data.color, gunHand: data.id === 'blondie' ? 'left' : 'right' });
     blob.root.position.set(x, groundHeight(x, z), z);
@@ -3642,7 +4107,7 @@ const player = {
   // bleed back up on your own so nobody gets dumped out of the session
   downed: false, downT: 0, beacon: null, dripT: 0,
   slideT: 0, slideDX: 0, slideDZ: 0, hopT: 0,
-  dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1, jumpMult: 1,
+  dmgMult: 1, sprintMult: 1, reloadMult: 1, ammoMult: 1, jumpMult: 1, meleeMult: 1,
   owned: ['fists'], aiming: false, aimT: 0,   // aimT: eased 0=hip .. 1=aiming down / zoomed
   fpv: false, fpvT: 0,                         // fpv toggle (V / Select); fpvT eased 0=third-person .. 1=first-person
 };
@@ -3733,6 +4198,9 @@ function applyCousin(id) {
   player.reloadMult = id === 'bloopy' ? 0.65 : 1;
   player.ammoMult = id === 'blondie' ? 1.5 : 1;
   player.jumpMult = id === 'blingo' ? 1.1 : 1; // unlisted perk: the "balanced hero" quietly jumps higher
+  // unlisted perk: the bouncer. Any melee Blomba swings lands half again as hard, her
+  // kills come apart instead of just falling, and every one feeds her (see blombaVamp)
+  player.meleeMult = id === 'blomba' ? 1.5 : 1;
   if (gunMesh) { gunMesh.removeFromParent(); gunMesh = null; }
   equipWeapon(player.weapon.id === 'fists' ? 'fists' : player.weapon.id);
   ownPlayerBodyMats(); // the fresh blob needs its own fade-able materials again
@@ -5174,6 +5642,21 @@ function meleeMoveGib(w, z, kx, kz, hop) {
   if (z.state !== 'dying' || z.isBoss || z.netGhost || z.blob.bodyGone) return;
   popChest(z, kx, kz);
 }
+// Blomba's hidden trait, the easter egg the lounge regulars swear by: her melee kills
+// never just read a number and fall — they come apart (head, limbs or chest, dealer's
+// choice) — and every one feeds her. +2hp a swing kill, +6 off bare fists: the softer
+// the touch, the sweeter the jelly. Vampirism, but make it a bouncer.
+// (Host/solo only: a client can't see host-side hp, so its kills settle upstream.)
+function blombaVamp(w, z, kx, kz, wasDying) {
+  if (player.meleeMult <= 1 || wasDying || z.state !== 'dying') return;
+  if (!z.isBoss && !z.netGhost && !z.blob.bodyGone) {
+    const roll = Math.random();
+    if (roll < 0.34) popHead(z, kx, kz);
+    else if (roll < 0.67) { blowLimb(z, kx, kz); blowLimb(z, kx, kz); }
+    else popChest(z, kx, kz);
+  }
+  player.hp = Math.min(player.maxHp, player.hp + (w.id === 'fists' ? 6 : 2));
+}
 // a sprawled zombie (asleep, or an already-dead carcass) lies flat, head and torso low and
 // off along the sprawl axis rather than stacked upright. Two fat low spheres down the body
 // catch a shot aimed at what you actually see. Returns nearest t (Infinity on a miss); sets
@@ -5198,8 +5681,10 @@ function meleeChopHit() {
   const knock = 3.5 * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
   for (const hit of hits) {   // the down swing sweeps the whole crowd too
     const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z, d = Math.hypot(dx, dz) || 1;
-    damageZombie(hit, w.dmg * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock, { weapon: w, dist: d, isHead: false });
+    const wasDying = hit.state === 'dying';
+    damageZombie(hit, w.dmg * player.meleeMult * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock, { weapon: w, dist: d, isHead: false });
     meleeMoveGib(w, hit, dx / d, dz / d, hop);
+    blombaVamp(w, hit, dx / d, dz / d, wasDying);
   }
   SFX.shoot(w); rumble(...w.rmb);
 }
@@ -5235,13 +5720,16 @@ function fireWeapon() {
       const d = Math.hypot(dx, dz) || 1;
       // fists land on the ZOMBIE, not the hand or the clock: each one takes 6 on its first
       // punch, 7 on its next, 6 again — its own running count, so two zombies in one arc
-      // can be on different beats. Melee ignores hero damage perks so the numbers stay
-      // true for everyone — the perks live on guns.
+      // can be on different beats. Melee ignores the gun damage perks so the numbers stay
+      // true for everyone — Blomba's meleeMult is the one sanctioned exception: the
+      // bouncer's swings are her whole perk.
       const base = w.id === 'fists' ? ((hit.punchN = (hit.punchN | 0) + 1) % 2 ? 6 : 7) : w.dmg;
       const knock = (w.id === 'fists' ? 5.5 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
-      damageZombie(hit, base * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
+      const wasDying = hit.state === 'dying';
+      damageZombie(hit, base * player.meleeMult * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
         { weapon: w, dist: d, isHead: false });
       meleeMoveGib(w, hit, dx / d, dz / d, hop);
+      blombaVamp(w, hit, dx / d, dz / d, wasDying);
     }
     if (hits.length) rumble(...w.rmb);
     // armed weapons chop through: schedule the down swing to land mid-arc (fists keep their
@@ -5569,6 +6057,7 @@ function tradeWeapons(c) {
   SFX.swap(WEAPONS[theirId]);
   rumble(60, 0.3, 0.4);
   toast(`TRADED: YOUR ${WEAPONS[myId].name.toUpperCase()} FOR ${(c.netP ? 'P' + c.netP + ' ' : '') + c.data.name.toUpperCase()}'S ${WEAPONS[theirId].name.toUpperCase()}`);
+  bloopyTradeNice();
 }
 // ---------- hold-to-trade (multiplayer, any weapons) ----------
 // two players hold interact within reach of each other: a hero-coloured ring fills,
@@ -5647,6 +6136,7 @@ function executeHoldTrade(a, b) {
   }
   SFX.tradePing();
   if (!a.self && !b.self) toast(`P${a.p} AND P${b.p} TRADED WEAPONS`);
+  bloopyTradeNice();
 }
 // a client asked to swap melees with player p (1 = the host); host validates and settles
 function netHandleTradeReq(conn, p) {
@@ -5665,6 +6155,7 @@ function netHandleTradeReq(conn, p) {
     try { c.netConn.send({ t: 'tradeW', w: idB, took: idA }); } catch (e) {}
     try { c2.netConn.send({ t: 'tradeW', w: idA, took: idB }); } catch (e) {}
     toast(`P${c.netP} AND P${p} TRADED MELEES`);
+    bloopyTradeNice();
   }
 }
 // ---------- the bare-skin trade (multiplayer cousin swap) ----------
@@ -5713,6 +6204,7 @@ function executeSkinTrade(a, b) {
   }
   SFX.tradePing();
   rumble(120, 0.5, 0.5);
+  bloopyTradeNice(); // even a whole-skin deal gets the one-word review
 }
 // re-dress a player-driven companion as a different cousin on a different spot — the
 // host-side half of a bare-skin trade (the player behind it keeps their number + conn)
@@ -5840,7 +6332,8 @@ function recruitCousin(c) {
   maybeSpawnBoss();
   // half of them say hello, half just fall in — so the greeting stays a moment rather
   // than a formality. Beat late: the JOINED toast lands first, then they speak.
-  if (Math.random() < 0.5) c.helloT = 0.45;
+  // Bloopy is the exception: he has NEVER once skipped the hello. No coin for him.
+  if (Math.random() < 0.5 || persona(c).alwaysHello) c.helloT = 0.45;
   // family lore: Bloopy has watched Blondie's pocket-geometry looting for years. Every
   // time she signs back on, he wishes the world good luck. Always — no coin on this one.
   if (c.data.id === 'blondie') {
@@ -5860,7 +6353,7 @@ const PERSONA = {
   blingo:  { fightHops: true },      // can't stand still in a fight
   blazo:   { leapChop: true },       // melee in hand? the swing comes down out of the air
   blomba:  { crowShot: true, meleeBrawler: true }, // guns: no crow is safe. Melee: he takes the fight TO them
-  bloopy:  { bossNice: true },       // says the quiet part when a boss drops
+  bloopy:  { bossNice: true, alwaysHello: true, tradeNice: true }, // says the quiet part when a boss drops; never skips a hello; rates every trade
   blondie: { sweeper: true },        // wider loot reach, and hops home once she has it
 };
 function persona(c) { return (c.data && PERSONA[c.data.id]) || {}; }
@@ -5875,6 +6368,12 @@ function cousinEmote(c, i) {
 const HELLO_EMOTE = EMOTES.findIndex(e => e.startsWith('Hello'));
 const NICE_EMOTE = EMOTES.findIndex(e => e.startsWith('Nice'));
 const LUCK_EMOTE = EMOTES.findIndex(e => e.startsWith('Good'));
+// Bloopy appreciates commerce: once he's on the squad, EVERY settled trade — weapons,
+// melees, whole skins — gets his one-word review, a beat after the swap lands
+function bloopyTradeNice() {
+  const bp = companions.find(o => persona(o).tradeNice && o.recruited && !o.downed && !o.netP);
+  if (bp) bp.niceT = 0.9;
+}
 // weapon-only loot roll (companions only ever grab guns from crates)
 function rollLootWeapon(rng) {
   for (let i = 0; i < 8; i++) { const id = rollLoot(rng); if (id !== 'ammo' && id !== 'medkit') return id; }
@@ -5994,6 +6493,7 @@ function stepFrame(dt) {
     updateBossFx(dt);
     updateFloodlights(dt);
     updateCrows(dt);
+    updateButterflies(dt);
     updateFountain(dt);
     updateCelebration(dt);
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
@@ -7054,7 +7554,9 @@ function updateSpawner(dt) {
       x = player.pos.x + Math.sin(ang) * d;
       z = player.pos.z + Math.cos(ang) * d;
       [x, z] = resolveCollision(x, z, 0.5);
-      ok = !insideBuilding(x, z); // zombies never appear inside buildings on their own
+      // zombies never appear inside buildings on their own — and never on the park,
+      // perimeter included: the jelly picnic ground stays spawn-free
+      ok = !insideBuilding(x, z) && !inPark(x, z, 3);
     }
     if (!ok) return;
     const power = 1 + game.time / 240;
@@ -7078,7 +7580,7 @@ function updateSpawner(dt) {
       const ca = Math.random() * TAU, cd = 1.5 + Math.random() * 1.4;
       const [cxx, czz] = resolveCollision(x + Math.sin(ca) * cd, z + Math.cos(ca) * cd, 0.5);
       const clear = !zombies.some(zz => zz.state !== 'dying' && Math.hypot(zz.pos.x - cxx, zz.pos.z - czz) < 1.1);
-      if (clear && !insideBuilding(cxx, czz)) spawnZombie(cxx, czz, power, { mode: 'corpse' });
+      if (clear && !insideBuilding(cxx, czz) && !inPark(cxx, czz, 3)) spawnZombie(cxx, czz, power, { mode: 'corpse' });
     }
   }
 }
