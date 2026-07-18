@@ -65,6 +65,13 @@ function angLerp(a, b, t) {
   if (d < -Math.PI) d += TAU;
   return a + d * t;
 }
+// signed shortest angular distance a->b — the "am I actually facing it yet" test
+function angDiff(a, b) {
+  let d = (b - a) % TAU;
+  if (d > Math.PI) d -= TAU;
+  if (d < -Math.PI) d += TAU;
+  return d;
+}
 
 // ---------- terrain height ----------
 function vhash(ix, iz) {
@@ -7311,16 +7318,22 @@ function updateCompanions(dt) {
       }
       // a zombie in his face always outranks a bird — the quirk is a habit, not a death wish
       if (bird && (!tgt || tD > 6)) {
-        const gun = c.weapon;
-        c.shootCd = 0.75 + Math.random() * 0.3;
-        c.yaw = Math.atan2(bird.g.position.x - c.pos.x, bird.g.position.z - c.pos.z);
+        const wantYaw = Math.atan2(bird.g.position.x - c.pos.x, bird.g.position.z - c.pos.z);
+        c.yaw = wantYaw;
         const sy2 = c.y + 1.0;
-        if (c.gunMesh && c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_cv);
-        else _cv.set(c.pos.x, sy2, c.pos.z);
-        spawnTracer(_cv.clone(), bird.g.position.clone());
-        killCrow(bird, (bird.g.position.x - c.pos.x) / bD, (bird.g.position.z - c.pos.z) / bD, (gun.dmg || 5) * 2);
-        game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
-        if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(gun));
+        // track the bird's height with the gun arm while swinging round; hold the shot
+        // until he's actually facing it — same barrel-first discipline as the squad's
+        c.aimPitch = lerp(c.aimPitch || 0, Math.atan2(bird.g.position.y - sy2, bD), 1 - Math.exp(-14 * dt));
+        if (Math.abs(angDiff(b.root.rotation.y, wantYaw)) < 0.12) {
+          const gun = c.weapon;
+          c.shootCd = 0.75 + Math.random() * 0.3;
+          if (c.gunMesh && c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_cv);
+          else _cv.set(c.pos.x, sy2, c.pos.z);
+          spawnTracer(_cv.clone(), bird.g.position.clone());
+          killCrow(bird, (bird.g.position.x - c.pos.x) / bD, (bird.g.position.z - c.pos.z) / bD, (gun.dmg || 5) * 2);
+          game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
+          if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(gun));
+        }
       }
     }
     if (tgt) c.yaw = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
@@ -7328,6 +7341,15 @@ function updateCompanions(dt) {
     else if (cmd === 'wait' && !moving) c.yaw = Math.atan2(c.pos.x - squadCmd.ax, c.pos.z - squadCmd.az); // backs together, eyes out
     else if (cmd === 'guard' && !moving) c.yaw = Math.atan2(c.pos.x - player.pos.x, c.pos.z - player.pos.z); // watch your flanks
     else if (still && !moving) c.yaw = fYaw; // stand at attention facing where you face
+    // real aiming: track the vertical angle to the mark (shoulder to torso) so the gun
+    // arm actually points at what's being shot, and never loose a round until the body
+    // has swung round to face it — the shot leaves along the barrel, not out of a hip
+    // mid-turn like the old instant-fire did
+    if (tgt && !(c.weapon || WEAPONS.pistol).melee) {
+      const wantP = Math.atan2((tgt.blob.root.position.y + 0.7 * tgt.scale) - (c.y + 1.0), tD);
+      c.aimPitch = lerp(c.aimPitch || 0, wantP, 1 - Math.exp(-14 * dt));
+    } else c.aimPitch = lerp(c.aimPitch || 0, 0, 1 - Math.exp(-6 * dt));
+    const facingTgt = !!tgt && Math.abs(angDiff(b.root.rotation.y, c.yaw)) < 0.12;
     if (tgt && c.shootCd <= 0) {
       const kx = (tgt.pos.x - c.pos.x) / tD, kz = (tgt.pos.z - c.pos.z) / tD;
       if (cw.melee) {
@@ -7357,7 +7379,9 @@ function updateCompanions(dt) {
           }
           if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 24) play3d(c.pos.x, c.pos.z, () => SFX.shoot(cw));
         }
-      } else {
+      } else if (facingTgt) {
+        // ranged holds fire until the swing-round completes (facingTgt) — the round
+        // leaves the instant the barrel actually crosses the mark
         c.shootCd = (cw.auto ? 0.32 : cw.id === 'shotgun' ? 0.6 : 0.7) + Math.random() * 0.15;
         // cousin gunfire rings out just as loud as ours: blind zombies home in on it too
         game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
@@ -7394,9 +7418,11 @@ function updateCompanions(dt) {
     b.legs[0].rotation.x = swing;
     b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
-    // guns held levelled; melee walks in the low carry, buries the blade at the dirt on
-    // a swing, rides high for a beat after it, then relaxes back down — same as the hero
-    if (!cw.melee) b.arms[b.gunArm].rotation.x = -Math.PI / 2;
+    // guns point where the shots go: level in the carry, pitched up/down the aim angle
+    // while a mark is tracked (same 0.8 arm-lag the hero's own aim uses); melee walks in
+    // the low carry, buries the blade at the dirt on a swing, rides high for a beat
+    // after it, then relaxes back down — same as the hero
+    if (!cw.melee) b.arms[b.gunArm].rotation.x = -Math.PI / 2 - (c.aimPitch || 0) * 0.8;
     else {
       if (c.meleeT > 0) c.meleeHoldT = 1;
       else c.meleeHoldT = Math.max(0, (c.meleeHoldT || 0) - dt);
@@ -9389,11 +9415,16 @@ function netHostTick(dt) {
   if (net.txT > 0 || !net.conns.length) return;
   net.txT = 0.1;
   const R = v => Math.round(v * 20) / 20;
+  // every actor ships its gun-arm angle too: the host's own aim, an AI cousin's tracked
+  // pitch, or a remote player's streamed one (already applied to their blob) — so every
+  // client renders the same full x/y aim the owning screen sees
   const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
-    playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed)];
+    playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed,
+    playerBlob.arms[playerBlob.gunArm].rotation.x)];
   for (const c of companions) {
     if (!c.recruited) continue;
-    ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed));
+    ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed,
+      c.blob.arms[c.blob.gunArm].rotation.x));
   }
   const zb = [];
   for (const z of zombies) {
@@ -9410,12 +9441,13 @@ function netHostTick(dt) {
     ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
     zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 }); // host's spawn dials + gore-horde, mirrored on every client
 }
-function netActorOf(p, cid, x, z, y, yw, wp, hp, dn) {
+function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar) {
   const R = v => Math.round(v * 20) / 20;
   const key = p ? 'p' + p : 'ai' + cid;
   const mv = Math.hypot(x - (net['_lx' + key] || x), z - (net['_lz' + key] || z)) > 0.03 ? 1 : 0;
   net['_lx' + key] = x; net['_lz' + key] = z;
-  return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv };
+  return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv,
+    ar: ar == null ? undefined : Math.round(ar * 100) / 100 }; // gun-arm angle, finer grain than position
 }
 
 // --- joining ---
@@ -9600,7 +9632,7 @@ function netApplySnapshot(m) {
     // another player just hit the floor: the lobby callout (0-check skips fresh ghosts,
     // so joining mid-rescue doesn't announce an old fall)
     if (a.p && a.dn && g.dn === 0) toast(`P${a.p} ${g.data.name.toUpperCase()} DOWN .ᐟ`, true);
-    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn;
+    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar;
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
   updatePauseLobby();   // the slots readout follows the actor list live, even mid-pause
@@ -9662,10 +9694,13 @@ function netClientWorldTick(dt) {
     const swing = Math.sin(g.walk) * (g.mv ? 0.8 : 0.05);
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
+    // ranged arms ride the streamed gun-arm angle (eased over the 10Hz snapshots), so a
+    // hero aiming at the sky here aims at the sky on every screen — not a levelled prop
+    g.arS = lerp(g.arS ?? -Math.PI / 2, g.tar ?? -Math.PI / 2, 1 - Math.exp(-14 * dt));
     b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8
       : (WEAPONS[g.wp] && WEAPONS[g.wp].melee
         ? meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8)
-        : -Math.PI / 2);
+        : g.arS);
     if (g.dn) {
       // downed players crawl on their belly, same read as the host's own view of them
       b.wob.rotation.x = 1.2;
@@ -9743,6 +9778,9 @@ function netClientTick(dt) {
     try {
       net.conns[0].send({ t: 'p', x: player.pos.x, z: player.pos.z, y: player.pos.y,
         yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp), th,
+        // the gun arm's actual angle — full vertical aim, kick included — so every other
+        // screen sees this hero pointing exactly where they point
+        ar: Math.round(playerBlob.arms[playerBlob.gunArm].rotation.x * 100) / 100,
         dn: player.downed ? 1 : 0 });
     } catch (e) {}
   }
@@ -9836,9 +9874,11 @@ function netPoseCompanion(c, dt) {
   b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
   b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
   b.arms[b.offArm].rotation.x = -swing * 0.7;
+  // their streamed gun-arm angle, eased over the 15Hz stream: real x/y aim, not a levelled prop
+  c.arS = lerp(c.arS ?? -Math.PI / 2, p && p.ar != null ? p.ar : -Math.PI / 2, 1 - Math.exp(-14 * dt));
   b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
     ? meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8)
-    : -Math.PI / 2;
+    : c.arS;
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
   if (c.downed) {
     b.wob.rotation.x = 1.2;
