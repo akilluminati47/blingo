@@ -3860,6 +3860,21 @@ function eatChili() {
 // the grow/shrink melt: the splash screen's blur, borrowed for a body changing size
 function playerFadeBegin() { if (!player._fade) { player._fade = { blob: playerBlob }; beginBlobFade(player._fade); } }
 function playerFadeEnd() { if (player._fade) { endBlobFade(player._fade); player._fade = null; } }
+// the giant's constitution: a temporary +50 to the pool while you're huge, healed in on
+// the way up and clamped back out when you shrink (or go down). Idempotent both ways.
+const GIANT_HP_BOOST = 50;
+function giantHpOn() {
+  if (player.giantHpBoost) return;
+  player.giantHpBoost = GIANT_HP_BOOST;
+  player.maxHp += GIANT_HP_BOOST;
+  player.hp = Math.min(player.maxHp, player.hp + GIANT_HP_BOOST);
+}
+function giantHpOff() {
+  if (!player.giantHpBoost) return;
+  player.maxHp -= player.giantHpBoost;
+  player.giantHpBoost = 0;
+  player.hp = Math.min(player.hp, player.maxHp);
+}
 function updateGiant(dt) {
   if (player.giantPhase) {
     player.giantPhT += dt;
@@ -3879,8 +3894,9 @@ function updateGiant(dt) {
       if (player._fade) setBlobFade(player._fade, 0.3 + 0.7 * Math.abs(Math.cos(k * Math.PI)));
       if (k >= 1) {
         playerFadeEnd(); player.giantPhase = 'rise'; player.giantPhT = 0;
+        giantHpOn(); // the +50 lands as the growing finishes
         rumble(400, 1, 0.9); shakeAmp = Math.max(shakeAmp, 0.2);
-        toast('BOSS-SIZED .ᐟ', true);
+        toast('BOSS-SIZED .ᐟ +50 HP .ᐟ', true);
       }
     } else if (ph === 'rise') {
       // the look-around: still, arms down as fists, head sweeping left and right (animated
@@ -3894,7 +3910,7 @@ function updateGiant(dt) {
       player.giantScale = GIANT_SCALE + (1 - GIANT_SCALE) * k;
       if (player._fade) setBlobFade(player._fade, 0.3 + 0.7 * Math.abs(Math.cos(k * Math.PI)));
       if (k >= 1) {
-        playerFadeEnd();
+        playerFadeEnd(); giantHpOff();
         player.giantPhase = null; player.giantScale = 1; player.giantT = 0;
         toast('THE CHILI WEARS OFF . .');
       }
@@ -3919,6 +3935,11 @@ function giantStomp() {
     const d = Math.hypot(dx, dz);
     if (d > 6.5) continue;
     damageZombie(z, z.isBoss ? 6 : 400, dx / (d || 1), dz / (d || 1), 9, { isHead: false });
+  }
+  // the boot comes down on the loot too: any crate under the stomp bursts open (health only)
+  for (const cr of [...allCrates]) {
+    if (cr.opened) continue;
+    if (Math.hypot(cr.pos.x - player.pos.x, cr.pos.z - player.pos.z) < 4.5) openCrate(cr);
   }
 }
 function giantCharge() {
@@ -4780,7 +4801,7 @@ function goDown() {
   // then it stands you back up whole (jellyRevive, run from the downed block)
   player.jellyT = player.owned.includes('jelly') ? 3 : 0;
   // giant chili wears off the instant you hit the floor: nobody bleeds out boss-sized
-  if (player.giantPhase) { playerFadeEnd(); player.giantPhase = null; player.giantScale = 1; player.giantT = 0; playerBlob.root.scale.setScalar(1); updateGiantHud(); }
+  if (player.giantPhase || player.giantHpBoost) { playerFadeEnd(); giantHpOff(); player.giantPhase = null; player.giantScale = 1; player.giantT = 0; playerBlob.root.scale.setScalar(1); updateGiantHud(); }
   // everything committed gets dropped — you are not drop-kicking from the floor
   player.slideT = 0; player.hopT = 0; player.swingT = 0;
   player.dropKick = false; player.dropKickHits = null;
@@ -5664,7 +5685,7 @@ function resetGame() {
   // consumables come back with the world: full jars, full pot, six bowls, nobody fed yet
   player.jellyT = 0;
   playerFadeEnd();
-  player.giantPhase = null; player.giantScale = 1; player.giantT = 0;
+  player.giantPhase = null; player.giantScale = 1; player.giantT = 0; player.giantHpBoost = 0;
   playerBlob.root.scale.setScalar(1);
   jellyBar.lootedBy.clear(); applyJellyMask(0);
   chiliBar.lootedBy.clear(); applyChiliTaken(0);
@@ -7169,6 +7190,13 @@ function openCrate(cr) {
   cr.trim.visible = false;
   const rng = Math.random;
   const loot = rollCrateLoot(rng, cr);
+  // a chili giant can't hold a gun, so a crate a giant bursts hands over its HEALTH only —
+  // a medkit still heals, but weapons and ammo are left in the dirt (giantSpill marks them)
+  if (playerGiantOn()) {
+    if (loot === 'medkit') { player.hp = Math.min(player.maxHp, player.hp + 40); toast('+40 HP'); SFX.pickup(); }
+    else { toast('TOO BIG FOR THE GUNS . .'); giantSpill(cr.pos.x, cr.pos.z); }
+    return;
+  }
   if (loot === 'sniperammo') {
     // the armoury's full: the consolation is a box of the scarcest rounds in the game
     const add = Math.ceil(WEAPONS.sniper.mag * (1.5 + rng()) * player.ammoMult);
@@ -7192,6 +7220,10 @@ function openCrate(cr) {
   } else {
     giveWeapon(loot);
   }
+}
+// the giant leaves what it can't use: a little grey puff over the crate it just crushed
+function giantSpill(x, z) {
+  spawnParticles(x, groundHeight(x, z) + 0.6, z, 0x8a8f98, 8, 3, 0.7);
 }
 function giveWeapon(id) {
   const w = WEAPONS[id];
@@ -7467,16 +7499,18 @@ function updatePlayer(dt) {
   input.slide = false;
 
   let mvx = vx, mvz = vz;
+  // a chili giant throws its weight around: a bit more push on the slide and the slide-hop
+  const gSlide = playerGiantOn() ? 1.35 : 1;
   if (player.slideT > 0) {
     player.slideT -= dt;
     const s = Math.max(player.slideT, 0) / 0.55;
-    mvx += player.slideDX * 7.5 * s;
-    mvz += player.slideDZ * 7.5 * s;
+    mvx += player.slideDX * 7.5 * s * gSlide;
+    mvz += player.slideDZ * 7.5 * s * gSlide;
   }
   if (player.hopT > 0) { // slide-hop momentum carried through the air
     player.hopT -= dt;
-    mvx += player.slideDX * 6.5;
-    mvz += player.slideDZ * 6.5;
+    mvx += player.slideDX * 6.5 * gSlide;
+    mvz += player.slideDZ * 6.5 * gSlide;
   }
   if (player.stumbleT > 0) {
     player.stumbleT -= dt;
@@ -7501,7 +7535,8 @@ function updatePlayer(dt) {
   const groundY = supportTop(player.pos.x, player.pos.z, player.pos.y, STEP_UP);
   if (input.jump && player.grounded && !player.downed) {
     const hop = player.slideT > 0;   // slide-hop: bigger jump, momentum kept
-    player.vy = (hop ? 8.6 : 7.4) * (fists ? 1.1 : 1) * player.jumpMult;
+    // a chili giant leaves the ground harder — the extra height sets up bigger stomps
+    player.vy = (hop ? 8.6 : 7.4) * (fists ? 1.1 : 1) * player.jumpMult * (playerGiantOn() ? 1.25 : 1);
     if (hop) { player.hopT = 0.5; player.slideT = 0; }
     player.grounded = false;
     player.squash = -0.25;
@@ -7601,7 +7636,8 @@ function updatePlayer(dt) {
   const nearDowned = findNearDowned();
   const nearNetDowned = (!nearDowned && net.role === 'client') ? netFindNearDowned() : null;
   const blockLower = nearDowned || nearNetDowned;
-  nearCrate = blockLower ? null : findNearCrate();
+  // a chili giant never opens a crate by hand — the stomp bursts them instead (giantStomp)
+  nearCrate = (blockLower || playerGiantAny()) ? null : findNearCrate();
   nearRecruit = blockLower ? null : findNearRecruit();
   // a client can sign up the streamed recruit-beacon cousins too (host owns the squad, so
   // it's a request) — treated exactly like a local recruit for prompt + priority
@@ -11543,6 +11579,7 @@ window.__dbg = {
   hurt: (dmg, ax, az) => hurtPlayer(dmg, ax, az),
   toggleFPV, bossState, spawnBoss, spawnBoss2, spawnBoss3, spawnBoss4, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
   jellyBar, chiliBar, lootJelly, lootChili, grantJelly, grantChili, eatChili, jellyRevive, goDown, hurtPlayer, JELLY, JELLY_G, jelly,
+  updateGiant, giantStomp, openCrate, allCrates,
   // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad
   // out, drop everyone at the picnic ground and stand the Rotten One up for the fight + trek
   rotten: (recruit = true) => {
