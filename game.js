@@ -109,6 +109,7 @@ const TOWN_RECTS = [
   [112, -56, 146, -28], // the jelly park, down the block from the civic pair's side road
   [108, 48, 128, 66],   // Red's Chili corner plot, two blocks up the side road from the statue
   [103, -140, 141, -104], // the Blob Lounge grounds, far down the side road the other way
+  [91, 160, 129, 196],  // grandma's Jelly House grounds — far past the church, the farthest landmark out
 ];
 // The park keeps its perimeter sacred: no zombie ever spawns on it (they may still
 // wander in chasing you, which is exactly the picnic-crashing the plaque deserves).
@@ -1200,7 +1201,7 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   brainMesh.visible = brain;
   skull.visible = !brain; // showing the brain means the intact skull cap is gone
 
-  const eyes = [];
+  const eyes = [], pupils = [];
   for (const s of [-1, 1]) {
     const eye = ball(0.13, blind ? 0xe2e6e2 : 0xffffff);
     eye.position.set(0.16 * s, droopy ? -0.02 : 0.05, 0.32);
@@ -1208,7 +1209,7 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
     const pupil = ball(0.055, blind ? 0xbfc3c6 : (zombie ? 0x7a1010 : 0x1a1a1a));
     pupil.position.set(0.16 * s, droopy ? -0.06 : 0.05, 0.415); // recessed flush with the cornea
     head.add(pupil);
-    eyes.push(eye);
+    eyes.push(eye); pupils.push(pupil);
     if (droopy) {
       const lid = box(0.28, 0.13, 0.1, color);
       lid.position.set(0.16 * s, 0.09, 0.37); lid.rotation.x = 0.32;
@@ -1274,8 +1275,89 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   // collect skin meshes for red damage flash
   const skinList = [];
   root.traverse(o => { if (o.isMesh && o.material !== shadowMat) skinList.push({ mesh: o, mat: o.material }); });
-  return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, mouth, shadow, stainCount, skinList, flashT: 0,
+  return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, pupils, mouth, shadow, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
+}
+// ---------- rot gore (the Rotten One and his sickness) ----------
+// Anatomy dressings for the fourth boss and the walkers that rot while he stands. All
+// positions are unscaled blob-local, so the same builder dresses a boss and a street walker.
+// The chest is always the heart side (+x local). The hanging EYE, though, rolls a side per
+// character (eyeSide): street rot and his minions hang left OR right, the Rotten One always
+// left. Every piece is tracked into the blob's skinList so it flashes red when he's hit.
+const ROT_PINK = 0xe89aa8, ROT_HEART = 0xcf5a63, ROT_RIB = 0xefb2ba, ROT_SOCKET = 0x1c0e10, ROT_CAV = 0x7e3f49, ROT_FLESH = 0xd77a8e;
+function addRotGore(blob, { hangEye = false, ribs = false, belly = false, chestHole = false, eyeSide = 1 } = {}) {
+  // pieces added AFTER buildBlob missed the skinList sweep, so gather them here and fold them
+  // in — that's what makes the eye + open chest flash red under fire like the rest of the body
+  const rotFlash = [], track = m => { rotFlash.push(m); return m; };
+  if (hangEye) {
+    // that eye has let go. Take its eyeball + pupil out of the face entirely, and leave a
+    // concave black socket where it sat — a dark sphere turned INSIDE-OUT (BackSide) and sunk
+    // into the brow so you read the cup of an empty hole, not a ball stuck on. A tiny pit at
+    // its back sells the depth. The eyeball itself now dangles below on a red optic stalk, off
+    // one group so the whole thing swings with every head twitch (its sway is in updateZombies).
+    const es = eyeSide < 0 ? -1 : 1, ei = es > 0 ? 1 : 0; // which original eye to pull out
+    if (blob.eyes && blob.eyes[ei]) blob.eyes[ei].visible = false;
+    if (blob.pupils && blob.pupils[ei]) blob.pupils[ei].visible = false;
+    const socket = new THREE.Mesh(SPHERE, mat(ROT_SOCKET, { side: THREE.BackSide }));
+    socket.scale.set(0.15, 0.17, 0.15);
+    socket.position.set(0.16 * es, 0.05, 0.27);   // sunk in: the opening sits flush with the face
+    blob.head.add(track(socket));
+    const pit = ball(0.06, 0x050205); pit.position.set(0.16 * es, 0.05, 0.2); // the dark bottom of the hole
+    blob.head.add(track(pit));
+    const hang = new THREE.Group(); hang.position.set(0.16 * es, 0.0, 0.36);
+    const stalk = cyl(0.02, 0.02, 0.26, 0x8a2430, 5);
+    stalk.position.set(0, -0.12, 0.01); stalk.rotation.x = 0.22;
+    hang.add(track(stalk));
+    const eyeball = ball(0.11, 0xe8e4da); eyeball.position.set(0, -0.26, 0.05); hang.add(track(eyeball));
+    const pupil = ball(0.05, 0x7a1010); pupil.position.set(0, -0.27, 0.14); hang.add(track(pupil));
+    blob.head.add(hang);
+    blob.hangEye = hang;
+  }
+  if (ribs || chestHole) {
+    // the left chest laid open, on the heart side. Everything here rides on the TORSO SURFACE
+    // (~0.45 out in z at chest height) — earlier it sat at z~0.2, buried inside the body, which
+    // is why the chest read closed. A walker gets a slight tear; the boss gets the full gaping
+    // hole with the heart plainly beating proud of the lip (his weak spot — see the isBoss4
+    // sphere in the hitscan). The whole wound is pink flesh like the brain and the belly:
+    // a rose cavity you see INTO, pink ribs arcing over, a rosy heart in the mouth of it.
+    const deep = chestHole;
+    const cx = deep ? 0.17 : 0.16, cy = deep ? 0.82 : 0.74, surf = deep ? 0.45 : 0.46;
+    const cav = new THREE.Mesh(SPHERE, mat(ROT_CAV, { side: THREE.BackSide }));
+    cav.scale.set(deep ? 0.26 : 0.18, deep ? 0.3 : 0.21, deep ? 0.24 : 0.17);
+    cav.position.set(cx, cy, surf - (deep ? 0.12 : 0.09));
+    blob.wob.add(track(cav));
+    const heart = ball(deep ? 0.14 : 0.085, ROT_HEART);
+    heart.position.set(cx, cy - 0.02, surf + (deep ? 0.03 : 0.02)); // proud of the lip, plainly visible
+    blob.wob.add(track(heart));
+    blob.rotHeart = heart; blob.rotHeartR = deep ? 0.14 : 0.085; // pulse base radius
+    for (let i = 0; i < 3; i++) {          // pink rib bars arcing over the opening, proud of the skin
+      const rib = box(deep ? 0.32 : 0.21, 0.035, 0.06, ROT_RIB);
+      rib.position.set(cx, cy + (deep ? 0.14 : 0.1) - i * (deep ? 0.13 : 0.095), surf + (deep ? 0.07 : 0.05));
+      rib.rotation.z = -0.22;
+      blob.wob.add(track(rib));
+    }
+  }
+  if (belly) {
+    // the stomach torn open the same way the skullcap is: a bowl of skin peeled back low on
+    // the front (sphere minus its cap, opening forward), with the pink gut welling up out of
+    // the opening and a few lobes poking through — the belly's answer to the brain cutout.
+    const skinC = blob.body.material.color.getHex();
+    const surf = 0.49;
+    const bowl = new THREE.Mesh(new THREE.SphereGeometry(1, 14, 10, 0, TAU, 0.9, Math.PI - 0.9), mat(skinC, { side: THREE.DoubleSide }));
+    bowl.scale.set(0.2, 0.18, 0.17);
+    bowl.rotation.x = Math.PI / 2;         // tip the open mouth of the bowl forward, onto the belly
+    bowl.position.set(-0.02, 0.5, surf - 0.03);
+    blob.wob.add(track(bowl));
+    const gut = ball(0.15, ROT_PINK); gut.scale.set(0.15, 0.13, 0.12);
+    gut.position.set(-0.02, 0.5, surf + 0.01);   // the soft pink stomach welling up through it
+    blob.wob.add(track(gut));
+    for (let i = 0; i < 4; i++) {           // pink lobes poking out, like the brain's
+      const lobe = ball(0.045 + Math.random() * 0.03, ROT_FLESH);
+      lobe.position.set(-0.02 + (Math.random() - 0.5) * 0.14, 0.5 + (Math.random() - 0.5) * 0.12, surf + 0.03);
+      blob.wob.add(track(lobe));
+    }
+  }
+  for (const m of rotFlash) blob.skinList.push({ mesh: m, mat: m.material });
 }
 // keep a blob's shadow pinned flat under its centre, projected onto whatever surface
 // is below (terrain, car roofs, crates...) — it follows you up and slices onto lower tops
@@ -2220,8 +2302,9 @@ function nearbyColliders(x, z) {
     const ch = chunks.get(chunkKey(ccx + dx, ccz + dz));
     if (ch) out.push(...ch.colliders);
   }
-  // box covers the whole permanent build now: town core, park, chili corner, Blob Lounge
-  if (x > -50 && x < 160 && z > -145 && z < 110) out.push(...townColliders);
+  // box covers the whole permanent build now: town core, park, chili corner, Blob Lounge,
+  // and the Jelly House way out past the church
+  if (x > -50 && x < 160 && z > -145 && z < 205) out.push(...townColliders);
   return out;
 }
 function resolveCollision(x, z, r, y) {
@@ -3079,10 +3162,12 @@ function buildTown() {
   for (const lx of [16, 30, 58, 70]) if (!lotIsFloodlit(lx, 50)) makeStreetLamp(lx, 50, townGroup);
 
   // the east side: jelly park, Red's Chili and the Blob Lounge, strung down the
-  // side road the town hall and courthouse share
+  // side road the town hall and courthouse share — and grandma's Jelly House way
+  // off the other end of that road, far past the church
   buildPark(rng);
   buildChiliStand(rng);
   buildBlobLounge(rng);
+  buildJellyHouse(rng);
 }
 
 // ---------- the jelly park ----------
@@ -3401,12 +3486,25 @@ function buildChiliStand(rng) {
 // the doors, roof pitched behind it, four doorways (two a side) so the room never
 // bottles you in, and every wall lined with stocked shelves. The loot run of the map.
 function buildBlobLounge(rng) {
-  const bx = 122, bz = -121, w = 30, d = 16, h = 6.0;
+  buildLoungeHall(rng, { bx: 122, bz: -121,
+    wallC: 0x584a66,  // lounge purple, like the bouncer who kept its door
+    floorC: 0x453a4e, signText: 'BLOB LOUNGE', signBg: '#241a2e', signFg: '#d8a8ff' });
+}
+// grandma Blingo's Jelly House: the same fighting-hall bones as the Blob Lounge, dressed
+// in her jelly orange, way off past the church up the east road — the farthest landmark
+// on the map, which is the point: the trek IS the epilogue (see spawnJellyMarks).
+const JELLY = { x: 110, z: 178 };
+function buildJellyHouse(rng) {
+  buildLoungeHall(rng, { bx: JELLY.x, bz: JELLY.z,
+    wallC: 0xb4642a,  // jelly orange, sun-faded like the label on her jars
+    floorC: 0x6b4a30, signText: 'JELLY HOUSE', signBg: '#3a2210', signFg: '#ffb347' });
+}
+function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg }) {
+  const w = 30, d = 16, h = 6.0;
   const y0 = groundHeight(bx, bz);
   // it sits past the town's far ground apron, so it brings its own: the building must
   // never read as floating on void from across the map
   townGroup.add(terrainPlane(52, 48, 13, 12, bx, bz, grassMat(0.5), -0.15));
-  const wallC = 0x584a66; // lounge purple, like the bouncer who kept its door
   const t = 0.35;
   const DOOR_W = 2.8, DOOR_H = 3.4, DOOR_X = 8; // two doorways per long side, at ±DOOR_X
   const shell = [];
@@ -3443,7 +3541,7 @@ function buildBlobLounge(rng) {
     wallWithWindow(townGroup, townColliders, bx + s * w / 2, bz, false, d, t, h, y0,
       wallC, 0, shell, s);
   }
-  const floor = box(w, 0.6, d, 0x453a4e);
+  const floor = box(w, 0.6, d, floorC);
   floor.position.set(bx, y0 - 0.24, bz);
   townGroup.add(floor);
   townColliders.push(aabb(bx, bz, w / 2 - t, d / 2 - t, 0.56, y0 - 0.5));
@@ -3462,8 +3560,8 @@ function buildBlobLounge(rng) {
   // loose floor crates mid-room
   makeCrate(rng, bx - 3, y0 + 0.08, bz - 1.5, townGroup, townColliders, townCrates, false, true);
   makeCrate(rng, bx + 4, y0 + 0.08, bz + 2, townGroup, townColliders, townCrates, false, true);
-  // her name big on the flat frontage, above the doors, below the eaves
-  const sign = textPlate('BLOB LOUNGE', 8, 1.8, '#241a2e', '#d8a8ff');
+  // the name big on the flat frontage, above the doors, below the eaves
+  const sign = textPlate(signText, 8, 1.8, signBg, signFg);
   sign.position.set(bx, y0 + (DOOR_H + h) / 2 + 0.15, bz + d / 2 + t / 2 + 0.04);
   townGroup.add(sign);
   makeStreetLamp(bx - 5.5, bz + d / 2 + 2.4, townGroup, 3.6);
@@ -4184,8 +4282,9 @@ function hurtCompanion(c, dmg) {
   // The Infected One's plague goes through an AI cousin like paper — they fold three times
   // as fast while he stands. This sits below the netP hand-off on purpose: a real person
   // driving a cousin takes normal damage, so a squad of bots won't carry this fight and a
-  // lobby of people will. That gap is the whole point of him.
-  if (infectedFightOn()) dmg *= INFECTED_NPC_DMG;
+  // lobby of people will. That gap is the whole point of him. The Rotten One inherited the
+  // sickness whole — same playstyle, same plague.
+  if (infectedFightOn() || rottenFightOn()) dmg *= INFECTED_NPC_DMG;
   c.hp -= dmg;
   c.lastHurtT = game.time;
   flashBlob(c.blob);
@@ -4467,6 +4566,16 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const wounded = mode === 'corpse' || (extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5);
   const color = green ? 0x39b83a : red ? 0xd43a3a : purple ? 0x9b4dff : ZOMBIE_COLORS[(Math.random() * ZOMBIE_COLORS.length) | 0];
   const blob = buildBlob({ color, zombie: true, scale, droopy, brain, blind, wounded });
+  // the Rotten One's sickness: his own minions (opts.rot) always roll for it, and once he
+  // has risen EVERY street spawn can come up rotting too — the hanging eye, the slight left
+  // ribs with a small beating heart tucked under, the stomach showing pink. It rides through
+  // the fight AND the whole trek/late-game after (rotOnBlock), not just while he's standing
+  const rotty = !!opts.rot || rotOnBlock();
+  const rotE = rotty && Math.random() < 0.28;
+  const rotR = rotty && Math.random() < 0.26;
+  const rotB = rotty && Math.random() < 0.3;
+  const rotEyeSide = Math.random() < 0.5 ? 1 : -1;   // street rot + minions hang either side
+  if (rotE || rotR || rotB) addRotGore(blob, { hangEye: rotE, ribs: rotR, belly: rotB, eyeSide: rotEyeSide });
   blob.root.position.set(x, groundHeight(x, z), z);
   if (horns) {
     for (const s of [-1, 1]) {
@@ -4500,7 +4609,11 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     // fired off headT, jumped by a blind repath (repathed). See runHeadAnim.
     headT: Math.random() * 2.5, headAnim: null, repathed: false,
     bleeding: wounded, dripT: 0, purple, red, green, goreHorn, biteMult: (red || green) ? 1.35 : 1,
-    mode, emergeT: 0, hornWave: !!opts.horns, // NOTE: goreHorn deliberately never sets hornWave — it never shields a boss
+    rotE, rotR, rotB, // streamed so a joiner's ghosts rot the same way
+    // hornWave = a boss's shield guard while alive. opts.horns wears the horns and shields;
+    // opts.shield shields WITHOUT horns (the Rotten One's hornless minions are his shield).
+    // goreHorn deliberately sets neither — a free walker that never shields a boss.
+    mode, emergeT: 0, hornWave: !!opts.horns || !!opts.shield,
     farBorn: mode === 'runner', // runners live on a longer leash — they were born out past the fog
     // vertical: feet track a standable top with a step-up + gravity, so a walker climbs
     // in over a graded doorway threshold instead of stalling at the door (see updateZombies)
@@ -5161,6 +5274,12 @@ function resetGame() {
   bossState.boss = null; bossState.spawned = false; bossState.defeated = false;
   bossState.spawned2 = false; bossState.defeated2 = false;
   bossState.spawned3 = false; bossState.defeated3 = false; // the Infected One resets with his brothers
+  bossState.spawned4 = false; bossState.defeated4 = false; // and the Rotten One with all three
+  // grandma's light + ghost + tally leave with the run they closed
+  if (jelly.beacon) { scene.remove(jelly.beacon); jelly.beacon = null; }
+  if (jelly.ghost) { scene.remove(jelly.ghost.root); if (jelly.ghost.shadow) scene.remove(jelly.ghost.shadow); jelly.ghost = null; }
+  jelly.skins = []; jelly.ghostMats = []; jelly.sat = 0; jelly.awake = false; jelly.wakeT = 0; jelly.statT = -1; jelly.statRows = [];
+  hideFinalStats();
   bossBarEl.classList.remove('show');
   resetCrows();
   for (const p of pickups) scene.remove(p.mesh);
@@ -5356,6 +5475,7 @@ function quitToMenu() {
   document.getElementById('startscreen').classList.remove('hidden');
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
+  hideFinalStats(); // grandma's tally never follows you onto the menu
   stopTheme();
   netLeave();
   tabTitle && tabTitle.unlock(); // back at the menu: the tab title cycles the family again
@@ -5797,7 +5917,7 @@ function updateDropKick(dt) {
 }
 
 // ---------- shooting ----------
-const _from = new THREE.Vector3(), _to = new THREE.Vector3(), _gp = new THREE.Vector3();
+const _from = new THREE.Vector3(), _to = new THREE.Vector3(), _gp = new THREE.Vector3(), _gp2 = new THREE.Vector3();
 // the zombie a swing would land on right now, or null. Reach plus a wide forward cone —
 // not the nearest one, but the first inside both, which is exactly what the swing itself
 // takes. Auto-attack asks this before committing, so the probe and the swing can never
@@ -5995,6 +6115,17 @@ function fireWeapon() {
         if (ht < zt) { zt = ht; zh = { isHead: true, limb: null }; }
         const bt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 0.7 * s, z.pos.z, 0.55 * s);
         if (bt < zt) { zt = bt; zh = { isHead: false, limb: null }; }
+        // the Rotten One's open chest: a sphere over the beating heart proud of his left upper
+        // chest (it turns with him). It covers the exposed heart + the mouth of the wound, so a
+        // ray landing there upgrades the body hit to weak-spot damage (isHead's 2x) rather than
+        // competing with it on distance. Kept aligned with the visual heart in addRotGore.
+        if (z.isBoss4 && zh && !zh.isHead) {
+          const cy4 = Math.cos(z.yaw || 0), sy4 = Math.sin(z.yaw || 0);
+          const hx = z.pos.x + (0.17 * cy4 + 0.48 * sy4) * s;
+          const hz = z.pos.z + (-0.17 * sy4 + 0.48 * cy4) * s;
+          const wt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, hx, gy + 0.82 * s, hz, 0.28 * s);
+          if (wt < tMax) zh = { isHead: true, limb: null, weakspot: true };
+        }
         // arms + legs live in the zombie's facing frame; a hit here marks that exact limb
         if (!z.isBoss) {
           const cy = Math.cos(z.yaw || 0), sy = Math.sin(z.yaw || 0);
@@ -6007,7 +6138,7 @@ function fireWeapon() {
           }
         }
       }
-      if (zh && zt > tSelf) line.push({ t: zt, z, isHead: zh.isHead, limb: zh.limb });
+      if (zh && zt > tSelf) line.push({ t: zt, z, isHead: zh.isHead, limb: zh.limb, weakspot: zh.weakspot });
     }
     // crows are fair game too — a clean hit lands like a headshot. One shared hit-sphere
     // (crowRayT) that the crosshair flare reads from as well, so a bird that's under the
@@ -6033,7 +6164,7 @@ function fireWeapon() {
         died = true; // crows carry 1hp: first contact pops them
       } else {
         const dmg = w.dmg * player.dmgMult * (hit.isHead ? 2 : 1) * closeBonus(w, dHit) * rangeFactor(w, dHit);
-        damageZombie(hit.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: hit.isHead, limb: hit.limb });
+        damageZombie(hit.z, dmg, rdx, rdz, w.id === 'shotgun' ? 1.2 : 2, { weapon: w, dist: dHit, isHead: hit.isHead, limb: hit.limb, weakspot: hit.weakspot });
         // a client can't read host-side hp, so over the wire only the sniper's execute
         // (a guaranteed kill on anything that isn't a boss) counts as a confirmed drop
         died = hit.z.netGhost ? !!(w.execute && !hit.z.isBoss) : hit.z.state === 'dying';
@@ -6112,7 +6243,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   if (z.isBoss && bossShielded()) {
     // the shrug is green — except on the green one, where green on green is no signal at
     // all, so the Infected One turns white instead
-    flashBlob(z.blob, z.isBoss3 ? FLASH_WHITE : FLASH_GREEN);
+    flashBlob(z.blob, (z.isBoss3 || z.isBoss4) ? FLASH_WHITE : FLASH_GREEN);
     spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, z.isBoss3 ? 0xffffff : 0x3ae06a, 3, 2.5, 0.3);
     return;
   }
@@ -6143,6 +6274,13 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
 
   z.hp -= dmg;
   flashBlob(b);
+  // a round through the Rotten One's open chest: the heart itself sprays — the "you found
+  // the spot" read, distinct from the ordinary body-shot blood below
+  if (opts.weakspot && b.rotHeart) {
+    _gp2.setFromMatrixPosition(b.rotHeart.matrixWorld);
+    spawnBlood(_gp2.x, _gp2.y, _gp2.z, kx, kz, 1.6);
+    spawnParticles(_gp2.x, _gp2.y, _gp2.z, ROT_HEART, 6, 3, 0.4);
+  }
   spawnDamageNumber(z.pos.x, b.root.position.y + (isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
   // a boss is a mountain: a hit staggers a walker across the street but barely rocks him,
   // so weapons can't kite a boss backwards the way they herd the horde
@@ -6824,6 +6962,7 @@ function stepFrame(dt) {
     updateCrows(dt);
     updateButterflies(dt);
     updateFountain(dt);
+    updateJelly(dt);       // grandma's beacon, ghost dance and the finale tally — every role
     updateCelebration(dt);
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
     hud.timer.textContent = mins + ':' + String(secs).padStart(2, '0');
@@ -7037,9 +7176,12 @@ function updatePlayer(dt) {
     if (!nearTrade && !nearNpcTrade) nearNetPlayer = net.role === 'client' ? netFindNearPlayerAny()
                                                    : net.role === 'host'   ? findNearNetPlayer() : null;
   }
-  const showPrompt = !!(nearDowned || nearNetDowned || nearCrate || nearRecruit || nearNetRecruit || nearTrade || nearNpcTrade || nearNetPlayer);
+  // grandma's ghost outranks everything: at the end of the trek there is nothing else to do
+  const nearGrandma = findNearGrandma();
+  const showPrompt = !!(nearGrandma || nearDowned || nearNetDowned || nearCrate || nearRecruit || nearNetRecruit || nearTrade || nearNpcTrade || nearNetPlayer);
   const bareHand = player.weapon.id === 'fists'; // fists out: the trade on offer is your skin
-  hud.prompttxt.textContent = nearDowned ? 'Pick up ' + nearDowned.data.name
+  hud.prompttxt.textContent = nearGrandma ? 'Remember Grandma Blingo'
+    : nearDowned ? 'Pick up ' + nearDowned.data.name
     : nearNetDowned ? `Revive P${nearNetDowned.p} ${nearNetDowned.data.name}`
     : nearCrate ? 'Open Crate'
     : nearRecruit ? 'Recruit ' + nearRecruit.data.name
@@ -7051,7 +7193,12 @@ function updatePlayer(dt) {
   hud.prompt.classList.toggle('hidden', !showPrompt || input.device === 'touch');
   if (isTouch) hud.btnInteract.style.display = showPrompt ? 'flex' : 'none';
   if (input.interact) {
-    if (nearDowned) reviveCousin(nearDowned);
+    if (nearGrandma) {
+      // remembering her is host business (the squad + the gather are his); a client asks
+      if (net.role === 'client') { try { net.conns[0].send({ t: 'grandmaReq' }); } catch (e) {} }
+      else grandmaWake();
+    }
+    else if (nearDowned) reviveCousin(nearDowned);
     else if (nearNetDowned) { try { net.conns[0].send({ t: 'reviveReq', p: nearNetDowned.p }); } catch (e) {} }
     else if (nearCrate) openCrate(nearCrate);
     else if (nearRecruit) recruitCousin(nearRecruit);
@@ -7752,11 +7899,28 @@ function inTruckBed(px, pz, py) {
 const ZMOUTH_BASE_Y = -0.16, ZMOUTH_BASE_SY = 0.1;
 function pickHeadAnim(z, engaging) {
   const r = Math.random();
+  // the Rotten One's head never sits still: he leans hard into the gapes and twitches —
+  // the jaw working constantly, the neck jerking — which also swings the hanging eye
+  if (z.isBoss4 && r < 0.45) return { type: 'gape', t: 0, dur: 0.8 + Math.random() * 0.9 };
   // straight-brow walkers gape now and then — the jaw sagging open, trembling, then shut
   if (!z.droopy && r < (engaging ? 0.3 : 0.16)) return { type: 'gape', t: 0, dur: 1.1 + Math.random() * 1.4 };
   if (r < 0.5) return { type: 'twitch', t: 0, dur: 0.22 + Math.random() * 0.12 }; // a single sharp neck jerk
   if (r < 0.82) return { type: 'shake', t: 0, dur: 0.4 };                          // a fast flurry of them
   return { type: 'double', t: 0, dur: 0.6 };                                       // a look-away double-take
+}
+// the rot's living dressings, host walkers and client ghosts alike: the tucked heart
+// pumps (harder and larger on the boss's open chest), and the hanging eye swings on its
+// stalk with the body's own motion
+function animateRotGore(z, b) {
+  if (b.rotHeart) {
+    const beat = 1 + Math.max(0, Math.sin(performance.now() * 0.009 + (z.walkPhase || 0))) * 0.3;
+    b.rotHeart.scale.setScalar(b.rotHeartR * beat);
+  }
+  if (b.hangEye) {
+    const wp = z.walkPhase || 0;
+    b.hangEye.rotation.z = Math.sin(wp * 1.7) * 0.3;
+    b.hangEye.rotation.x = Math.sin(wp * 1.3 + 1) * 0.2;
+  }
 }
 // drive one zombie's head/mouth for the frame: run the current pool animation (or, when idle,
 // roll for the next). Damaged and actively-lunging walkers pull from it constantly so they
@@ -7778,12 +7942,17 @@ function runHeadAnim(z, b, dt, engaging) {
       ry = Math.sin(a.t * 17) * 0.05 * Math.max(openAmt, 0);          // a neck twitch riding it
     }
     if (a.t >= a.dur) z.headAnim = null;
-  } else if (!z.isBoss) {
+  } else if (!z.isBoss || z.isBoss4) {
+    // bosses hold a dead stare — except the Rotten One, whose head and jaw never stop:
+    // he rolls from the pool constantly, on the shortest cooldowns in the game
     z.headT -= dt;
     if (z.headT <= 0) {
-      const wants = z.bleeding || engaging || (!z.droopy && Math.random() < 0.7);
-      if (wants) { z.headAnim = pickHeadAnim(z, engaging); z.headT = (engaging ? 0.45 : z.bleeding ? 1.0 : 2.0) + Math.random() * (engaging ? 0.6 : 2); }
-      else z.headT = 1.5 + Math.random() * 2.5;
+      if (z.isBoss4) { z.headAnim = pickHeadAnim(z, engaging); z.headT = 0.2 + Math.random() * 0.45; }
+      else {
+        const wants = z.bleeding || engaging || (!z.droopy && Math.random() < 0.7);
+        if (wants) { z.headAnim = pickHeadAnim(z, engaging); z.headT = (engaging ? 0.45 : z.bleeding ? 1.0 : 2.0) + Math.random() * (engaging ? 0.6 : 2); }
+        else z.headT = 1.5 + Math.random() * 2.5;
+      }
     }
   }
   head.rotation.x = rx;
@@ -8083,6 +8252,7 @@ function updateZombies(dt) {
     b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
     // head + jaw: twitches, double-takes and gapes off the pool (keeps the base walk-sway)
     runHeadAnim(z, b, dt, engaging);
+    animateRotGore(z, b);
     // smoothed ground velocity (only chase walkers reach here) — what the gunners lead
     const inv = 1 / Math.max(dt, 0.001);
     z.vX = lerp(z.vX || 0, (z.pos.x - _vpx) * inv, 0.25);
@@ -8196,7 +8366,7 @@ function updateSpawner(dt) {
 
 // ---------- boss: the Two Horned One ----------
 const bossState = { boss: null, beam: null, spawned: false, defeated: false, spawned2: false, defeated2: false,
-  spawned3: false, defeated3: false };
+  spawned3: false, defeated3: false, spawned4: false, defeated4: false };
 // the Infected One is up and awake: his lot lights stutter, and his plague makes short work
 // of anyone who isn't a real person behind a screen
 function infectedFightOn() {
@@ -8204,9 +8374,23 @@ function infectedFightOn() {
   return bossState.spawned3 && !bossState.defeated3 && !!b && b.isBoss3 && b.state !== 'dormant' && b.state !== 'dying';
 }
 function infectedAlive() { return bossState.spawned3 && !bossState.defeated3; }
+// the Rotten One is up and awake: every street spawn comes up rotting (spawnZombie rolls
+// the eye/rib/belly variants) and NPC cousins take his plague damage like the Infected One's
+function rottenFightOn() {
+  const b = bossState.boss;
+  return bossState.spawned4 && !bossState.defeated4 && !!b && b.isBoss4 && b.state !== 'dormant' && b.state !== 'dying';
+}
+// the rot outlives him. Once the Rotten One has risen the whole block stays sick: every
+// street spawn keeps rolling the hanging eye / open-chest-with-beating-heart / pink-belly
+// variants for the entire trek to the Jelly House and all the late game after, so the world
+// only ever looks MORE rotten the longer you're out here — until grandma's jelly finally
+// stops it (she wakes). BEST JELLY STOPS THE ROT.
+function rotOnBlock() {
+  return bossState.spawned4 && !jelly.awake;
+}
 // once a boss is in play the streets change character: no more laying zombies (sleepers or
 // carcasses) get spawned — the block has bigger problems than crows picking at the dead
-function bossPhase() { return bossState.spawned || bossState.spawned2 || bossState.spawned3; }
+function bossPhase() { return bossState.spawned || bossState.spawned2 || bossState.spawned3 || bossState.spawned4; }
 const bossBarEl = document.getElementById('bossbar');
 const bossHpEl = document.getElementById('bosshp');
 const bossLabelEl = document.getElementById('bosslabel');
@@ -8229,10 +8413,11 @@ const BOSS_HP = 650, BOSS2_HP = Math.round(BOSS_HP * 1.25);
 const BOSS3_HP = BOSS2_HP, BOSS3_BIG = 1.15;
 // each boss flies his own colours: the purple bar belongs to the Two Horned One alone
 function dressBossBar(z) {
-  const kind = !z ? 0 : z.isBoss3 ? 3 : z.isBoss2 ? 2 : 1;
-  bossLabelEl.textContent = kind === 3 ? 'The Infected One' : kind === 2 ? 'The Crimson One' : 'The Two Horned One';
+  const kind = !z ? 0 : z.isBoss4 ? 4 : z.isBoss3 ? 3 : z.isBoss2 ? 2 : 1;
+  bossLabelEl.textContent = kind === 4 ? 'The Rotten One' : kind === 3 ? 'The Infected One' : kind === 2 ? 'The Crimson One' : 'The Two Horned One';
   bossBarEl.classList.toggle('crimson', kind === 2);
   bossBarEl.classList.toggle('infected', kind === 3);
+  bossBarEl.classList.toggle('rotten', kind === 4);
 }
 // unlocked once every cousin has been recruited
 function maybeSpawnBoss() {
@@ -8344,6 +8529,42 @@ function spawnBoss3() {
   toast('THE CHURCH IS QUIET . . SOMETHING STIRS UNDER THE LOT LIGHTS .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
 }
+// the Rotten One: the last of them, festering on the jelly park's picnic ground once the
+// Infected One is down. The Infected One's playstyle — big, fast, waves at damage
+// thresholds — but he wears NO horns and neither do his minions, so nothing ever shields
+// him. His weakness is anatomical instead: the rot has laid his left chest open, and the
+// heart beating in the hole takes weak-spot damage like a head (see the isBoss4 sphere in
+// the hitscan). While he stands, the whole street's spawns come up rotting like him.
+const BOSS_ROTTEN = 0x77a12c, ROTTEN_HANDS = 0x3f5a14;
+const BOSS4_HP = Math.round(BOSS2_HP * 1.2);
+function spawnBoss4() {
+  bossState.spawned4 = true;
+  const bx = 129, bz = -36;                   // the picnic ground, between the statue and the park gate
+  const scale = 2.7 * BOSS3_BIG;
+  const blob = buildBlob({ color: BOSS_ROTTEN, zombie: true, scale, hands: ROTTEN_HANDS });
+  addRotGore(blob, { hangEye: true, chestHole: true }); // no horns — the rot is his crown
+  blob.root.position.set(bx, groundHeight(bx, bz), bz);
+  scene.add(blob.root);
+  const hp = Math.round(BOSS4_HP * (1 + 0.4 * game.cycle));
+  const z = {
+    blob, pos: new THREE.Vector3(bx, 0, bz), hp, maxHp: hp, speed: 1.15 * BOSS3_BIG, yaw: 0, state: 'dormant',
+    attackT: 0, deadT: 0, walkPhase: 0, groanT: 2, scale,
+    headT: 0.5, headAnim: null, // his restless head rolls the anim pool like a walker does
+    brainExposed: false, blind: false, stepT: 0, bleeding: false, dripT: 0, isBoss: true, isBoss4: true,
+    biteMult: 1.35, wavesFired: 0, dashT: 0, dashCdT: -9,
+  };
+  zombies.push(z);
+  bossState.boss = z;
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.7, 1.7, 130, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xb8e03a, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+  );
+  beam.position.set(bx, groundHeight(bx, bz) + 64, bz);
+  scene.add(beam);
+  bossState.beam = beam; bossState.beamFade = false; // fresh pillar, full strength
+  bossBarEl.classList.remove('show');
+  initAudio(); play3d(bx, bz, () => SFX.groan());
+}
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;
   z.state = 'chase';
@@ -8352,7 +8573,7 @@ function wakeBoss(z) {
   bossState.beamFade = true;
   dressBossBar(z);
   bossBarEl.classList.add('show');
-  toast(z.isBoss3 ? 'THE INFECTED ONE DISTURBS THE LOT .ᐟ' : z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS .ᐟ', true);
+  toast(z.isBoss4 ? 'THE ROTTEN ONE CRASHES THE PICNIC .ᐟ' : z.isBoss3 ? 'THE INFECTED ONE DISTURBS THE LOT .ᐟ' : z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS .ᐟ', true);
   shakeAmp = Math.max(shakeAmp, 0.4);
   rumble(400, 1, 1);
   play3d(z.pos.x, z.pos.z, () => { noiseBurst(0.5, 200, 0.9); tone(60, 0.6, 0.5, 'sawtooth', 30); });
@@ -8391,7 +8612,7 @@ function pulseBossShield(z, blob, dt) {
   z._shieldT = (z._shieldT || 0) - dt;
   if (z._shieldT <= 0) {
     z._shieldT = 0.34;
-    flashBlob(blob, z.isBoss3 ? FLASH_WHITE : FLASH_GREEN);
+    flashBlob(blob, (z.isBoss3 || z.isBoss4) ? FLASH_WHITE : FLASH_GREEN);
   }
 }
 // a spot on a shop's doorstep, clear of whatever's parked against it
@@ -8402,7 +8623,31 @@ function shopDoorSpot() {
 }
 function fireBossWave(z, n) {
   z.wavesFired = n;
-  if (z.isBoss3) {
+  if (z.isBoss4) {
+    // The Rotten One's waves are all his own: green, hornless, rotting (opts.rot rolls the
+    // hanging eye / open chest / pink belly). He wears no horns — but the ROT is his shield:
+    // every wave minion spawns with opts.shield, so while any of them still stands he takes no
+    // damage at all (bossShielded). Cull the whole swarm to open him up, then hit the heart.
+    // They boil up around the ENTIRE park block at once, at every distance — some clawing
+    // straight up out of the grass line, others sprinting in out of the haze from clear across
+    // the block — so the picnic ground is swarmed heavily from every side. Park stays sacred.
+    const cx = (PARK.x0 + PARK.x1) / 2, cz = (PARK.z0 + PARK.z1) / 2; // park centre (129, -42)
+    const count = 12 + n * 5;                  // 17 -> 22 -> 27: a heavy swarm, growing each wave
+    for (let k = 0; k < count; k++) {
+      let px = cx, pz = cz, ok = false;
+      for (let tries = 0; tries < 12 && !ok; tries++) {
+        const a = Math.random() * TAU;
+        const dist = 22 + Math.random() * 48;  // 22 (just off the fence) out to 70 (across the block)
+        px = cx + Math.sin(a) * dist;
+        pz = cz + Math.cos(a) * dist;
+        [px, pz] = resolveCollision(px, pz, 0.5);
+        ok = !inPark(px, pz, 2) && !insideBuilding(px, pz);
+      }
+      if (!ok) continue;
+      const far = Math.hypot(px - cx, pz - cz) > 42; // the far half comes running, the near half rises
+      spawnZombie(px, pz, 1 + game.time / 240, { green: true, rot: true, shield: true, mode: far ? 'runner' : 'grave' });
+    }
+  } else if (z.isBoss3) {
     // The Infected One empties the parade, shop by shop, and the town gets sicker each time:
     // first his own green brutes with the ordinary dead in tow, then the Two Horned One's
     // purple guards still with fodder behind them, and finally nothing but horns — green,
@@ -8454,7 +8699,10 @@ function fireBossWave(z, n) {
     }
   }
   bossDash(z);
-  toast(`WAVE ${n}: KILL THE HORNED GUARDS TO BREAK HIS SHIELD`, true);
+  // the Rotten One's shield is the swarm itself, not horned guards — his callout points at
+  // culling the rot to lay him open, then the heart
+  toast(z.isBoss4 ? `WAVE ${n}: THE ROT SHIELDS HIM .ᐟ CULL THE SWARM, THEN THE HEART .ᐟ`
+                  : `WAVE ${n}: KILL THE HORNED GUARDS TO BREAK HIS SHIELD`, true);
   play3d(z.pos.x, z.pos.z, () => SFX.groan());
   shakeAmp = Math.max(shakeAmp, 0.2);
 }
@@ -8466,19 +8714,33 @@ function bossNice() {
 }
 function onBossDefeated(z) {
   bossNice();
+  if (z.isBoss4) {
+    // the true end of it: the last boss down, the block finally clean — and grandma's
+    // porch light comes on way off past the church. The party waits at the Jelly House.
+    bossState.defeated4 = true;
+    if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+    bossBarEl.classList.remove('show');
+    for (const zz of [...zombies]) if (zz !== z && !zz.netGhost && zz.state !== 'dying') killZombie(zz, 0, 0, false);
+    toast('THE ROTTEN ONE FALLS .ᐟ', true);
+    setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
+    setTimeout(() => toast('AHA, TO THE OLD JELLY HOUSE .ᐟ', true), 7400);
+    for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xb8e03a, 0xfff3d0][k % 3], 1, 6, 1.2);
+    rumble(600, 1, 1);
+    spawnJellyMarks();                        // the beacon + grandma's ghost inside
+    if (net.role === 'host') netBroadcast({ t: 'jelly' }); // every screen gets the light + the ghost
+    return;
+  }
   if (z.isBoss3) {
-    // the real end of it: with the Infected One down there is nothing left standing, and
-    // THEN the block has earned its street party
+    // the Infected One down — but the rot he carried has settled on the picnic ground.
+    // The street party still has one gatecrasher left to bounce.
     bossState.defeated3 = true;
     if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
     bossBarEl.classList.remove('show');
     for (const zz of [...zombies]) if (zz !== z && !zz.netGhost && zz.state !== 'dying') killZombie(zz, 0, 0, false);
-    toast('THE INFECTED ONE FALLS . . THE BLOCK IS CLEANSED .ᐟ', true);
+    toast('THE INFECTED ONE FALLS . . BUT SOMETHING ROTS ON THE JELLY PARK .ᐟ', true);
     for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0x3ae04a, 0xfff3d0][k % 3], 1, 6, 1.2);
     rumble(600, 1, 1);
-    game.celebrateT = 5.5;
-    recordPrestige();
-    if (net.role === 'host') netBroadcast({ t: 'secured', tm: game.time }); // everyone banks the clear
+    spawnBoss4();
     return;
   }
   if (z.isBoss2) {
@@ -8555,6 +8817,156 @@ function updateBossFx(dt) {
   }
   const z = bossState.boss;
   if (z && z.state !== 'dormant') bossHpEl.style.width = clamp(z.hp / z.maxHp, 0, 1) * 100 + '%';
+}
+
+// ---------- grandma Blingo and the Jelly House epilogue ----------
+// The end-game formula: the Rotten One falls -> a giant fog-proof light stands up over the
+// Jelly House (the farthest landmark out, way past the church) -> the trek -> inside, the
+// ghost of Grandma Blingo, grey and see-through, celebrating like the splash-screen blobs
+// at 4x their pace, her colours rainbowing through the whole family's in a blur. Remember
+// her (interact) and she colours in for real: every cousin — human and AI — is gathered
+// into the Jelly House for the family reunion, the opening medley plays, and the run's
+// tally counts itself up on screen while the party runs long enough to read it.
+const jelly = { beacon: null, ghost: null, skins: [], sat: 0, awake: false, wakeT: 0,
+  cyc: 0, gy: 0, col: new THREE.Color(0xff8c42), statRows: [], statT: -1 };
+const _jelC = new THREE.Color(), _jelHSL = { h: 0, s: 0, l: 0 };
+function spawnJellyMarks() {
+  if (jelly.beacon) return;                     // one light, one grandma
+  jelly.gy = groundHeight(JELLY.x, JELLY.z);
+  // the pillar: far wider and taller than a boss beam, and fog-exempt — it must read
+  // from the middle of town, all the way across the map, or the trek has no star to steer by
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(2.6, 2.6, 220, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xffa040, transparent: true, opacity: 0.3, fog: false,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false })
+  );
+  beam.position.set(JELLY.x, jelly.gy + 100, JELLY.z);
+  scene.add(beam);
+  jelly.beacon = beam;
+  // grandma's ghost, mid-celebration in the middle of her stockroom floor. Blingo's blob,
+  // Blingo's hands — the family skin stays skin; only the SUIT rainbows (and starts grey)
+  const b = buildBlob({ color: 0xff8c42 });
+  b.root.position.set(JELLY.x, jelly.gy, JELLY.z);
+  scene.add(b.root);
+  jelly.skins = [];
+  b.root.traverse(o => {
+    if (!o.isMesh || o.material === shadowMat) return;
+    const base = o.material.color.getHex();
+    o.material = o.material.clone();            // never touch the shared mat() cache
+    o.material.transparent = true; o.material.opacity = 0.5;
+    if (base === 0xff8c42) jelly.skins.push(o.material); // body + head + arms — the recolour set
+  });
+  jelly.ghostMats = [];
+  b.root.traverse(o => { if (o.isMesh && o.material !== shadowMat) jelly.ghostMats.push(o.material); });
+  jelly.ghost = b;
+  jelly.sat = 0; jelly.awake = false; jelly.wakeT = 0; jelly.statT = -1;
+}
+// grandma's ghost close enough to remember (the Jelly House prompt)
+function findNearGrandma() {
+  if (!jelly.ghost || jelly.awake) return null;
+  return Math.hypot(player.pos.x - JELLY.x, player.pos.z - JELLY.z) < 3.4 ? jelly : null;
+}
+// the moment of remembrance, on whichever screen owns the squad (host / solo). Colours her
+// in, gathers the whole family, starts the long party + the tally.
+function grandmaWake() {
+  if (jelly.awake) return;
+  recordPrestige();
+  startFinale();
+  // gather every cousin to the reunion: AI cousins are placed straight onto the ring
+  // (wounds healed — the jelly stops the rot); human-run cousins are asked to step
+  // through on their own screens (tpJelly), and the host pre-moves their bodies so the
+  // room fills the same instant everywhere
+  const ring = companions.filter(c => c.recruited);
+  ring.forEach((c, i) => {
+    const a = (i / Math.max(ring.length, 1)) * TAU + 0.6;
+    const x = JELLY.x + Math.sin(a) * 2.8, z = JELLY.z + Math.cos(a) * 2.8;
+    c.pos.x = x; c.pos.z = z; c.y = jelly.gy;
+    c.downed = false; c.hp = c.maxHp;
+    if (c.beacon) { scene.remove(c.beacon); c.beacon = null; }
+    if (c.netPose) { c.netPose.x = x; c.netPose.z = z; c.netPose.y = jelly.gy; }
+    if (c.netP && c.netConn) { try { c.netConn.send({ t: 'finale', x, z }); } catch (e) {} }
+    spawnParticles(x, jelly.gy + 1.2, z, c.data.color, 10, 4, 0.8);
+  });
+  rebuildSquadBars();
+  toast('GRANDMA BLINGO .ᐟ THE FAMILY IS WHOLE AGAIN .ᐟ', true);
+}
+// the shared half of the finale — runs on the host when grandma wakes, and on every client
+// when the 'finale' message lands: colour her in, strike up the family medley, run the
+// party long, and start the tally counting
+function startFinale() {
+  jelly.awake = true; jelly.wakeT = 0;
+  game.celebrateT = 16;                       // the long party: time to read the tally
+  game.cleanup = false; updateQuotaHud();
+  initAudio(); playOpeningTheme();            // all six motifs + the soundoff — the family theme
+  rumble(500, 0.8, 0.8);
+  // the tally rows, captured now so late kills don't wiggle the numbers mid-count
+  jelly.statRows = [
+    { label: 'KILLS', v: game.kills },
+    { label: 'SHOTS FIRED', v: game.shots | 0 },
+    { label: 'CRATES OPENED', v: game.cratesOpened | 0 },
+    { label: 'TIME', v: Math.round(game.time), fmt: fmtTime },
+  ];
+  jelly.statT = 0;
+  buildFinalStats();
+}
+const finalStatsEl = document.getElementById('finalstats');
+function buildFinalStats() {
+  finalStatsEl.innerHTML = '<div class="fshead">GRANDMA’S TALLY .ᐟ</div>';
+  for (const r of jelly.statRows) {
+    const row = document.createElement('div');
+    row.className = 'fsrow';
+    row.innerHTML = `<span>${r.label}</span><b>${r.fmt ? r.fmt(0) : 0}</b>`;
+    finalStatsEl.appendChild(row);
+    r.el = row; r.num = row.querySelector('b');
+  }
+  finalStatsEl.classList.remove('hidden');
+}
+function hideFinalStats() { finalStatsEl.classList.add('hidden'); finalStatsEl.innerHTML = ''; }
+function updateJelly(dt) {
+  if (!jelly.beacon) return;
+  jelly.beacon.material.opacity = 0.24 + Math.sin(performance.now() * 0.0035) * 0.1;
+  jelly.beacon.rotation.y += dt * 0.3;
+  const b = jelly.ghost;
+  if (!b) return;
+  // --- the rainbow: the splash screen's cousin-morph at 4x, smeared into a blur ---
+  jelly.cyc += dt * 4.5;                       // ~0.22s a cousin — 4x the splash's saunter
+  _jelC.set(COUSINS[Math.floor(jelly.cyc) % COUSINS.length].color);
+  jelly.col.lerp(_jelC, 1 - Math.exp(-9 * dt));
+  if (jelly.awake && jelly.sat < 1) jelly.sat = Math.min(1, jelly.sat + dt / 1.2); // colouring in
+  jelly.col.getHSL(_jelHSL);
+  _jelC.setHSL(_jelHSL.h, _jelHSL.s * jelly.sat, _jelHSL.l);
+  for (const m of jelly.skins) m.color.copy(_jelC);
+  // ghost translucency solidifies as she colours in
+  const op = 0.5 + jelly.sat * 0.5;
+  for (const m of jelly.ghostMats) m.opacity = op;
+  // --- the dance: hopping, arms up and waving, a slow happy spin ---
+  const gt = performance.now() * 0.001;
+  b.root.position.y = jelly.gy + Math.abs(Math.sin(gt * 6)) * 0.4;
+  b.arms[0].rotation.x = -2.6 + Math.sin(gt * 8) * 0.35;
+  b.arms[1].rotation.x = -2.6 + Math.sin(gt * 8 + Math.PI) * 0.35;
+  b.root.rotation.y += dt * 1.1;
+  b.wob.scale.y = 1 + Math.sin(gt * 12) * 0.04;
+  placeShadow(b, JELLY.x, JELLY.z, jelly.gy);
+  // --- the finale timeline: confetti around her + the tally counting itself up ---
+  if (!jelly.awake) return;
+  jelly.wakeT += dt;
+  if (Math.random() < dt * 5) {
+    const a = Math.random() * TAU, r = 1 + Math.random() * 2.5;
+    spawnParticles(JELLY.x + Math.sin(a) * r, jelly.gy + 2 + Math.random() * 2, JELLY.z + Math.cos(a) * r,
+      COUSINS[(Math.random() * COUSINS.length) | 0].color, 8, 4, 0.9);
+  }
+  if (jelly.statT < 0) return;
+  jelly.statT += dt;
+  jelly.statRows.forEach((r, i) => {
+    const t0 = 1.6 + i * 1.5;                  // each row takes the stage in turn
+    if (jelly.statT < t0) return;
+    if (!r.el.classList.contains('in')) r.el.classList.add('in');
+    const p = clamp((jelly.statT - t0) / 1.1, 0, 1);
+    const eased = 1 - Math.pow(1 - p, 3);      // count fast then settle on the number
+    const v = Math.round(r.v * eased);
+    const txt = r.fmt ? r.fmt(v) : String(v);
+    if (r.num.textContent !== txt) r.num.textContent = txt;
+  });
 }
 
 // ---------- crows ----------
@@ -9696,6 +10108,11 @@ function wireHostConn(conn) {
       // requires the two-sided hold pact (updateHoldTrades), so a lone request settles nothing.
     } else if (m.t === 'npcTradeReq') {
       netHandleNpcTrade(conn, m.c);   // AI cousins deal freely, no consent needed
+    } else if (m.t === 'grandmaReq') {
+      // a client reached grandma first: the finale is anyone's to start — the host just
+      // checks they're really standing in her stockroom before the family gathers
+      const gc = cousinByConn(conn);
+      if (gc && jelly.ghost && !jelly.awake && Math.hypot(gc.pos.x - JELLY.x, gc.pos.z - JELLY.z) < 4.5) grandmaWake();
     } else if (m.t === 'cswapKit') {
       // the reply half of a bare-skin trade: this player's old kit, bound for their partner
       const c = cousinByConn(conn);
@@ -9828,13 +10245,15 @@ function netHostTick(dt) {
       st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' || z.state === 'corpse' ? 2 : 0),
       sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, gr: z.green ? 1 : 0, gh: z.goreHorn ? 1 : 0,
       ho: (z.hornWave || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0, b3: z.isBoss3 ? 1 : 0,
+      b4: z.isBoss4 ? 1 : 0,              // the Rotten One → clients dress him rotten too
+      he: z.rotE ? 1 : 0, rb: z.rotR ? 1 : 0, pb: z.rotB ? 1 : 0, // the rot variants ride the wire
       sh: (z.isBoss && shielded) ? 1 : 0, // boss invuln flag → clients blink it the same
       dp: z.diedPop ? 1 : 0 });           // this death popped the head (gib/headshot) → clients burst it too
   }
   const boss = bossState.boss;
   netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb, rc,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
-    b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), // which one is up: clients dress the bar in his colours
+    b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), b4: !!(boss && boss.isBoss4), // which one is up: clients dress the bar in his colours
     ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
     zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 }); // host's spawn dials + gore-horde, mirrored on every client
 }
@@ -10047,6 +10466,21 @@ function netClientData(m, conn, peer, code) {
     netClientSkinSwap(m);
   } else if (m.t === 'cswapKit') {
     applySwapKit(m.kit); // the other half's kit, relayed through the host
+  } else if (m.t === 'jelly') {
+    // the Rotten One fell on the host's watch: the same light + ghost + toasts, our screen
+    spawnJellyMarks();
+    toast('THE ROTTEN ONE FALLS .ᐟ', true);
+    setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
+    setTimeout(() => toast('AHA, TO THE OLD JELLY HOUSE .ᐟ', true), 7400);
+  } else if (m.t === 'finale') {
+    // grandma remembered: step into the ring spot the host set for us and join the party
+    player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
+    player.vy = 0;
+    if (player.downed) { player.downed = false; player.hp = player.maxHp; } // the jelly stops the rot
+    spawnParticles(m.x, player.pos.y + 1.2, m.z, myCousinData().color, 10, 4, 0.8);
+    recordPrestige();                 // the family clear counts toward your badges too
+    startFinale();
+    toast('GRANDMA BLINGO .ᐟ THE FAMILY IS WHOLE AGAIN .ᐟ', true);
   } else if (m.t === 'secured') {
     game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
     updateQuotaHud();
@@ -10086,7 +10520,7 @@ function netApplySnapshot(m) {
   if (m.ck != null && Math.abs(m.ck - (game.clock ?? 0)) > 0.15) game.clock = m.ck;
   if (m.w && m.w !== wx.to) { wx.from = game.weather; wx.to = m.w; wx.u = 0; }
   bossBarEl.classList.toggle('show', m.bb >= 0);
-  if (m.bb >= 0) { dressBossBar({ isBoss2: !!m.b2, isBoss3: !!m.b3 }); bossHpEl.style.width = m.bb * 100 + '%'; }
+  if (m.bb >= 0) { dressBossBar({ isBoss2: !!m.b2, isBoss3: !!m.b3, isBoss4: !!m.b4 }); bossHpEl.style.width = m.bb * 100 + '%'; }
   // mirror the host's cleanup quota so the REMAIN readout ticks on every screen
   game.cleanup = (m.ct || 0) > 0; game.clearTarget = m.ct || 0; game.quotaN = m.cq || 0;
   updateQuotaHud();
@@ -10159,17 +10593,20 @@ function netApplySnapshot(m) {
     if (!g) {
       // bosses wear their own livery: without this they fell through to a random
       // zombie colour, so a joiner met a differently-coloured monster than the host
-      const color = zs.bo ? (zs.b3 ? BOSS_INFECTED : zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
+      const color = zs.bo ? (zs.b4 ? BOSS_ROTTEN : zs.b3 ? BOSS_INFECTED : zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
         : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
-      const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b3 ? INFECTED_HANDS : zs.b2 ? CRIMSON_HANDS : 0 });
-      if (zs.ho || zs.bo) for (const s of [-1, 1]) {
+      const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b4 ? ROTTEN_HANDS : zs.b3 ? INFECTED_HANDS : zs.b2 ? CRIMSON_HANDS : 0 });
+      // the Rotten One and his rotting walkers wear no horns — the rot is the whole crown
+      if ((zs.ho || zs.bo) && !zs.b4) for (const s of [-1, 1]) {
         const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
         horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
         horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
         blob.head.add(horn);
       }
+      if (zs.b4) addRotGore(blob, { hangEye: true, chestHole: true }); // boss always hangs left
+      else if (zs.he || zs.rb || zs.pb) addRotGore(blob, { hangEye: !!zs.he, ribs: !!zs.rb, belly: !!zs.pb, eyeSide: Math.random() < 0.5 ? 1 : -1 });
       scene.add(blob.root);
-      g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2, isBoss3: !!zs.b3,
+      g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2, isBoss3: !!zs.b3, isBoss4: !!zs.b4,
         state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false,
         purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh };
       net.ghosts.set(zs.i, g);
@@ -10263,6 +10700,7 @@ function netClientWorldTick(dt) {
       b.arms[0].rotation.x = -1.4 + sw * 0.25; b.arms[1].rotation.x = -1.4 - sw * 0.25;
     }
     if (g.isBoss && g.sh) pulseBossShield(g, b, dt);   // mirror the host's invuln blink
+    animateRotGore(g, b);                              // rot hearts beat + eyes swing here too
     placeShadow(b, g.pos.x, g.pos.z);
     updateFlash(b, dt);
   }
@@ -10416,7 +10854,7 @@ function netClientShot(z, dmg, kx, kz, opts) {
   if (z.isBoss && z.sh) {
     // hit a boss while its wave guards still stand: it shrugs — show the invuln colour, not
     // blood, so a client reads "no damage" the same way the host does
-    flashBlob(z.blob, z.isBoss3 ? FLASH_WHITE : FLASH_GREEN);
+    flashBlob(z.blob, (z.isBoss3 || z.isBoss4) ? FLASH_WHITE : FLASH_GREEN);
     spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, z.isBoss3 ? 0xffffff : 0x3ae06a, 3, 2.5, 0.3);
   } else {
     spawnDamageNumber(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
@@ -10529,7 +10967,47 @@ window.__dbg = {
   get playerBlob() { return playerBlob; },
   fire: () => fireWeapon(),
   hurt: (dmg, ax, az) => hurtPlayer(dmg, ax, az),
-  toggleFPV, bossState, spawnBoss, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
+  toggleFPV, bossState, spawnBoss, spawnBoss2, spawnBoss3, spawnBoss4, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
+  // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad
+  // out, drop everyone at the picnic ground and stand the Rotten One up for the fight + trek
+  rotten: (recruit = true) => {
+    // tear down any prior Rotten One + his beam first, so a re-run always stands up a FRESH,
+    // visible boss instead of leaving a spent/invisible one behind with a live boss bar
+    if (bossState.boss) {
+      scene.remove(bossState.boss.blob.root);
+      if (bossState.boss.blob.shadow) scene.remove(bossState.boss.blob.shadow);
+      const bi = zombies.indexOf(bossState.boss); if (bi >= 0) zombies.splice(bi, 1);
+    }
+    if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+    bossState.boss = null; bossState.spawned4 = false; bossState.defeated4 = false;
+    bossBarEl.classList.remove('show');
+    // clear any leftover endgame from a prior defeat: the Jelly House light + grandma's ghost,
+    // the tally, and the party/cleanup flags — plus un-mute spawns if a booth turned them off
+    if (jelly.beacon) { scene.remove(jelly.beacon); jelly.beacon = null; }
+    if (jelly.ghost) { scene.remove(jelly.ghost.root); jelly.ghost = null; }
+    jelly.awake = false; jelly.statT = -1;
+    if (typeof hideFinalStats === 'function') hideFinalStats();
+    game.celebrateT = 0; game.cleanup = false;
+    if (settings.zombieSpawn <= 0) settings.zombieSpawn = 1;
+    bossState.spawned = bossState.spawned2 = bossState.spawned3 = true;
+    bossState.defeated = bossState.defeated2 = bossState.defeated3 = true;
+    if (recruit) companions.forEach(c => { if (!c.recruited) recruitCousin(c); });
+    window.__dbg.kit();
+    player.pos.set(129, groundHeight(129, -58), -58);
+    spawnBoss4();
+  },
+  // max ammo, every gun in hand, and every recruited cousin handed an assault rifle
+  kit: () => {
+    for (const id of Object.keys(WEAPONS)) {
+      if (id === 'fists') continue;
+      if (!player.owned.includes(id)) player.owned.push(id);
+      if (!WEAPONS[id].melee) reserves[id] = 9999;
+    }
+    player.owned.sort((a, b) => slotRank(a) - slotRank(b));
+    equipWeapon('rifle');
+    updateAmmoHUD();
+    companions.forEach(c => { if (c.recruited) setCompanionWeapon(c, 'rifle'); });
+  },
   setSky: (phase, weather) => { game.clock = [8, 13, 18.7, 23][phase] ?? 13; if (weather) wxSet(weather); applyEnvironment(); },
   setClock: (h) => { game.clock = h % 24; applyEnvironment(); },
   recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),

@@ -124,6 +124,25 @@
   #bossbar.infected #bosslabel { color:#a8ffb0; text-shadow:0 0 10px rgba(50,230,80,.7); }
   #bossbar.infected #bosswrap { border-color:rgba(140,255,150,.55); box-shadow:0 0 16px rgba(40,220,60,.4); }
   #bossbar.infected #bosshp { background:linear-gradient(90deg,#5aff6a,#12801e); }
+  /* the Rotten One festers in putrid yellow-green — sicker than his brother's clean green */
+  #bossbar.rotten #bosslabel { color:#dff0a0; text-shadow:0 0 10px rgba(184,224,58,.7); }
+  #bossbar.rotten #bosswrap { border-color:rgba(210,235,120,.55); box-shadow:0 0 16px rgba(160,200,40,.4); }
+  #bossbar.rotten #bosshp { background:linear-gradient(90deg,#cfe45a,#6d7a12); }
+
+  /* grandma's tally: the finale stat sheet. Rows slide up into view one at a time while
+     their numbers count up (updateJelly drives both), so the party can be read, not blinked at */
+  #finalstats { position:absolute; left:50%; top:52%; transform:translate(-50%,-50%); width:min(78vw,420px);
+    display:flex; flex-direction:column; gap:9px; align-items:stretch; pointer-events:none;
+    background:rgba(8,10,14,.62); border:1px solid rgba(255,179,71,.4); border-radius:14px;
+    padding:16px 22px; backdrop-filter:blur(5px); box-shadow:0 0 26px rgba(255,150,40,.25); }
+  #finalstats.hidden { display:none; }
+  #finalstats .fshead { text-align:center; color:#ffb347; font-weight:800; letter-spacing:.14em; font-size:17px;
+    text-shadow:0 2px 6px #000, 0 0 14px rgba(255,150,40,.6); margin-bottom:4px; }
+  #finalstats .fsrow { display:flex; justify-content:space-between; align-items:baseline;
+    opacity:0; transform:translateY(14px); transition:opacity .45s ease, transform .45s ease; }
+  #finalstats .fsrow.in { opacity:1; transform:translateY(0); }
+  #finalstats .fsrow span { color:#e8e2d8; font-size:12px; letter-spacing:.2em; }
+  #finalstats .fsrow b { color:#ffd24a; font-size:22px; font-weight:800; text-shadow:0 1px 3px #000; font-variant-numeric:tabular-nums; }
 
   #bottomright { position:absolute; right:calc(16px + env(safe-area-inset-right)); bottom:calc(14px + env(safe-area-inset-bottom)); text-align:right; color:#fff; }
   #weaponname { font-size:13px; letter-spacing:3px; text-transform:uppercase; opacity:.85; text-shadow:0 1px 3px #000; }
@@ -575,6 +594,9 @@
     </div>
     <div class="tplabel">ACCEPTED .ᐟ</div>
   </div>
+
+  <!-- grandma's tally: the finale stat sheet (built + driven from updateJelly) -->
+  <div id="finalstats" class="hidden"></div>
 
   <div id="bossbar">
     <div id="bosslabel">The Two Horned One</div>
