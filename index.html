@@ -82,6 +82,16 @@
   #quota.show { opacity:1; }
   #quota b { font-size:18px; line-height:1; color:var(--hero); }
   #quota span { font-size:9px; letter-spacing:2px; color:var(--hero); opacity:.65; margin-top:2px; }
+  /* RED'S CHILI giant countdown: the quota's twin in chili red. It takes the quota's spot
+     when the hunt readout is dark, and steps down under it when both are showing. */
+  #gianttimer { position:absolute; top:calc(10px + env(safe-area-inset-top)); right:calc(14px + env(safe-area-inset-right));
+    display:flex; flex-direction:column; align-items:center; pointer-events:none;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    text-shadow:0 2px 6px rgba(0,0,0,.7); opacity:0; transition:opacity .8s, top .4s; }
+  #gianttimer.show { opacity:1; }
+  #gianttimer.lower { top:calc(56px + env(safe-area-inset-top)); }
+  #gianttimer b { font-size:18px; line-height:1; color:#ff4030; }
+  #gianttimer span { font-size:9px; letter-spacing:2px; color:#ff4030; opacity:.65; margin-top:2px; }
   #cousins b { color:#6fd8ff !important; }
 
   #bottomleft { position:absolute; left:calc(14px + env(safe-area-inset-left)); bottom:calc(14px + env(safe-area-inset-bottom)); color:#fff; }
@@ -275,6 +285,8 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:13px; font-weight:700;
     text-shadow:0 1px 3px #000; transition:font-size .12s, color .12s; }
   .ewseg.hot { color:var(--hero); font-size:17px; text-shadow:0 0 10px var(--hero), 0 1px 3px #000; }
+  /* orders a chili giant can't give: greyed out and untouchable until the shrink lands */
+  .ewseg.off { opacity:.22; pointer-events:none; }
   /* player + boss tags: a chevron aimed down at the blob with P{N} above it, in the blob
      font. Sized in JS from distance, so no transitions here or every frame would fight
      them. Flex-column + centered items keeps the arrow locked under the name regardless
@@ -604,6 +616,7 @@
   </div>
 
   <div id="quota"><b>0/0</b><span>REMAIN</span></div>
+  <div id="gianttimer"><b>0:00</b><span>RED'S CHILI</span></div>
   <div id="topbar">
     <div class="stat" id="kills"><b>0</b><span>Kills</span></div>
     <div class="stat" id="timer"><b>0:00</b><span>Survived</span></div>

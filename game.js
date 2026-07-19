@@ -109,7 +109,7 @@ const TOWN_RECTS = [
   [112, -56, 146, -28], // the jelly park, down the block from the civic pair's side road
   [108, 48, 128, 66],   // Red's Chili corner plot, two blocks up the side road from the statue
   [103, -140, 141, -104], // the Blob Lounge grounds, far down the side road the other way
-  [91, 160, 129, 196],  // grandma's Jelly House grounds — far past the church, the farthest landmark out
+  [105, 160, 143, 196], // grandma's Jelly House grounds — far past the church, the farthest landmark out, clear east of the x=100 road
 ];
 // The park keeps its perimeter sacred: no zombie ever spawns on it (they may still
 // wander in chasing you, which is exactly the picnic-crashing the plaque deserves).
@@ -212,10 +212,53 @@ const roofMats = [
 const darkGlassMat = new THREE.MeshLambertMaterial({ color: 0x11131a, side: THREE.DoubleSide });
 const glowTex = canvasTex(64, 64, ctx => {
   const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
-  g.addColorStop(0, 'rgba(255,220,120,1)');
-  g.addColorStop(1, 'rgba(255,220,120,0)');
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
 });
+// ---------- the loot glow kit ----------
+// One dressed-up glow, reused everywhere something wants to be found: a soft tinted pool
+// laid on the ground (the drop shadow), a sharp ring breathing over it, and a brighter orb
+// of light riding above the top centre of whatever it marks. Crates wear it gold, the jelly
+// table purple, the chili pot red — and boss-wave guards wear it in their own body colour
+// so the shield-breakers read at a glance (the shielded boss glows his too, till they fall).
+function makeLootGlow(color, { r = 1, y = 0.9, s = 1.6 } = {}) {
+  const g = new THREE.Group();
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(r * 2.7, r * 2.7),
+    new THREE.MeshBasicMaterial({ map: glowTex, color, transparent: true, opacity: 0.45,
+      blending: THREE.AdditiveBlending, depthWrite: false }));
+  pool.rotation.x = -Math.PI / 2; pool.position.y = 0.045; pool.renderOrder = 2;
+  g.add(pool);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.8, r, 28),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.07; ring.renderOrder = 2;
+  g.add(ring);
+  const orb = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true,
+    opacity: 0.8, depthWrite: false }));
+  orb.scale.setScalar(s);
+  orb.position.y = y;
+  g.add(orb);
+  g.userData.glow = { pool, ring, orb, s, orbY: y, mul: 1 };
+  return g;
+}
+// one shared heartbeat for every glow: the ring breathes out while the pool swells under
+// it and the orb bobs and brightens on the same beat. mul lets a glow fade off (a boss
+// losing his shield) without tearing the group down.
+function animateLootGlow(g, t) {
+  const u = g.userData.glow;
+  if (!u) return;
+  g.visible = u.mul > 0.02;
+  if (!g.visible) return;
+  const beat = Math.sin(t * 2.6), soft = Math.sin(t * 2.6 + 1.1);
+  u.ring.scale.setScalar(1 + beat * 0.14);
+  u.ring.material.opacity = (0.36 + beat * 0.2) * u.mul;
+  u.pool.scale.setScalar(1 + soft * 0.1);
+  u.pool.material.opacity = (0.38 + soft * 0.14) * u.mul;
+  u.orb.material.opacity = (0.6 + beat * 0.28) * u.mul;
+  u.orb.scale.setScalar(u.s * (1 + beat * 0.09));
+  u.orb.position.y = u.orbY + beat * 0.07;
+}
 // Extra Gore at full is the "gore horde": locally it's the slider maxed; a client also
 // inherits it from the host, since the host's world is the one doing the spawning. It lights
 // the settings notches (see updateGoreHordeUI) and swells the spawner — the in-world zombies
@@ -917,6 +960,11 @@ let shakeAmp = 0;
 // in an instant kill. slot: which inventory group the weapon sorts into (melee first, then guns).
 const WEAPONS = {
   fists:   { id: 'fists',   name: 'Fists',        melee: true, slot: 'melee', dmg: 6, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
+  // the consumables: family recipes with lore, not arms. Both swing exactly like fists
+  // (same numbers, never break) — their real power fires elsewhere: the jelly is a
+  // self-revive when you bleed out, the chili is 90 seconds of being the boss.
+  jelly:   { id: 'jelly',   name: 'Good Jelly',   melee: true, slot: 'consumable', consumable: true, dmg: 6, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
+  chili:   { id: 'chili',   name: "Red's Chili",  melee: true, slot: 'consumable', consumable: true, dmg: 6, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
   pipe:    { id: 'pipe',    name: 'Lead Pipe',    melee: true, slot: 'melee', dmg: 16, range: 3.1, rpm: 150, mag: Infinity, kick: 0.03, rmb: [80, 0.5, 0.3], cqc: 0, dismember: 0.28, color: 0x8b9099 },
   bat:     { id: 'bat',     name: 'Slugger Bat',  melee: true, slot: 'melee', dmg: 19, range: 3.4, rpm: 130, mag: Infinity, kick: 0.04, rmb: [90, 0.55, 0.35], cqc: 0, dismember: 0.34, color: 0x8a5a2a },
   machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 23, range: 3.2, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
@@ -930,8 +978,9 @@ const WEAPONS = {
   magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [140, 1, 0.75],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18 },
   sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 22,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [260, 1, 1],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
 };
-// inventory slot order: melee group first (fists then found melee by weight), then guns by tier
-const SLOT_ORDER = ['fists', 'pipe', 'bat', 'machete', 'katana', 'sledge', 'axe', 'pistol', 'smg', 'rifle', 'shotgun', 'magnum', 'sniper'];
+// inventory slot order: fists, then the consumables (grandma's jelly, Red's chili), then
+// found melee by weight, then guns by tier
+const SLOT_ORDER = ['fists', 'jelly', 'chili', 'pipe', 'bat', 'machete', 'katana', 'sledge', 'axe', 'pistol', 'smg', 'rifle', 'shotgun', 'magnum', 'sniper'];
 function slotRank(id) { const i = SLOT_ORDER.indexOf(id); return i < 0 ? 99 : i; }
 // point-blank damage multiplier for a hit at distance d
 function closeBonus(w, d) { return 1 + (w.cqc || 0) * clamp(1 - d / 8, 0, 1); }
@@ -989,7 +1038,8 @@ function buildGunMesh(id) {
     const rail = box(0.05, 0.03, 0.42, 0x22252b); rail.position.set(0, 0.15, -0.18); g.add(rail);
     const barrel = cyl(0.045, 0.05, 0.28, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.58); g.add(barrel);
     const shroud = box(0.09, 0.09, 0.14, 0x2a2c30); shroud.position.set(0, 0.06, -0.5); g.add(shroud);
-    const drum = cyl(0.15, 0.15, 0.1, c, 14); drum.rotation.z = Math.PI / 2; drum.position.set(0, -0.11, -0.13); g.add(drum);
+    // the drum turned to face forward like a proper AA-12's, and dressed in black
+    const drum = cyl(0.15, 0.15, 0.1, 0x14161a, 14); drum.rotation.x = Math.PI / 2; drum.position.set(0, -0.11, -0.13); g.add(drum);
     const grip = box(0.08, 0.16, 0.1, 0x22252b); grip.position.set(0, -0.08, 0.09); grip.rotation.x = 0.22; g.add(grip);
     const stock = box(0.09, 0.14, 0.2, c); stock.position.set(0, 0.04, 0.22); g.add(stock);
   } else if (id === 'rifle') {
@@ -998,26 +1048,28 @@ function buildGunMesh(id) {
     const stock = box(0.08, 0.12, 0.28, c); stock.position.set(0, 0.02, 0.24); g.add(stock); // stock lengthened a touch
     // longer barrel tube off the front end — the round leaves ITS tip now (muzzle anchor below)
     const barrel = cyl(0.03, 0.033, 0.4, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.76); g.add(barrel);
-    // one sight tab on the front half of the tube, welded on like an upside-down U: two legs
-    // drop past the barrel's sides so the piece straddles the tube, an arch bridges over the
-    // top, and a tiny V divot is notched from the top-centre — still one cut-out piece
+    // the front sight: one plate straddling the barrel like the letter ň — straight outer
+    // sides, a flush semicircular cutout riding the tube with ZERO gap (the arc matches
+    // the tube's radius and bites a hair into it, so nothing ever shows daylight around
+    // the join), and the little V notched from the top-centre to aim through
+    const BR = 0.0305;              // the tube's radius where the plate sits
     const sShape = new THREE.Shape();
-    sShape.moveTo(-0.045, -0.045);  // bottom of the left leg (outer)
+    sShape.moveTo(-0.045, -0.026);  // left leg foot (outer)
     sShape.lineTo(-0.045, 0.05);    // up the left outer edge
     sShape.lineTo(-0.008, 0.05);    // across the top to the divot
     sShape.lineTo(0, 0.036);        // down into the little V
     sShape.lineTo(0.008, 0.05);     // back up out of it
     sShape.lineTo(0.045, 0.05);     // across to the right outer top
-    sShape.lineTo(0.045, -0.045);   // down the right outer edge to the right leg's foot
-    sShape.lineTo(0.034, -0.045);   // in under the right leg
-    sShape.lineTo(0.034, 0.008);    // up the inner edge to the arch underside
-    sShape.lineTo(-0.034, 0.008);   // across the underside of the arch (clears the barrel top)
-    sShape.lineTo(-0.034, -0.045);  // down the inner edge of the left leg
+    sShape.lineTo(0.045, -0.026);   // down the right outer edge
+    sShape.lineTo(BR, -0.026);      // in under the right leg
+    sShape.lineTo(BR, 0);           // up the inner edge to the tube's waistline
+    sShape.absarc(0, 0, BR, 0, Math.PI, false); // the flush arch, curved to the tube itself
+    sShape.lineTo(-BR, -0.026);     // down the inner left edge
     sShape.closePath();             // back along the left leg's foot
     const sGeo = new THREE.ExtrudeGeometry(sShape, { depth: 0.02, bevelEnabled: false });
     sGeo.translate(0, 0, -0.01);
     const sight = new THREE.Mesh(sGeo, mat(0x101216));
-    sight.position.set(0, 0.085, -0.86);  // arch underside kisses the barrel top; legs saddle its sides
+    sight.position.set(0, 0.06, -0.86);  // centred ON the barrel axis: the arch hugs the tube all round
     g.add(sight);
   } else if (id === 'sniper') {
     // long-barrelled marksman rifle with a proper scope + lens
@@ -1030,6 +1082,22 @@ function buildGunMesh(id) {
     lens.material = new THREE.MeshBasicMaterial({ color: 0x7fb8ff }); g.add(lens);
     const stock = box(0.08, 0.15, 0.3, 0x2a2318); stock.position.set(0, 0.0, 0.28); g.add(stock);
     const grip = box(0.07, 0.16, 0.09, 0x22252b); grip.position.set(0, -0.09, 0.12); grip.rotation.x = 0.25; g.add(grip);
+  } else if (id === 'jelly') {
+    // grandma's jar in hand: purple glass under a waxed cap, the family cure-all
+    const glass = cyl(0.11, 0.1, 0.24, 0xffffff, 10);
+    glass.material = new THREE.MeshLambertMaterial({ color: 0x8a4dd0, emissive: 0x2a0d4a, emissiveIntensity: 0.55 });
+    glass.position.y = -0.02; g.add(glass);
+    const lid = cyl(0.12, 0.12, 0.04, 0xe8dcc0, 10); lid.position.y = 0.12; g.add(lid);
+    const band = cyl(0.115, 0.115, 0.025, 0xb4642a, 10); band.position.y = 0.095; g.add(band);
+    g.userData.reach = 0.5; // the melee carry needs a length, even for a jar
+  } else if (id === 'chili') {
+    // Red's own serving: a bowl with the chili still in it and a spoon standing proud
+    const bowl = cyl(0.16, 0.11, 0.1, 0xd8cdb8, 10); bowl.position.y = -0.02; g.add(bowl);
+    const chi = cyl(0.14, 0.14, 0.035, 0xffffff, 10);
+    chi.material = new THREE.MeshLambertMaterial({ color: 0x8a2f1a, emissive: 0x1e0602, emissiveIntensity: 0.4 });
+    chi.position.y = 0.035; g.add(chi);
+    const spoon = box(0.025, 0.2, 0.015, 0xb9bdc4); spoon.position.set(0.05, 0.12, 0); spoon.rotation.z = -0.3; g.add(spoon);
+    g.userData.reach = 0.5; // same: the carry pose reads it
   } else if (w.melee && id !== 'fists') {
     buildMeleeMesh(g, id, c);
   }
@@ -1471,9 +1539,8 @@ function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf, indoor) {
   const lid = box(0.72, 0.1, 0.72, 0x6e451f);
   lid.position.y = 0.57;
   g.add(lid);
-  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, transparent: true, opacity: 0.7, depthWrite: false }));
-  glow.scale.setScalar(1.6);
-  glow.position.y = 0.9;
+  // the dressed-up find-me glow: gold pool + ring at the crate's feet, orb over the lid
+  const glow = makeLootGlow(0xffdc78, { r: 0.78, y: 1.05, s: 1.7 });
   g.add(glow);
   g.position.set(x, y, z);
   g.rotation.y = rng() * TAU;
@@ -3351,6 +3418,10 @@ function updateButterflies(dt) {
 // ground, one knocked flat, chili everywhere. RED'S CHILI overhead in the goopy face,
 // civic-plate sized, because the town hall never made anything this good.
 const chiliMat = mat(0x7a2412);
+// RED'S CHILI, the lootable consumable: the counter pot + its bowl stack. taken counts
+// servings gone (6 empties it for the run); surf is the pot's chili surface, ladled
+// lower per loot. lootedBy holds who already ate this run (multiplayer: one per cousin).
+const chiliBar = { x: 0, z: 0, y: 0, surf: null, potH: 0.75, bowls: [], taken: 0, glow: null, lootedBy: new Set() };
 function makeChiliPot(x, z, r, h, opts = {}) {
   const y0 = groundHeight(x, z) + (opts.lift || 0);
   const iron = mat(0x2e3238, { side: THREE.DoubleSide });
@@ -3373,6 +3444,7 @@ function makeChiliPot(x, z, r, h, opts = {}) {
     chili.rotation.x = -Math.PI / 2;
     chili.position.y = -h / 2 + Math.max(0.03, h * opts.fill);
     pot.add(chili);
+    pot.userData.chiliSurf = chili; pot.userData.chiliH = h; // the counter pot ladles down per loot
   }
   if (opts.tipped) {
     pot.rotation.z = Math.PI / 2 - 0.06;
@@ -3427,18 +3499,28 @@ function buildChiliStand(rng) {
   ret.position.set(sx - 2.45, y0 + 0.475, sz - 0.1);
   townGroup.add(ret);
   townColliders.push(aabb(sx - 2.45, sz - 0.1, 0.35, 1.3, 0.95, y0));
-  // the big cooking pot up on the counter, full and steaming-adjacent; ladle leaned in
-  makeChiliPot(sx + 1.3, sz - 1.7, 0.55, 0.75, { fill: 0.85, lift: 0.95 });
+  // the big cooking pot up on the counter, full and steaming-adjacent; ladle leaned in.
+  // This one is RED'S CHILI, the lootable: its level ladles DOWN a notch per serving
+  // taken, and the bowl stack beside it goes with it, one bowl a cousin, six deep.
+  const mainPot = makeChiliPot(sx + 1.3, sz - 1.7, 0.55, 0.75, { fill: 0.85, lift: 0.95 });
+  chiliBar.x = sx + 1.3; chiliBar.z = sz - 1.7; chiliBar.y = y0;
+  chiliBar.surf = mainPot.userData.chiliSurf; chiliBar.potH = mainPot.userData.chiliH;
+  chiliBar.taken = 0; chiliBar.lootedBy.clear(); chiliBar.bowls.length = 0;
   const ladle = cyl(0.02, 0.02, 0.8, 0xb9bdc4, 6);
   ladle.position.set(sx + 1.05, y0 + 2.05, sz - 1.62);
   ladle.rotation.z = 0.5;
   townGroup.add(ladle);
-  // the stack of bowls beside it
-  for (let i = 0; i < 5; i++) {
+  // the stack of bowls beside it: six high now, one per cousin at the table
+  for (let i = 0; i < 6; i++) {
     const bowl = cyl(0.22, 0.15, 0.1, i % 2 ? 0xd8cdb8 : 0xcabfa8, 10);
     bowl.position.set(sx - 0.9, y0 + 1.0 + i * 0.085, sz - 1.68);
     townGroup.add(bowl);
+    chiliBar.bowls.push(bowl);
   }
+  // the big red glow: pool + ring on the counter top, orb riding over the pot
+  chiliBar.glow = makeLootGlow(0xff4030, { r: 1.5, y: 1.35, s: 2.5 });
+  chiliBar.glow.position.set(sx + 1.3, y0 + 0.96, sz - 1.7);
+  townGroup.add(chiliBar.glow);
   // spoons live in a caddy cup on the counter now, handles up, grab-and-go
   const caddy = cyl(0.14, 0.11, 0.22, 0x64431f, 8);
   caddy.position.set(sx - 1.6, y0 + 1.06, sz - 1.68);
@@ -3488,18 +3570,24 @@ function buildChiliStand(rng) {
 function buildBlobLounge(rng) {
   buildLoungeHall(rng, { bx: 122, bz: -121,
     wallC: 0x584a66,  // lounge purple, like the bouncer who kept its door
-    floorC: 0x453a4e, signText: 'BLOB LOUNGE', signBg: '#241a2e', signFg: '#d8a8ff' });
+    floorC: 0x453a4e, signText: 'BLOB LOUNGE', signBg: '#241a2e', signFg: '#d8a8ff',
+    jars: 'good' }); // the mess-hall centrepiece: grandma's GOOD JELLY, still potent
 }
 // grandma Blingo's Jelly House: the same fighting-hall bones as the Blob Lounge, dressed
 // in her jelly orange, way off past the church up the east road — the farthest landmark
 // on the map, which is the point: the trek IS the epilogue (see spawnJellyMarks).
-const JELLY = { x: 110, z: 178 };
+// East of the x=100 road (which runs x 93.6..106.4): the house sits on its own grass,
+// never on the tarmac.
+const JELLY = { x: 124, z: 178 };
+// where grandma's ghost actually stands: beside the long table, not inside it
+const JELLY_G = { x: JELLY.x, z: JELLY.z + 4.2 };
 function buildJellyHouse(rng) {
   buildLoungeHall(rng, { bx: JELLY.x, bz: JELLY.z,
     wallC: 0xb4642a,  // jelly orange, sun-faded like the label on her jars
-    floorC: 0x6b4a30, signText: 'JELLY HOUSE', signBg: '#3a2210', signFg: '#ffb347' });
+    floorC: 0x6b4a30, signText: 'JELLY HOUSE', signBg: '#3a2210', signFg: '#ffb347',
+    jars: 'empty' }); // her table too — but the jars here were eaten long ago: no loot, no mess
 }
-function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg }) {
+function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg, jars }) {
   const w = 30, d = 16, h = 6.0;
   const y0 = groundHeight(bx, bz);
   // it sits past the town's far ground apron, so it brings its own: the building must
@@ -3557,9 +3645,10 @@ function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg 
     makeShelf(rng, bx - w / 2 + 0.85, bz + sz, Math.PI / 2, townGroup, townColliders, townCrates, y0 + 0.06);
     makeShelf(rng, bx + w / 2 - 0.85, bz + sz, Math.PI / 2, townGroup, townColliders, townCrates, y0 + 0.06);
   }
-  // loose floor crates mid-room
-  makeCrate(rng, bx - 3, y0 + 0.08, bz - 1.5, townGroup, townColliders, townCrates, false, true);
-  makeCrate(rng, bx + 4, y0 + 0.08, bz + 2, townGroup, townColliders, townCrates, false, true);
+  // loose floor crates pushed off the centreline — the mess tables own the middle now
+  makeCrate(rng, bx - 4.5, y0 + 0.08, bz - 4.9, townGroup, townColliders, townCrates, false, true);
+  makeCrate(rng, bx + 4.5, y0 + 0.08, bz + 4.9, townGroup, townColliders, townCrates, false, true);
+  buildMessTables(bx, bz, y0, jars);
   // the name big on the flat frontage, above the doors, below the eaves
   const sign = textPlate(signText, 8, 1.8, signBg, signFg);
   sign.position.set(bx, y0 + (DOOR_H + h) / 2 + 0.15, bz + d / 2 + t / 2 + 0.04);
@@ -3573,6 +3662,286 @@ function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg 
   townBuildings.push({ x: bx, z: bz, hw: w / 2 + 0.5, hd: d / 2 + 0.5, shell, doors,
     doorX: doors[2].x, doorZ: doors[2].z, doorOutX: doors[2].outX, doorOutZ: doors[2].outZ,
     roofY: y0 + h - 0.05 + d * 0.32, ridgeHW: Math.max(1, w / 2 - 0.6) });
+}
+// ---------- the mess tables + grandma's GOOD JELLY ----------
+// The Valhalla line: three picnic tables end to end down the hall's spine, benches both
+// sides, like a viking mess hall waiting on a feast. In the BLOB LOUNGE the centre table
+// carries the centrepiece — six capped jars of grandma's GOOD JELLY under a big purple
+// glow, with the purple spill of a hurried exit over the table and the floor by the door.
+// One whole cluster acts as one big loot spot (the jar nearest your crosshair is the one
+// you take). In the JELLY HOUSE the same table stands with the jars long since emptied:
+// clear glass, no lids, nothing to take — she gave it all away.
+const jellyBar = { x: 0, z: 0, y: 0, jars: [], mask: 0, glow: null, lootedBy: new Set() };
+function makeJellyJar(full) {
+  const g = new THREE.Group();
+  const glass = cyl(0.16, 0.14, 0.34, 0xffffff, 10);
+  glass.material = full
+    ? new THREE.MeshLambertMaterial({ color: 0x8a4dd0, emissive: 0x2a0d4a, emissiveIntensity: 0.55 })
+    : new THREE.MeshLambertMaterial({ color: 0xdde4ec, transparent: true, opacity: 0.35 });
+  glass.position.y = 0.17;
+  g.add(glass);
+  if (full) { // capped: wax-paper lid + her orange band
+    const lid = cyl(0.17, 0.17, 0.05, 0xe8dcc0, 10); lid.position.y = 0.365; g.add(lid);
+    const band = cyl(0.165, 0.165, 0.03, 0xb4642a, 10); band.position.y = 0.33; g.add(band);
+  }
+  return g;
+}
+function buildMessTables(bx, bz, y0, jars) {
+  const wood = 0x6e4a26, woodDk = 0x59391c;
+  for (const tx of [-8, 0, 8]) {
+    const top = box(7.2, 0.14, 2.2, wood);
+    top.position.set(bx + tx, y0 + 0.95, bz);
+    townGroup.add(top);
+    for (const ex of [-3.1, 3.1]) for (const s of [-1, 1]) {
+      const leg = box(0.16, 0.95, 0.16, woodDk);
+      leg.position.set(bx + tx + ex, y0 + 0.475, bz + s * 0.7);
+      townGroup.add(leg);
+    }
+    townColliders.push(aabb(bx + tx, bz, 3.6, 1.1, 1.02, y0));
+    for (const s of [-1, 1]) { // benches both sides, low enough to hop up on
+      const bench = box(7.2, 0.1, 0.55, wood);
+      bench.position.set(bx + tx, y0 + 0.55, bz + s * 1.6);
+      townGroup.add(bench);
+      for (const ex of [-3, 3]) {
+        const bl = box(0.14, 0.55, 0.14, woodDk);
+        bl.position.set(bx + tx + ex, y0 + 0.275, bz + s * 1.6);
+        townGroup.add(bl);
+      }
+      townColliders.push(aabb(bx + tx, bz + s * 1.6, 3.6, 0.32, 0.62, y0));
+    }
+  }
+  // the jar cluster on the centre table: 2 rows of 3
+  const full = jars === 'good';
+  for (let i = 0; i < 6; i++) {
+    const jar = makeJellyJar(full);
+    jar.position.set(bx + ((i % 3) - 1) * 0.6, y0 + 1.02, bz + (i < 3 ? -0.42 : 0.42));
+    townGroup.add(jar);
+    if (full) jellyBar.jars.push(jar);
+  }
+  if (!full) return;
+  jellyBar.x = bx; jellyBar.z = bz; jellyBar.y = y0;
+  jellyBar.mask = 0; jellyBar.lootedBy.clear();
+  // the big purple glow: pool + ring spilling out from under the table, orb over the jars
+  jellyBar.glow = makeLootGlow(0xb06fff, { r: 1.8, y: 2.3, s: 2.8 });
+  jellyBar.glow.position.set(bx, y0, bz);
+  townGroup.add(jellyBar.glow);
+  // the spill: jelly dragged across the tabletop and dropped again on the way out the door
+  const jmat = new THREE.MeshLambertMaterial({ color: 0x7a3fd0, emissive: 0x1e0a3a, emissiveIntensity: 0.4 });
+  const tspill = new THREE.Mesh(BOX, jmat); tspill.scale.set(1.5, 0.03, 0.9);
+  tspill.position.set(bx - 1.3, y0 + 1.03, bz + 0.3); townGroup.add(tspill);
+  const fspill = new THREE.Mesh(BOX, jmat); fspill.scale.set(1.7, 0.03, 1.2);
+  fspill.position.set(bx + 7.6, y0 + 0.075, bz + 5); townGroup.add(fspill);
+  const fspill2 = new THREE.Mesh(BOX, jmat); fspill2.scale.set(0.9, 0.03, 0.7);
+  fspill2.position.set(bx + 6.6, y0 + 0.075, bz + 3.4); townGroup.add(fspill2);
+  for (let i = 0; i < 5; i++) { // gobs in the smear
+    const gob = ball(0.05 + Math.random() * 0.05, 0x7a3fd0);
+    gob.position.set(bx + 6.4 + Math.random() * 2.4, y0 + 0.1, bz + 3.2 + Math.random() * 2.6);
+    townGroup.add(gob);
+  }
+}
+// ---------- consumable loot state ----------
+// State appliers run on EVERY screen (locally on loot for the host/solo, off the host's
+// snapshot for clients): jars vanish by mask bit so all screens hide the SAME jar, the
+// pot surface ladles down per serving, and the bowls leave the stack top-first. When a
+// stock runs dry its glow fades off with it.
+function jellyLeft() { let n = 0; for (let i = 0; i < 6; i++) if (!(jellyBar.mask & (1 << i))) n++; return n; }
+function applyJellyMask(mask) {
+  jellyBar.mask = mask;
+  jellyBar.jars.forEach((j, i) => j.visible = !(mask & (1 << i)));
+  if (jellyBar.glow) jellyBar.glow.userData.glow.mul = jellyLeft() > 0 ? 1 : 0;
+}
+function applyChiliTaken(taken) {
+  chiliBar.taken = taken;
+  chiliBar.bowls.forEach((b, i) => b.visible = i < 6 - taken);
+  if (chiliBar.surf) {
+    const fill = 0.85 * (6 - taken) / 6;
+    chiliBar.surf.visible = taken < 6;
+    chiliBar.surf.position.y = -chiliBar.potH / 2 + Math.max(0.03, chiliBar.potH * fill);
+  }
+  if (chiliBar.glow) chiliBar.glow.userData.glow.mul = taken < 6 ? 1 : 0;
+}
+function updateConsumables(dt) {
+  if (jellyBar.glow) animateLootGlow(jellyBar.glow, game.time);
+  if (chiliBar.glow) animateLootGlow(chiliBar.glow, game.time * 1.13 + 2); // its own beat
+}
+// who this screen's player is in the once-per-run ledgers
+function myLootKey() { return net.role ? 'p' + (net.playerNum || 1) : 'solo'; }
+// solo runs can come back for more after using one (the once-per-run law is a lobby rule);
+// nobody loots a second helping while still carrying the first, and giants don't shop
+function canLootJelly() {
+  return jellyLeft() > 0 && !player.owned.includes('jelly') && !player.downed
+    && !(net.role && jellyBar.lootedBy.has(myLootKey())) && !playerGiantAny();
+}
+function canLootChili() {
+  return chiliBar.taken < 6 && !player.owned.includes('chili') && !player.downed
+    && !(net.role && chiliBar.lootedBy.has(myLootKey())) && !playerGiantAny();
+}
+function findNearJelly() {
+  if (!canLootJelly()) return null;
+  return Math.hypot(player.pos.x - jellyBar.x, player.pos.z - jellyBar.z) < 3.8 ? jellyBar : null;
+}
+function findNearChili() {
+  if (!canLootChili()) return null;
+  return Math.hypot(player.pos.x - chiliBar.x, player.pos.z - chiliBar.z) < 3.6 ? chiliBar : null;
+}
+// the whole cluster is one big loot spot, but the jar that leaves the table is the one
+// nearest your crosshair
+const _jarV = new THREE.Vector3();
+function nearestJarToCrosshair() {
+  let best = -1, bd = Infinity;
+  jellyBar.jars.forEach((j, i) => {
+    if (jellyBar.mask & (1 << i)) return;
+    _jarV.setFromMatrixPosition(j.matrixWorld).project(camera);
+    const d = Math.hypot(_jarV.x, _jarV.y);
+    if (_jarV.z < 1 && d < bd) { bd = d; best = i; }
+  });
+  if (best >= 0) return best;
+  for (let i = 0; i < 6; i++) if (!(jellyBar.mask & (1 << i))) return i;
+  return -1;
+}
+function nearestFreeJar() { for (let i = 0; i < 6; i++) if (!(jellyBar.mask & (1 << i))) return i; return -1; }
+function lootJelly() {
+  if (net.role === 'client') { try { net.conns[0].send({ t: 'jellyReq', jar: nearestJarToCrosshair() }); } catch (e) {} return; }
+  const jar = nearestJarToCrosshair();
+  if (jar < 0) return;
+  applyJellyMask(jellyBar.mask | (1 << jar));
+  jellyBar.lootedBy.add(myLootKey());
+  grantJelly();
+  npcNiceRound();
+}
+function lootChili() {
+  if (net.role === 'client') { try { net.conns[0].send({ t: 'chiliReq' }); } catch (e) {} return; }
+  applyChiliTaken(chiliBar.taken + 1);
+  chiliBar.lootedBy.add(myLootKey());
+  grantChili();
+}
+function grantJelly() {
+  jellyBar.lootedBy.add(myLootKey()); // clients keep their own copy of the once-per-run law
+  equipWeapon('jelly');
+  SFX.pickup(); rumble(120, 0.4, 0.5);
+  toast('GOOD JELLY ACQUIRED .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true);
+  spawnParticles(player.pos.x, player.pos.y + 1.4, player.pos.z, 0xb06fff, 14, 4, 0.8);
+  updateAmmoHUD();
+}
+function grantChili() {
+  chiliBar.lootedBy.add(myLootKey()); // same law, client-side mirror
+  equipWeapon('chili');
+  SFX.pickup(); rumble(120, 0.4, 0.5);
+  toast("RED'S CHILI ACQUIRED .ᐟ RELOAD TO EAT IT .ᐟ", true);
+  spawnParticles(player.pos.x, player.pos.y + 1.4, player.pos.z, 0xff4030, 14, 4, 0.8);
+  updateAmmoHUD();
+}
+// the whole squad's review of grandma's jelly leaving the shelf: every AI cousin fires
+// the Nice emote, each a heartbeat apart
+function npcNiceRound() {
+  if (net.role === 'client') return; // the host owns the squad's voices
+  companions.forEach(c => { if (c.recruited && !c.downed && !c.netP) c.niceT = 0.4 + Math.random() * 0.9; });
+}
+
+// ---------- RED'S CHILI giant mode ----------
+// Eat the bowl (the reload key — RED'S on the touch button) and the chili does what the
+// lore promises: you come up boss-sized for 90 seconds (Blazo, raised on the stuff, holds
+// it 120). Melee only while grown — the swings insta-gib street walkers, a landed jump
+// slams an AOE stomp, a slide bulldozes the crowd — but a boss only ever takes a punch's
+// worth from a giant, and street teeth only find 1hp of giant to chew. The chili clears
+// waves; it never cheeses a boss. That's the balance the table talk is about.
+const GIANT_SCALE = 2.7;
+function playerGiantOn() { return (player.giantScale || 1) > 1.5; }
+function playerGiantAny() { return !!player.giantPhase; } // any phase: eating, grown, shrinking
+function eatChili() {
+  if (player.giantPhase || player.downed || player.dead) return;
+  if (!player.owned.includes('chili')) return;
+  if (player.weapon.id !== 'chili') equipWeapon('chili'); // the bowl comes out for the meal
+  player.giantPhase = 'eat'; player.giantPhT = 0;
+  player.giantDur = selectedCousin === 'blazo' ? 120 : 90;
+  player.giantT = player.giantDur;
+  initAudio(); SFX.crate(); rumble(200, 0.6, 0.6);
+}
+// the grow/shrink melt: the splash screen's blur, borrowed for a body changing size
+function playerFadeBegin() { if (!player._fade) { player._fade = { blob: playerBlob }; beginBlobFade(player._fade); } }
+function playerFadeEnd() { if (player._fade) { endBlobFade(player._fade); player._fade = null; } }
+function updateGiant(dt) {
+  if (player.giantPhase) {
+    player.giantPhT += dt;
+    const ph = player.giantPhase, t = player.giantPhT;
+    if (ph === 'eat') {
+      // still, bowl to the mouth; at the gulp the bowl leaves the hand and the growing starts
+      if (t >= 0.85) {
+        const i = player.owned.indexOf('chili');
+        if (i >= 0) player.owned.splice(i, 1);
+        equipWeapon('fists');
+        player.giantPhase = 'grow'; player.giantPhT = 0;
+        playerFadeBegin();
+      }
+    } else if (ph === 'grow') {
+      const k = Math.min(t / 0.8, 1);
+      player.giantScale = 1 + (GIANT_SCALE - 1) * k;
+      if (player._fade) setBlobFade(player._fade, 0.3 + 0.7 * Math.abs(Math.cos(k * Math.PI)));
+      if (k >= 1) {
+        playerFadeEnd(); player.giantPhase = 'rise'; player.giantPhT = 0;
+        rumble(400, 1, 0.9); shakeAmp = Math.max(shakeAmp, 0.2);
+        toast('BOSS-SIZED .ᐟ', true);
+      }
+    } else if (ph === 'rise') {
+      // the look-around: still, arms down as fists, head sweeping left and right (animated
+      // in updatePlayerVisual off this phase)
+      if (t >= 0.9) { player.giantPhase = 'on'; player.giantPhT = 0; }
+    } else if (ph === 'on') {
+      player.giantT -= dt;
+      if (player.giantT <= 0) { player.giantPhase = 'shrink'; player.giantPhT = 0; playerFadeBegin(); }
+    } else if (ph === 'shrink') {
+      const k = Math.min(t / 0.8, 1);
+      player.giantScale = GIANT_SCALE + (1 - GIANT_SCALE) * k;
+      if (player._fade) setBlobFade(player._fade, 0.3 + 0.7 * Math.abs(Math.cos(k * Math.PI)));
+      if (k >= 1) {
+        playerFadeEnd();
+        player.giantPhase = null; player.giantScale = 1; player.giantT = 0;
+        toast('THE CHILI WEARS OFF . .');
+      }
+    }
+    playerBlob.root.scale.setScalar(player.giantScale || 1);
+  }
+  // giant stomp: landing off a jump slams an AOE ring into everything around the boots
+  const landed = player.grounded && !player._gPrevGrounded && (player._gPrevVy || 0) < -5.5;
+  if (landed && playerGiantOn()) giantStomp();
+  player._gPrevGrounded = player.grounded; player._gPrevVy = player.vy;
+  // giant charge: a slide bulldozes through the crowd, batting walkers off their feet
+  if (playerGiantOn() && player.slideT > 0) giantCharge();
+  updateGiantHud();
+}
+function giantStomp() {
+  spawnParticles(player.pos.x, player.pos.y + 0.4, player.pos.z, 0xffb056, 30, 7, 1);
+  rumble(320, 1, 0.9); shakeAmp = Math.max(shakeAmp, 0.24);
+  play3d(player.pos.x, player.pos.z, () => SFX.crate());
+  for (const z of [...zombies]) {
+    if (z.state === 'dying') continue;
+    const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 6.5) continue;
+    damageZombie(z, z.isBoss ? 6 : 400, dx / (d || 1), dz / (d || 1), 9, { isHead: false });
+  }
+}
+function giantCharge() {
+  for (const z of [...zombies]) {
+    if (z.state === 'dying') continue;
+    const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 3.4) continue;
+    if (game.time - (z._chgT || -9) < 0.8) continue; // one shove per pass, not per frame
+    z._chgT = game.time;
+    damageZombie(z, z.isBoss ? 6 : 300, dx / (d || 1), dz / (d || 1), 14, { isHead: false });
+  }
+}
+// the countdown chip, styled like the kill quota and living just under its spot
+const giantHudEl = document.getElementById('gianttimer');
+const giantHudNum = giantHudEl ? giantHudEl.querySelector('b') : null;
+function updateGiantHud() {
+  const on = playerGiantAny() && player.giantPhase !== 'eat';
+  if (giantHudEl) {
+    giantHudEl.classList.toggle('show', on);
+    giantHudEl.classList.toggle('lower', game.cleanup && game.clearTarget > 0); // quota showing: sit under it
+    if (on && giantHudNum) giantHudNum.textContent = fmtTime(Math.max(player.giantT, 0));
+  }
 }
 
 // ---------- input ----------
@@ -4407,6 +4776,11 @@ function goDown() {
   player.downed = true;
   player.downT = DOWN_BLEED;
   player.hp = 0;
+  // carrying grandma's jelly: the jar breaks itself open — 3 seconds of bleeding purple,
+  // then it stands you back up whole (jellyRevive, run from the downed block)
+  player.jellyT = player.owned.includes('jelly') ? 3 : 0;
+  // giant chili wears off the instant you hit the floor: nobody bleeds out boss-sized
+  if (player.giantPhase) { playerFadeEnd(); player.giantPhase = null; player.giantScale = 1; player.giantT = 0; playerBlob.root.scale.setScalar(1); updateGiantHud(); }
   // everything committed gets dropped — you are not drop-kicking from the floor
   player.slideT = 0; player.hopT = 0; player.swingT = 0;
   player.dropKick = false; player.dropKickHits = null;
@@ -4436,6 +4810,23 @@ function playerGetUp(byRescue, hp) {
   rumble(140, 0.5, 0.6);
   toast(byRescue ? 'BACK ON YOUR FEET .ᐟ' : 'YOU DRAGGED YOURSELF BACK UP .ᐟ');
 }
+// the jar does its work: consumed from the inventory, a FULL-health self revive, the
+// family toast, and your own Nice fired without asking — grandma knew what she had
+function jellyRevive() {
+  const i = player.owned.indexOf('jelly');
+  if (i >= 0) player.owned.splice(i, 1);
+  if (player.weapon.id === 'jelly') equipWeapon('fists');
+  player.downed = false; player.downT = 0; player.jellyT = 0;
+  player.hp = player.maxHp;
+  if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
+  playerBlob.wob.rotation.x = 0;
+  SFX.recruit();
+  rumble(320, 0.9, 0.8);
+  toast('GOOD JELLY .ᐟ', true);
+  fireEmote(2); // 'Nice .ᐟ'
+  spawnParticles(player.pos.x, player.pos.y + 1.2, player.pos.z, 0xb06fff, 26, 5, 1);
+  updateAmmoHUD();
+}
 
 function hurtPlayer(dmg, awayX, awayZ) {
   // already on the floor: being chewed on can't finish you, that's the whole promise of
@@ -4456,7 +4847,8 @@ function hurtPlayer(dmg, awayX, awayZ) {
     spawnBlood(player.pos.x, player.pos.y + 1, player.pos.z, player.stumbleX, player.stumbleZ, 1.4);
     bloodSplat();
   }
-  if (player.hp <= 0 && !player.dead) { if (hasHumanAlly()) goDown(); else die(); }
+  // the GOOD JELLY is a reason to go down instead of die even alone: it stops the rot
+  if (player.hp <= 0 && !player.dead) { if (hasHumanAlly() || player.owned.includes('jelly')) goDown(); else die(); }
 }
 
 function applyCousin(id) {
@@ -4521,8 +4913,14 @@ function cycleWeapon(dir = 1) {
   if (player.reloading > 0) { SFX.reload(); return; }
   let idx = player.owned.indexOf(player.weapon.id);
   if (idx < 0) idx = 0;
-  idx = (idx + dir + player.owned.length) % player.owned.length;
-  const id = player.owned[idx];
+  let id = player.weapon.id;
+  // a giant's hands are melee-only until the shrink lands: the cycle walks the loadout but
+  // skips every gun (and the consumables, which a giant can't use anyway)
+  for (let n = 0; n < player.owned.length; n++) {
+    idx = (idx + dir + player.owned.length) % player.owned.length;
+    const cand = player.owned[idx];
+    if (!playerGiantAny() || (WEAPONS[cand].melee && !WEAPONS[cand].consumable)) { id = cand; break; }
+  }
   if (id === player.weapon.id) return;
   equipWeapon(id);
   SFX.swap(WEAPONS[id]);
@@ -4584,6 +4982,14 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
       blob.head.add(horn);
     }
   }
+  // a boss's shield guard wears the loot glow in its OWN body colour — purple guard glows
+  // purple, red red, green green — so the shield-breakers read at a glance across the block.
+  // goreHorn brutes never glow: they look the part but shield nobody.
+  if ((opts.horns || opts.shield) && !goreHorn) {
+    const gl = makeLootGlow(purple ? 0x9b4dff : red ? 0xd43a3a : 0x39b83a, { r: 0.85, y: 2.1, s: 1.5 });
+    blob.root.add(gl);
+    blob.guardGlow = gl;
+  }
   // 1-in-10 shuffles in already missing an arm, a dried blood glob capping the shoulder
   if (Math.random() < 0.1) {
     const idx = Math.random() < 0.5 ? 0 : 1;
@@ -4613,7 +5019,9 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     // hornWave = a boss's shield guard while alive. opts.horns wears the horns and shields;
     // opts.shield shields WITHOUT horns (the Rotten One's hornless minions are his shield).
     // goreHorn deliberately sets neither — a free walker that never shields a boss.
-    mode, emergeT: 0, hornWave: !!opts.horns || !!opts.shield,
+    // hornVis carries what the head actually WEARS, so clients never sprout horns on a
+    // shield-only guard (the ho stream reads this, not hornWave).
+    mode, emergeT: 0, hornWave: !!opts.horns || !!opts.shield, hornVis: horns,
     farBorn: mode === 'runner', // runners live on a longer leash — they were born out past the fog
     // vertical: feet track a standable top with a step-up + gravity, so a walker climbs
     // in over a graded doorway threshold instead of stalling at the door (see updateZombies)
@@ -4900,6 +5308,9 @@ function ewRender() {
     ewSegs[i].style.left = (c + Math.sin(mid) * r) + 'px';
     ewSegs[i].style.top = (c - Math.cos(mid) * r) + 'px';
     ewSegs[i].classList.toggle('hot', i === sel);
+    // a chili giant keeps the greetings but loses the orders: Trade, Wait and Fight grey
+    // out until the shrink lands (fireEmote refuses them too — the wedge is honest)
+    ewSegs[i].classList.toggle('off', playerGiantAny() && i >= 3);
     a += w(i);
   }
   ewringEl.style.background = `conic-gradient(from ${start}deg, ${stops.join(',')})`;
@@ -4921,7 +5332,8 @@ function spawnBubble(getPos, text, owner) {
   bubbles.push({ el, getPos, owner, t: 0, life: 2.6 });
 }
 function fireEmote(i) {
-  spawnBubble(() => ({ x: player.pos.x, y: player.pos.y + 2.2, z: player.pos.z }), EMOTES[i], player);
+  if (playerGiantAny() && i >= 3) return; // no Trade / Wait / Fight orders from a giant
+  spawnBubble(() => ({ x: player.pos.x, y: player.pos.y + (playerGiantOn() ? 5.2 : 2.2), z: player.pos.z }), EMOTES[i], player);
   SFX.pickup();
   // some emotes double as squad orders for the AI cousins
   const name = EMOTES[i] || '';
@@ -5200,16 +5612,22 @@ const hud = {
 };
 const scopeEl = document.getElementById('scope');
 function updateAmmoHUD() {
-  if (player.weapon.melee) { hud.clip.textContent = '∞'; hud.res.textContent = ''; }
+  if (player.weapon.consumable) { hud.clip.textContent = '1'; hud.res.textContent = ''; }
+  else if (player.weapon.melee) { hud.clip.textContent = '∞'; hud.res.textContent = ''; }
   else {
     hud.clip.textContent = player.clip;
     hud.res.textContent = ' / ' + (reserves[player.weapon.id] | 0);
   }
+  // holding Red's bowl, the reload button becomes RED'S: pressing it is the meal
+  const rb = document.getElementById('btnReload');
+  if (rb) rb.textContent = player.weapon.id === 'chili' ? "RED'S" : 'RELOAD';
 }
 // label on the touch weapon-cycle button
 function updateWeaponBtn() {
   const el = document.getElementById('btnCycle');
-  if (el) el.textContent = player.weapon.melee ? 'FIST' : player.weapon.id.slice(0, 4).toUpperCase();
+  if (el) el.textContent = player.weapon.id === 'jelly' ? 'JELLY'
+    : player.weapon.id === 'chili' ? 'CHILI'
+    : player.weapon.melee ? 'FIST' : player.weapon.id.slice(0, 4).toUpperCase();
 }
 let toastT = 0;
 function toast(txt, long) {
@@ -5243,6 +5661,14 @@ function resetGame() {
   player.downed = false; player.downT = 0; player.dripT = 0;
   if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
   player.slideT = 0; player.hopT = 0;
+  // consumables come back with the world: full jars, full pot, six bowls, nobody fed yet
+  player.jellyT = 0;
+  playerFadeEnd();
+  player.giantPhase = null; player.giantScale = 1; player.giantT = 0;
+  playerBlob.root.scale.setScalar(1);
+  jellyBar.lootedBy.clear(); applyJellyMask(0);
+  chiliBar.lootedBy.clear(); applyChiliTaken(0);
+  updateGiantHud();
   // the hero starts with bare fists plus their own signature melee; recruits keep theirs
   player.owned = ['fists', COUSINS.find(c => c.id === selectedCousin).melee];
   player.owned.sort((a, b) => slotRank(a) - slotRank(b));
@@ -5933,10 +6359,11 @@ function meleeTargets(w) {
   if (!player.grounded && !player.fpv) yaw = playerBlob.root.rotation.y;
   else { getAimDir(_mDir); yaw = Math.atan2(_mDir.x, _mDir.z); }
   const out = [];
+  const reach = w.range * (playerGiantOn() ? 2.3 : 1); // giant arms sweep a giant arc
   for (const z of zombies) {
     if (z.state === 'dying') continue;
     const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
-    if (Math.hypot(dx, dz) >= w.range) continue;
+    if (Math.hypot(dx, dz) >= reach) continue;
     const diff = Math.abs(((Math.atan2(dx, dz) - yaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
     if (diff < 1.15) out.push(z);
   }
@@ -6001,6 +6428,9 @@ function meleeChopHit() {
 function fireWeapon() {
   if (squadCmd.mode === 'lineup') squadCmd.mode = null; // gunfire breaks up the trade line
   const w = player.weapon;
+  // mid-meal you swing nothing; and a giant's trigger fingers are too big for guns anyway
+  if (player.giantPhase === 'eat' || player.giantPhase === 'grow' || player.giantPhase === 'rise') return;
+  if (playerGiantOn() && !w.melee) return;
   getAimDir(_aimDir);
   if (w.melee) {
     // bare fists in the air are a drop kick, not a punch: a committed move you ride down
@@ -6033,11 +6463,15 @@ function fireWeapon() {
       // can be on different beats. Melee ignores the gun damage perks so the numbers stay
       // true for everyone — Blomba's meleeMult is the one sanctioned exception: the
       // bouncer's swings are her whole perk.
-      const base = w.id === 'fists' ? ((hit.punchN = (hit.punchN | 0) + 1) % 2 ? 6 : 7) : w.dmg;
-      const knock = (w.id === 'fists' ? 5.5 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
+      let base = w.id === 'fists' ? ((hit.punchN = (hit.punchN | 0) + 1) % 2 ? 6 : 7) : w.dmg;
+      // a giant's swing insta-gibs a street walker — but a boss only ever feels the punch,
+      // so a grown cousin clears the wave while the small ones keep the real boss DPS
+      if (playerGiantOn() && !hit.isBoss) base = 400;
+      const knock = (w.id === 'fists' ? 5.5 : 3.5) * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5) * (playerGiantOn() ? 1.8 : 1);
       const wasDying = hit.state === 'dying';
       damageZombie(hit, base * player.meleeMult * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
         { weapon: w, dist: d, isHead: false });
+      if (playerGiantOn() && !hit.isBoss && !hit.netGhost && hit.state === 'dying' && !wasDying && !hit.blob.bodyGone) popChest(hit, dx / d, dz / d);
       meleeMoveGib(w, hit, dx / d, dz / d, hop);
       blombaVamp(w, hit, dx / d, dz / d, wasDying);
     }
@@ -6381,6 +6815,7 @@ function findNearNetPlayer() {
   const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
   for (const c of companions) {
     if (!c.netP || !c.netConn || c.downed) continue;
+    if ((c.netGs || 1) > 1.02) continue; // no dealing with (or at) a chili giant
     const dx = c.pos.x - player.pos.x, dz = c.pos.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = { p: c.netP, name: c.data.name }; }
@@ -6484,11 +6919,11 @@ function updateHoldTrades(dt) {
   // everyone who could be trading right now: me (the host) + every player-run cousin, up & alive
   const parts = [];
   const meP = net.playerNum || 1;
-  if (!player.dead && !player.downed)
+  if (!player.dead && !player.downed && !playerGiantAny())  // a giant host signs no pacts
     parts.push({ p: meP, self: true, x: player.pos.x, z: player.pos.z,
       held: !!(input.interactHeld || input.interactHeldPad), data: myCousinData() });
   for (const c of companions)
-    if (c.netP && c.netConn && !c.downed)
+    if (c.netP && c.netConn && !c.downed && (c.netGs || 1) <= 1.02) // nor does a giant client
       parts.push({ p: c.netP, c, x: c.pos.x, z: c.pos.z, held: !!(c.netPose && c.netPose.th), data: c.data });
   // the engagement = the closest in-reach pair with at least one side holding, so the pact can
   // show with the partner greyed the instant you reach out — before they've held back
@@ -6850,7 +7285,7 @@ function cousinDropEmptyGun(c) {
   if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 26) play3d(c.pos.x, c.pos.z, () => SFX.dry());
   const was = c.weapon.name;
   setCompanionWeapon(c, 'fists');
-  toast(`${c.data.name.toUpperCase()} EMPTIED THE ${was.toUpperCase()} — BARE-KNUCKLE NOW`);
+  toast(`${c.data.name.toUpperCase()} EMPTIED THE ${was.toUpperCase()} .ᐟ BARE-KNUCKLE NOW .ᐟ`);
 }
 // a companion opens a crate it walked up to and equips whatever gun it finds
 // every cousin dreams of one specific gun; spare finds flow to whoever still swings melee
@@ -6957,6 +7392,8 @@ function stepFrame(dt) {
     }
     updateCrates(dt);
     updatePickups(dt);
+    updateConsumables(dt); // the jelly + chili glows breathe on every screen
+    updateGiant(dt);       // the chili ritual: eat, grow, reign, shrink
     updateBossFx(dt);
     updateFloodlights(dt);
     updateCrows(dt);
@@ -6997,13 +7434,21 @@ function updatePlayer(dt) {
   // bleeding out: nobody came, so you haul yourself back up rather than drop out
   if (player.downed) {
     player.downT -= dt;
-    if (player.downT <= 0) playerGetUp(false);
+    // the GOOD JELLY working: three seconds bleeding purple, then up whole
+    if (player.jellyT > 0) {
+      player.jellyT -= dt;
+      if (Math.random() < dt * 9) spawnParticles(player.pos.x, player.pos.y + 0.7, player.pos.z, 0x9b4dff, 3, 2.2, 0.5);
+      if (player.jellyT <= 0) jellyRevive();
+    }
+    if (player.downed && player.downT <= 0) playerGetUp(false);
   }
+  // mid-meal (eating, growing, the look-around): rooted to the spot, that's the ritual
+  if (player.giantPhase === 'eat' || player.giantPhase === 'grow' || player.giantPhase === 'rise') { mx = 0; my = 0; }
   const sprinting = (keys['ShiftLeft'] || keys['ShiftRight'] || sprintToggle || input.sprintGamepad) && ml > 0.1 && !player.downed;
   // bare fists keep you light on your feet: 5% quicker stride, 10% springier jumps
   const fists = player.weapon.id === 'fists';
-  // downed you can still move, but only at a drag
-  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73) * (fists ? 1.05 : 1) * (player.downed ? 0.24 : 1);
+  // downed you can still move, but only at a drag; a chili giant covers ground like a boss
+  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73) * (fists ? 1.05 : 1) * (player.downed ? 0.24 : 1) * (playerGiantOn() ? 1.45 : 1);
 
   // camera-relative: forward = away from camera
   const sin = Math.sin(player.camYaw), cos = Math.cos(player.camYaw);
@@ -7135,7 +7580,8 @@ function updatePlayer(dt) {
   }
   input.shootPressed = false;
 
-  if (input.reload) { tryReload(); input.reload = false; }
+  // holding Red's bowl, the reload button IS the meal (RED'S on the touch label)
+  if (input.reload) { if (player.weapon.id === 'chili') eatChili(); else tryReload(); input.reload = false; }
   if (player.reloading > 0) {
     player.reloading -= dt;
     if (player.reloading <= 0) {
@@ -7166,11 +7612,15 @@ function updatePlayer(dt) {
     const dr = Math.hypot(recruitAny.pos.x - player.pos.x, recruitAny.pos.z - player.pos.z);
     if (dc <= dr) { nearRecruit = null; nearNetRecruit = null; } else nearCrate = null;
   }
+  // the consumable stations: the jelly cluster and the chili pot, both one big loot spot
+  const nearJelly = blockLower ? null : findNearJelly();
+  const nearChili = blockLower ? null : findNearChili();
   // AI cousins trade freely on one tap (findNearTrade for the host, netFindNearNpcTrade for a
   // client). A player-run cousin instead lights the "hold to trade" prompt — that swap is gated
   // behind the two-sided consent pact, so no human's kit moves without their held agreement.
+  // A chili giant trades with NOBODY: no skin swaps, no weapon deals, until small again.
   let nearTrade = null, nearNpcTrade = null, nearNetPlayer = null;
-  if (!blockLower && !nearCrate && !nearRecruit && !nearNetRecruit) {
+  if (!blockLower && !nearCrate && !nearRecruit && !nearNetRecruit && !playerGiantAny()) {
     nearTrade = findNearTrade();
     if (!nearTrade && net.role === 'client') nearNpcTrade = netFindNearNpcTrade();
     if (!nearTrade && !nearNpcTrade) nearNetPlayer = net.role === 'client' ? netFindNearPlayerAny()
@@ -7178,12 +7628,14 @@ function updatePlayer(dt) {
   }
   // grandma's ghost outranks everything: at the end of the trek there is nothing else to do
   const nearGrandma = findNearGrandma();
-  const showPrompt = !!(nearGrandma || nearDowned || nearNetDowned || nearCrate || nearRecruit || nearNetRecruit || nearTrade || nearNpcTrade || nearNetPlayer);
+  const showPrompt = !!(nearGrandma || nearDowned || nearNetDowned || nearCrate || nearJelly || nearChili || nearRecruit || nearNetRecruit || nearTrade || nearNpcTrade || nearNetPlayer);
   const bareHand = player.weapon.id === 'fists'; // fists out: the trade on offer is your skin
   hud.prompttxt.textContent = nearGrandma ? 'Remember Grandma Blingo'
     : nearDowned ? 'Pick up ' + nearDowned.data.name
     : nearNetDowned ? `Revive P${nearNetDowned.p} ${nearNetDowned.data.name}`
     : nearCrate ? 'Open Crate'
+    : nearJelly ? 'Take the GOOD JELLY'
+    : nearChili ? "Take RED'S CHILI"
     : nearRecruit ? 'Recruit ' + nearRecruit.data.name
     : nearNetRecruit ? 'Recruit ' + nearNetRecruit.data.name
     : nearTrade ? (bareHand ? `Offer skin to ${nearTrade.data.name}`
@@ -7201,6 +7653,8 @@ function updatePlayer(dt) {
     else if (nearDowned) reviveCousin(nearDowned);
     else if (nearNetDowned) { try { net.conns[0].send({ t: 'reviveReq', p: nearNetDowned.p }); } catch (e) {} }
     else if (nearCrate) openCrate(nearCrate);
+    else if (nearJelly) lootJelly();
+    else if (nearChili) lootChili();
     else if (nearRecruit) recruitCousin(nearRecruit);
     else if (nearNetRecruit) { try { net.conns[0].send({ t: 'recruitReq', c: nearNetRecruit.data.id }); } catch (e) {} }
     else if (nearTrade) tradeWeapons(nearTrade);
@@ -7208,7 +7662,7 @@ function updatePlayer(dt) {
     else if (nearNetPlayer) {
       // no one-sided grab off another human: a tap just names it — HOLDING interact is what
       // reaches out (the hold auto-fires your trade emote and fills the consent pact)
-      toast('HOLD TO TRADE — BOTH PLAYERS HOLD .ᐟ');
+      toast('HOLD TO TRADE .ᐟ BOTH PLAYERS HOLD .ᐟ');
     }
     input.interact = false;
   }
@@ -7389,6 +7843,23 @@ function updatePlayer(dt) {
     b.legs[1].rotation.x = 0.3 - claw * 0.18;
     b.head.rotation.x = -0.55;   // chin up, still looking where you're dragging to
   }
+  // the chili ritual outranks everything above: eating lifts the bowl to the mouth; the
+  // grow + look-around stands dead still, arms down as fists, head sweeping left and right
+  if (player.giantPhase === 'eat') {
+    const k = Math.min(player.giantPhT / 0.5, 1);
+    b.arms[b.gunArm].rotation.x = -0.3 - k * 2.1;   // the bowl rides up to the face
+    b.arms[b.offArm].rotation.x = -0.3 - k * 1.9;   // both hands on the meal
+    b.head.rotation.x = -0.25 * k;                  // tipped back for the gulp
+    b.legs[0].rotation.x = 0; b.legs[1].rotation.x = 0;
+  } else if (player.giantPhase === 'grow' || player.giantPhase === 'rise') {
+    b.arms[0].rotation.x = -0.08; b.arms[1].rotation.x = -0.08; // arms down, fists closed
+    b.legs[0].rotation.x = 0; b.legs[1].rotation.x = 0;
+    const lt = player.giantPhase === 'rise' ? player.giantPhT : 0;
+    b.head.rotation.y = Math.sin(lt * 7) * 0.55;    // the left-and-right survey of the block
+    b.head.rotation.x = 0;
+  } else if (b.head.rotation.y !== 0 && !player.downed) {
+    b.head.rotation.y = 0; // hand the head back to the normal animator once the ritual ends
+  }
 
   updateChunks(player.pos.x, player.pos.z);
 }
@@ -7503,15 +7974,18 @@ function updateCompanions(dt) {
     }
     // steady regen once they've been out of a bite for a few seconds
     if (game.time - (c.lastHurtT || -9) > 5 && c.hp < c.maxHp) c.hp = Math.min(c.maxHp, c.hp + 5 * dt);
-    // seek my formation slot
+    // seek my formation slot. A chili giant gets room: the squad hangs back about twice as
+    // far (nobody walks under those boots), and they get there on their own legs — the
+    // 60m teleport cheat stays off while the giant stands (see below)
+    const gRoom = playerGiantOn() ? 2.1 : 1;
     const i = c.slotIdx || 0, n = c.slotN || 1;
     let tx2, tz2;
     if (still) {
       const lateral = (i - (n - 1) / 2) * 1.7;
-      tx2 = player.pos.x + bkX * 2.3 + rtX * lateral;
-      tz2 = player.pos.z + bkZ * 2.3 + rtZ * lateral;
+      tx2 = player.pos.x + bkX * 2.3 * gRoom + rtX * lateral;
+      tz2 = player.pos.z + bkZ * 2.3 * gRoom + rtZ * lateral;
     } else {
-      tx2 = player.pos.x + bkX * (1.8 + i * 1.5);
+      tx2 = player.pos.x + bkX * (1.8 * gRoom + i * 1.5);
       tz2 = player.pos.z + bkZ * (1.8 + i * 1.5);
     }
     // an emote squad order overrides the slot: trade line, back-to-back huddle, or guard ring
@@ -7579,7 +8053,7 @@ function updateCompanions(dt) {
     // teleport catch-up only when left FAR behind — 60m now, not 30, so a slide-hopping
     // cousin gets to show she can close a real gap on her own legs before the world
     // cheats for her. Never during a Wait: they were told to stay put, and stay they do.
-    if (pd > 60 && cmd !== 'wait') {
+    if (pd > 60 && cmd !== 'wait' && !playerGiantOn()) {
       c.tp = { t: 0, phase: 0 };   // the splash-screen melt, worldside (handled above)
       beginBlobFade(c);
       continue;
@@ -7972,6 +8446,11 @@ function updateZombies(dt) {
     // the smoothed velocity we derive from this (vX/vZ), computed at the bottom of the loop
     const _vpx = z.pos.x, _vpz = z.pos.z;
     updateFlash(b, dt);
+    // a shield guard's glow breathes while it stands and dies with it
+    if (b.guardGlow) {
+      if (z.state === 'dying') b.guardGlow.visible = false;
+      else animateLootGlow(b.guardGlow, game.time + (z.walkPhase || 0));
+    }
     // knockback rides on after the hit, corpses included — walls still stop a body
     if (z.kvx || z.kvz) {
       const [kx2, kz2] = resolveCollision(z.pos.x + z.kvx * dt, z.pos.z + z.kvz * dt, 0.4 * z.scale, b.root.position.y);
@@ -8012,6 +8491,13 @@ function updateZombies(dt) {
         continue;
       }
       if (bossShielded()) pulseBossShield(z, b, dt);   // blink invuln while its guards stand
+      // the shielded boss glows in his own colours; the glow drains off as the last
+      // guard drops, so "he's open" reads from clear across the fight
+      if (b.bossGlow) {
+        const u = b.bossGlow.userData.glow;
+        u.mul = lerp(u.mul, bossShielded() ? 1 : 0, 1 - Math.exp(-4 * dt));
+        animateLootGlow(b.bossGlow, game.time);
+      }
     }
 
     // visible entrances instead of popping into view: clawing out of the dirt...
@@ -8180,17 +8666,22 @@ function updateZombies(dt) {
         z.attackT = z.isBoss ? 1.1 : 0.9;
         // very rarely a walker with both arms still on throws a haymaker instead of a bite:
         // a telegraphed arm-thrust (punchT drives it in the animator) and a harder shove
+        // a street walker gnawing on a chili giant finds 1hp of purchase; a boss bites a
+        // giant exactly as hard as he bites the small you
+        const giantSoak = playerGiantOn() && !z.isBoss;
         if (!z.isBoss && !b.armGone[0] && !b.armGone[1] && Math.random() < 0.05) {
           z.punchT = 0.34;
-          hurtPlayer((8 + Math.random() * 5) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+          hurtPlayer(giantSoak ? 1 : (8 + Math.random() * 5) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
           player.stumbleT = 0.6; // knocked back a step harder than a bite
         } else {
-          hurtPlayer((z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+          hurtPlayer(giantSoak ? 1 : (z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
         }
       } else if (tgtC && !tgtC.downed && (tgtC.y || 0) - b.root.position.y < vReach) {
         const cd = Math.hypot(tgtC.pos.x - z.pos.x, tgtC.pos.z - z.pos.z);
         if (cd < (z.isBoss ? 3.2 : 1.6) && !biteBlocked(z, tgtC.pos.x, (tgtC.y || 0) + 1, tgtC.pos.z)) {
-          z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, (z.isBoss ? 22 : 7 + Math.random() * 5) * (z.biteMult || 1));
+          // a client riding the chili: street teeth find the same 1hp on their giant too
+          const cGiant = (tgtC.netGs || 1) > 1.02 && !z.isBoss;
+          z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, cGiant ? 1 : (z.isBoss ? 22 : 7 + Math.random() * 5) * (z.biteMult || 1));
         }
       }
     }
@@ -8429,6 +8920,7 @@ function spawnBoss() {
   bossState.spawned = true;
   const bx = 0, bz = -37.7;                   // the open ground between the fountain and the bank steps
   const blob = buildBlob({ color: BOSS_PURPLE, zombie: true, scale: 2.7 });
+  attachBossGlow(blob, BOSS_PURPLE);
   for (const s of [-1, 1]) {                  // horns
     const horn = cyl(0.02, 0.15, 0.55, 0x2a1a3a, 6);
     horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
@@ -8464,6 +8956,7 @@ function spawnBoss2() {
   bossState.spawned2 = true;
   const bx = CHURCHYARD.x, bz = CHURCHYARD.z; // the strip between the church side door and the graveyard gate
   const blob = buildBlob({ color: BOSS_CRIMSON, zombie: true, scale: 2.7, hands: CRIMSON_HANDS });
+  attachBossGlow(blob, BOSS_CRIMSON);
   for (const s of [-1, 1]) {                  // the same crown of horns, rust-dark
     const horn = cyl(0.02, 0.15, 0.55, 0x3a1414, 6);
     horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
@@ -8502,6 +8995,7 @@ function spawnBoss3() {
   const bx = LOT.x, bz = LOT.z;
   const scale = 2.7 * BOSS3_BIG;
   const blob = buildBlob({ color: BOSS_INFECTED, zombie: true, scale, hands: INFECTED_HANDS });
+  attachBossGlow(blob, BOSS_INFECTED);
   for (const s of [-1, 1]) {                  // the same crown of horns, sickly dark
     const horn = cyl(0.02, 0.15, 0.55, 0x123a12, 6);
     horn.position.set(0.22 * s, 0.3, 0.02); horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
@@ -8542,6 +9036,7 @@ function spawnBoss4() {
   const bx = 129, bz = -36;                   // the picnic ground, between the statue and the park gate
   const scale = 2.7 * BOSS3_BIG;
   const blob = buildBlob({ color: BOSS_ROTTEN, zombie: true, scale, hands: ROTTEN_HANDS });
+  attachBossGlow(blob, BOSS_ROTTEN);
   addRotGore(blob, { hangEye: true, chestHole: true }); // no horns — the rot is his crown
   blob.root.position.set(bx, groundHeight(bx, bz), bz);
   scene.add(blob.root);
@@ -8599,6 +9094,15 @@ function updateBossState(z) {
   if (z.wavesFired < 1 && taken >= 0.33) fireBossWave(z, 1);
   else if (z.wavesFired < 2 && taken >= 0.50) fireBossWave(z, 2);
   else if (z.wavesFired < 3 && taken >= 0.75) fireBossWave(z, 3);
+}
+// the shielded boss wears the loot glow in his own body colour, dark until his first
+// wave stands a shield up (mul 0), fading back off as the last guard falls
+function attachBossGlow(blob, color) {
+  const gl = makeLootGlow(color, { r: 1.05, y: 1.85, s: 1.6 });
+  gl.userData.glow.mul = 0;
+  gl.visible = false; // dormant bosses never animate: stay dark until the fight wakes
+  blob.root.add(gl);
+  blob.bossGlow = gl;
 }
 // while any horned wave zombie stands, the boss takes no damage at all
 function bossShielded() {
@@ -8846,7 +9350,7 @@ function spawnJellyMarks() {
   // grandma's ghost, mid-celebration in the middle of her stockroom floor. Blingo's blob,
   // Blingo's hands — the family skin stays skin; only the SUIT rainbows (and starts grey)
   const b = buildBlob({ color: 0xff8c42 });
-  b.root.position.set(JELLY.x, jelly.gy, JELLY.z);
+  b.root.position.set(JELLY_G.x, jelly.gy, JELLY_G.z); // beside the long table, jars at her elbow
   scene.add(b.root);
   jelly.skins = [];
   b.root.traverse(o => {
@@ -8864,7 +9368,7 @@ function spawnJellyMarks() {
 // grandma's ghost close enough to remember (the Jelly House prompt)
 function findNearGrandma() {
   if (!jelly.ghost || jelly.awake) return null;
-  return Math.hypot(player.pos.x - JELLY.x, player.pos.z - JELLY.z) < 3.4 ? jelly : null;
+  return Math.hypot(player.pos.x - JELLY_G.x, player.pos.z - JELLY_G.z) < 3.4 ? jelly : null;
 }
 // the moment of remembrance, on whichever screen owns the squad (host / solo). Colours her
 // in, gathers the whole family, starts the long party + the tally.
@@ -8879,7 +9383,7 @@ function grandmaWake() {
   const ring = companions.filter(c => c.recruited);
   ring.forEach((c, i) => {
     const a = (i / Math.max(ring.length, 1)) * TAU + 0.6;
-    const x = JELLY.x + Math.sin(a) * 2.8, z = JELLY.z + Math.cos(a) * 2.8;
+    const x = JELLY_G.x + Math.sin(a) * 2.5, z = JELLY_G.z + Math.cos(a) * 2.5; // ringed round her, clear of the table
     c.pos.x = x; c.pos.z = z; c.y = jelly.gy;
     c.downed = false; c.hp = c.maxHp;
     if (c.beacon) { scene.remove(c.beacon); c.beacon = null; }
@@ -8929,7 +9433,7 @@ function updateJelly(dt) {
   const b = jelly.ghost;
   if (!b) return;
   // --- the rainbow: the splash screen's cousin-morph at 4x, smeared into a blur ---
-  jelly.cyc += dt * 4.5;                       // ~0.22s a cousin — 4x the splash's saunter
+  jelly.cyc += dt * 6.75;                      // ~0.15s a cousin — 6x the splash's saunter: one beat per cousin, six cousins in her blur
   _jelC.set(COUSINS[Math.floor(jelly.cyc) % COUSINS.length].color);
   jelly.col.lerp(_jelC, 1 - Math.exp(-9 * dt));
   if (jelly.awake && jelly.sat < 1) jelly.sat = Math.min(1, jelly.sat + dt / 1.2); // colouring in
@@ -8946,13 +9450,13 @@ function updateJelly(dt) {
   b.arms[1].rotation.x = -2.6 + Math.sin(gt * 8 + Math.PI) * 0.35;
   b.root.rotation.y += dt * 1.1;
   b.wob.scale.y = 1 + Math.sin(gt * 12) * 0.04;
-  placeShadow(b, JELLY.x, JELLY.z, jelly.gy);
+  placeShadow(b, JELLY_G.x, JELLY_G.z, jelly.gy);
   // --- the finale timeline: confetti around her + the tally counting itself up ---
   if (!jelly.awake) return;
   jelly.wakeT += dt;
   if (Math.random() < dt * 5) {
     const a = Math.random() * TAU, r = 1 + Math.random() * 2.5;
-    spawnParticles(JELLY.x + Math.sin(a) * r, jelly.gy + 2 + Math.random() * 2, JELLY.z + Math.cos(a) * r,
+    spawnParticles(JELLY_G.x + Math.sin(a) * r, jelly.gy + 2 + Math.random() * 2, JELLY_G.z + Math.cos(a) * r,
       COUSINS[(Math.random() * COUSINS.length) | 0].color, 8, 4, 0.9);
   }
   if (jelly.statT < 0) return;
@@ -9542,7 +10046,7 @@ function updateCrates(dt) {
     cr.t += dt;
     if (!cr.opened) {
       cr.trim.material.emissiveIntensity = 0.4 + Math.sin(cr.t * 3) * 0.3;
-      cr.glow.material.opacity = 0.5 + Math.sin(cr.t * 3) * 0.25;
+      animateLootGlow(cr.glow, cr.t);
       continue;
     }
     // open lid, then shrink away, then respawn elsewhere
@@ -9610,10 +10114,12 @@ function updateCamera(dt) {
   const fpv = player.fpvT || 0;   // 0 = third-person .. 1 = first-person
   const wz = player.weapon;
   // ---- third-person over-the-shoulder rig: aiming tightens the shoulder & pulls the camera in close ----
+  // a chili giant carries the whole rig up and back with the body, so boss-sized still frames
+  const gs = player.giantScale || 1;
   const rightX = Math.cos(cy), rightZ = -Math.sin(cy);
-  const shoulder = 0.7 * (1 - aimT * 0.35);
+  const shoulder = 0.7 * (1 - aimT * 0.35) * gs;
   const pivotX = player.pos.x + rightX * shoulder;
-  const pivotY = player.pos.y + 1.5;
+  const pivotY = player.pos.y + 1.5 * gs;
   const pivotZ = player.pos.z + rightZ * shoulder;
   // ground-cam flare, settled last frame: as the rig gets shoved into the dirt it also
   // pulls in tight, so the widening lens below reads as a dolly zoom rather than a plain
@@ -9621,7 +10127,7 @@ function updateCamera(dt) {
   // which eases the very shove that drives the flare — keep this gentle or that loop
   // gains enough to breathe.
   const gcPrev = player.groundCamT;
-  const tpDist = camDist * (1 - aimT * 0.5) * (1 - gcPrev * 0.42); // pull in harder as the rig meets the dirt
+  const tpDist = camDist * (1 - aimT * 0.5) * (1 - gcPrev * 0.42) * (1 + (gs - 1) * 0.75); // pull in harder as the rig meets the dirt; ease back for a giant
   const tpX = pivotX + Math.sin(cy) * Math.cos(cp) * tpDist;
   const tpY = pivotY - Math.sin(cp) * tpDist;
   const tpZ = pivotZ + Math.cos(cy) * Math.cos(cp) * tpDist;
@@ -9634,9 +10140,9 @@ function updateCamera(dt) {
   const bobY = Math.sin(player.walkPhase * 2) * 0.014 * bob;
   const bobX = Math.sin(player.walkPhase) * 0.011 * bob;
   const fwdX = -Math.sin(cy) * Math.cos(cp), fwdY = Math.sin(cp), fwdZ = -Math.cos(cy) * Math.cos(cp);
-  const eyeX = player.pos.x + fwdX * 0.16 + rightX * bobX;
-  const eyeY = player.pos.y + 1.52 + fwdY * 0.16 + bobY;
-  const eyeZ = player.pos.z + fwdZ * 0.16 + rightZ * bobX;
+  const eyeX = player.pos.x + fwdX * 0.16 * gs + rightX * bobX;
+  const eyeY = player.pos.y + 1.52 * gs + fwdY * 0.16 * gs + bobY;
+  const eyeZ = player.pos.z + fwdZ * 0.16 * gs + rightZ * bobX;
   // ---- blend the two rigs by the view toggle ----
   const tX = lerp(tpX, eyeX, fpv), tY = lerp(tpY, eyeY, fpv), tZ = lerp(tpZ, eyeZ, fpv);
   const k = 1 - Math.exp(-14 * dt);
@@ -10077,6 +10583,7 @@ function wireHostConn(conn) {
       const c = cousinByConn(conn);
       if (c) {
         c.netPose = m; c.hp = m.hp;
+        c.netGs = m.gs || 1; // their chili-giant scale rides the pose stream
         // a player-controlled cousin owns its own downed state (hurtCompanion bails out
         // for them), so mirror it here and run their rescue beacon from it
         const dn = !!m.dn;
@@ -10112,7 +10619,29 @@ function wireHostConn(conn) {
       // a client reached grandma first: the finale is anyone's to start — the host just
       // checks they're really standing in her stockroom before the family gathers
       const gc = cousinByConn(conn);
-      if (gc && jelly.ghost && !jelly.awake && Math.hypot(gc.pos.x - JELLY.x, gc.pos.z - JELLY.z) < 4.5) grandmaWake();
+      if (gc && jelly.ghost && !jelly.awake && Math.hypot(gc.pos.x - JELLY_G.x, gc.pos.z - JELLY_G.z) < 4.5) grandmaWake();
+    } else if (m.t === 'jellyReq') {
+      // a client at the jelly table: one jar a cousin for the whole run — the host holds
+      // the ledger, hides the jar their crosshair chose, and the snapshot carries it out
+      const jc = cousinByConn(conn);
+      const key = jc ? 'p' + jc.netP : '';
+      if (jc && jellyLeft() > 0 && !jellyBar.lootedBy.has(key)
+          && Math.hypot(jc.pos.x - jellyBar.x, jc.pos.z - jellyBar.z) < 5.2) {
+        const jar = (m.jar >= 0 && m.jar < 6 && !(jellyBar.mask & (1 << m.jar))) ? m.jar : nearestFreeJar();
+        applyJellyMask(jellyBar.mask | (1 << jar));
+        jellyBar.lootedBy.add(key);
+        try { conn.send({ t: 'jellyGive' }); } catch (e) {}
+        npcNiceRound();
+      }
+    } else if (m.t === 'chiliReq') {
+      const cc = cousinByConn(conn);
+      const key = cc ? 'p' + cc.netP : '';
+      if (cc && chiliBar.taken < 6 && !chiliBar.lootedBy.has(key)
+          && Math.hypot(cc.pos.x - chiliBar.x, cc.pos.z - chiliBar.z) < 5) {
+        applyChiliTaken(chiliBar.taken + 1);
+        chiliBar.lootedBy.add(key);
+        try { conn.send({ t: 'chiliGive' }); } catch (e) {}
+      }
     } else if (m.t === 'cswapKit') {
       // the reply half of a bare-skin trade: this player's old kit, bound for their partner
       const c = cousinByConn(conn);
@@ -10224,7 +10753,7 @@ function netHostTick(dt) {
   // client renders the same full x/y aim the owning screen sees
   const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
     playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed,
-    playerBlob.arms[playerBlob.gunArm].rotation.x)];
+    playerBlob.arms[playerBlob.gunArm].rotation.x, player.giantScale || 1)];
   // the remaining cousins still waiting to be found: streamed so every client sees the same
   // recruit beacons the host does and can walk one up themselves (netFindNearRecruit)
   const rc = [];
@@ -10235,7 +10764,7 @@ function netHostTick(dt) {
   for (const c of companions) {
     if (!c.recruited) continue;
     ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed,
-      c.blob.arms[c.blob.gunArm].rotation.x));
+      c.blob.arms[c.blob.gunArm].rotation.x, c.netGs || 1));
   }
   const zb = [];
   const shielded = bossShielded();   // its wave guards are up: the boss is invuln right now
@@ -10244,10 +10773,11 @@ function netHostTick(dt) {
     zb.push({ i: z.nid, x: R(z.pos.x), z: R(z.pos.z), yw: R(z.yaw || 0),
       st: z.state === 'dying' ? 1 : (z.state === 'sleep' || z.state === 'emerge' || z.state === 'corpse' ? 2 : 0),
       sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, gr: z.green ? 1 : 0, gh: z.goreHorn ? 1 : 0,
-      ho: (z.hornWave || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0, b3: z.isBoss3 ? 1 : 0,
+      ho: (z.hornVis || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0, b3: z.isBoss3 ? 1 : 0,
       b4: z.isBoss4 ? 1 : 0,              // the Rotten One → clients dress him rotten too
       he: z.rotE ? 1 : 0, rb: z.rotR ? 1 : 0, pb: z.rotB ? 1 : 0, // the rot variants ride the wire
       sh: (z.isBoss && shielded) ? 1 : 0, // boss invuln flag → clients blink it the same
+      gd: (z.hornWave && !z.goreHorn) ? 1 : 0, // shield guard → clients dress the tell-tale glow
       dp: z.diedPop ? 1 : 0 });           // this death popped the head (gib/headshot) → clients burst it too
   }
   const boss = bossState.boss;
@@ -10255,15 +10785,17 @@ function netHostTick(dt) {
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
     b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), b4: !!(boss && boss.isBoss4), // which one is up: clients dress the bar in his colours
     ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
+    cjm: jellyBar.mask, cct: chiliBar.taken, // the consumable shelves, so every screen shows the same jars + bowls left
     zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 }); // host's spawn dials + gore-horde, mirrored on every client
 }
-function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar) {
+function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs) {
   const R = v => Math.round(v * 20) / 20;
   const key = p ? 'p' + p : 'ai' + cid;
   const mv = Math.hypot(x - (net['_lx' + key] || x), z - (net['_lz' + key] || z)) > 0.03 ? 1 : 0;
   net['_lx' + key] = x; net['_lz' + key] = z;
   return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv,
-    ar: ar == null ? undefined : Math.round(ar * 100) / 100 }; // gun-arm angle, finer grain than position
+    ar: ar == null ? undefined : Math.round(ar * 100) / 100, // gun-arm angle, finer grain than position
+    gs: gs && gs > 1.02 ? Math.round(gs * 20) / 20 : undefined }; // chili-giant scale: absent = small
 }
 
 // --- reconnect: a client that drops (phone sleeps, tunnel blinks) soft-pauses and dials
@@ -10472,6 +11004,10 @@ function netClientData(m, conn, peer, code) {
     toast('THE ROTTEN ONE FALLS .ᐟ', true);
     setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
     setTimeout(() => toast('AHA, TO THE OLD JELLY HOUSE .ᐟ', true), 7400);
+  } else if (m.t === 'jellyGive') {
+    grantJelly();   // the host honoured our jar: it lands in the hand
+  } else if (m.t === 'chiliGive') {
+    grantChili();   // the host ladled our serving: bowl in hand, RED'S on the button
   } else if (m.t === 'finale') {
     // grandma remembered: step into the ring spot the host set for us and join the party
     player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
@@ -10523,6 +11059,9 @@ function netApplySnapshot(m) {
   if (m.bb >= 0) { dressBossBar({ isBoss2: !!m.b2, isBoss3: !!m.b3, isBoss4: !!m.b4 }); bossHpEl.style.width = m.bb * 100 + '%'; }
   // mirror the host's cleanup quota so the REMAIN readout ticks on every screen
   game.cleanup = (m.ct || 0) > 0; game.clearTarget = m.ct || 0; game.quotaN = m.cq || 0;
+  // and the consumable shelves: same jars gone, same bowls left, on every screen
+  if (m.cjm !== undefined && m.cjm !== net._cjm) { net._cjm = m.cjm; applyJellyMask(m.cjm); }
+  if (m.cct !== undefined && m.cct !== net._cct) { net._cct = m.cct; applyChiliTaken(m.cct); }
   updateQuotaHud();
   applyHostNotches(m.zs, m.ls, m.hg); // and the host's spawn dials + gore-horde, in case a change slipped past
   const seenA = new Set();
@@ -10560,6 +11099,7 @@ function netApplySnapshot(m) {
     // so joining mid-rescue doesn't announce an old fall)
     if (a.p && a.dn && g.dn === 0) toast(`P${a.p} ${g.data.name.toUpperCase()} DOWN .ᐟ`, true);
     g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar;
+    g.tgs = a.gs || 1; // chili-giant scale target: the ghost grows/shrinks toward it with the melt blur
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
   updatePauseLobby();   // the slots readout follows the actor list live, even mid-pause
@@ -10605,6 +11145,10 @@ function netApplySnapshot(m) {
       }
       if (zs.b4) addRotGore(blob, { hangEye: true, chestHole: true }); // boss always hangs left
       else if (zs.he || zs.rb || zs.pb) addRotGore(blob, { hangEye: !!zs.he, ribs: !!zs.rb, belly: !!zs.pb, eyeSide: Math.random() < 0.5 ? 1 : -1 });
+      // the tell-tale glows travel: a boss ghost carries his shield glow, a guard ghost
+      // its own body-colour glow — the same reads the host sees, on every client screen
+      if (zs.bo) attachBossGlow(blob, color);
+      else if (zs.gd) { const gl = makeLootGlow(color, { r: 0.85, y: 2.1, s: 1.5 }); blob.root.add(gl); blob.guardGlow = gl; }
       scene.add(blob.root);
       g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2, isBoss3: !!zs.b3, isBoss4: !!zs.b4,
         state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false,
@@ -10672,18 +11216,37 @@ function netClientWorldTick(dt) {
       b.legs[0].rotation.x = 0.3 + claw * 0.18;
       b.legs[1].rotation.x = 0.3 - claw * 0.18;
     } else b.wob.rotation.x = 0;
+    // chili giants on other screens: ease the ghost toward the streamed scale, wearing the
+    // splash-melt blur while the size is actually changing (grow AND the shrink back)
+    const gsNow = b.root.scale.x, gsTgt = g.tgs || 1;
+    if (Math.abs(gsNow - gsTgt) > 0.03) {
+      if (!g.tpMats) beginBlobFade(g);
+      const ns = lerp(gsNow, gsTgt, 1 - Math.exp(-6 * dt));
+      b.root.scale.setScalar(ns);
+      setBlobFade(g, 0.35 + 0.65 * Math.abs(ns - (gsNow < gsTgt ? 1 : GIANT_SCALE)) / (GIANT_SCALE - 1));
+    } else if (g.tpMats && !g.dn) { endBlobFade(g); b.root.scale.setScalar(gsTgt); }
     placeShadow(b, b.root.position.x, b.root.position.z, b.root.position.y);
     updateFlash(b, dt);
   }
   for (const [nid, g] of net.ghosts) {
     const b = g.blob;
     if (g.state === 'dying') {
+      if (b.guardGlow) b.guardGlow.visible = false;   // a dead guard's glow dies with it
+      if (b.bossGlow) b.bossGlow.visible = false;
       g.deadT += dt;
       b.root.rotation.x = Math.min(g.deadT * 4, Math.PI / 2);
       if (g.deadT > 1.2) b.root.position.y -= dt * 0.8;
       placeShadow(b, g.pos.x, g.pos.z);
       if (g.deadT > 2.4) netRemoveGhost(nid);
       continue;
+    }
+    // the shield tells, client-side: guards breathe their body-colour glow; the boss's own
+    // fades in with his shield (streamed sh flag) and drains off when the last guard drops
+    if (b.guardGlow) animateLootGlow(b.guardGlow, game.time + (g.walkPhase || 0));
+    if (b.bossGlow) {
+      const u = b.bossGlow.userData.glow;
+      u.mul = lerp(u.mul, g.sh ? 1 : 0, 1 - Math.exp(-4 * dt));
+      animateLootGlow(b.bossGlow, game.time);
     }
     g.pos.x = lerp(g.pos.x, g.tx ?? g.pos.x, k);
     g.pos.z = lerp(g.pos.z, g.tz ?? g.pos.z, k);
@@ -10739,7 +11302,7 @@ function netClientTick(dt) {
   // fills once they answer (the host streams that back as tradeP), so until it does
   // this names the offer and lets it pitch itself
   let skinOffer = false;
-  if ((input.interactHeld || input.interactHeldPad) && !player.dead && !player.downed && player.weapon.id === 'fists') {
+  if ((input.interactHeld || input.interactHeldPad) && !player.dead && !player.downed && player.weapon.id === 'fists' && !playerGiantAny()) {
     for (const [, g] of net.actors) {
       if (!g.p || g.dn || !g.wp || g.wp === 'fists') continue;
       if (Math.hypot(g.blob.root.position.x - player.pos.x, g.blob.root.position.z - player.pos.z) < 3.2) { skinOffer = true; break; }
@@ -10753,7 +11316,7 @@ function netClientTick(dt) {
     net._px = player.pos.x; net._pz = player.pos.z;
     // holding interact near another player streams the trade-hold handshake flag
     let th = 0;
-    if ((input.interactHeld || input.interactHeldPad) && !player.dead) {
+    if ((input.interactHeld || input.interactHeldPad) && !player.dead && !playerGiantAny()) {
       for (const [, g] of net.actors) {
         if (!g.p || g.dn) continue;
         if (Math.hypot(g.blob.root.position.x - player.pos.x, g.blob.root.position.z - player.pos.z) < TRADE_RANGE) { th = 1; break; }
@@ -10769,6 +11332,7 @@ function netClientTick(dt) {
         // the gun arm's actual angle — full vertical aim, kick included — so every other
         // screen sees this hero pointing exactly where they point
         ar: Math.round(playerBlob.arms[playerBlob.gunArm].rotation.x * 100) / 100,
+        gs: (player.giantScale || 1) > 1.02 ? Math.round(player.giantScale * 20) / 20 : undefined,
         dn: player.downed ? 1 : 0 });
     } catch (e) {}
   }
@@ -10803,6 +11367,7 @@ function netFindNearPlayerAny() {
   const fx = -Math.sin(player.camYaw), fz = -Math.cos(player.camYaw);
   for (const [, g] of net.actors) {
     if (!g.p || g.dn) continue;
+    if ((g.tgs || 1) > 1.02) continue; // no dealing with (or at) a chili giant
     const dx = g.blob.root.position.x - player.pos.x, dz = g.blob.root.position.z - player.pos.z;
     const d = Math.hypot(dx, dz);
     if (d < bestD && (dx * fx + dz * fz) / Math.max(d, 0.001) > 0.5) { bestD = d; best = { p: g.p, name: g.data.name }; }
@@ -10930,6 +11495,15 @@ function netPoseCompanion(c, dt) {
     b.legs[1].rotation.x = 0.3 - claw * 0.18;
     if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
   } else if (b.wob.rotation.x) b.wob.rotation.x = 0;
+  // a client that ate the chili: the host's view of them grows/shrinks through the same
+  // melt blur, driven off the gs field riding their pose stream
+  const cgNow = b.root.scale.x, cgTgt = c.netGs || 1;
+  if (Math.abs(cgNow - cgTgt) > 0.03) {
+    if (!c.tpMats) beginBlobFade(c);
+    const ns = lerp(cgNow, cgTgt, 1 - Math.exp(-6 * dt));
+    b.root.scale.setScalar(ns);
+    setBlobFade(c, 0.35 + 0.65 * Math.abs(ns - (cgNow < cgTgt ? 1 : GIANT_SCALE)) / (GIANT_SCALE - 1));
+  } else if (c.tpMats && !c.tp && !c.downed) { endBlobFade(c); b.root.scale.setScalar(cgTgt); }
   placeShadow(b, c.pos.x, c.pos.z, c.y);
   updateFlash(b, dt);
 }
@@ -10968,6 +11542,7 @@ window.__dbg = {
   fire: () => fireWeapon(),
   hurt: (dmg, ax, az) => hurtPlayer(dmg, ax, az),
   toggleFPV, bossState, spawnBoss, spawnBoss2, spawnBoss3, spawnBoss4, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
+  jellyBar, chiliBar, lootJelly, lootChili, grantJelly, grantChili, eatChili, jellyRevive, goDown, hurtPlayer, JELLY, JELLY_G, jelly,
   // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad
   // out, drop everyone at the picnic ground and stand the Rotten One up for the fight + trek
   rotten: (recruit = true) => {
