@@ -111,6 +111,88 @@ const TOWN_RECTS = [
   [103, -140, 141, -104], // the Blob Lounge grounds, far down the side road the other way
   [105, 160, 143, 196], // grandma's Jelly House grounds — far past the church, the farthest landmark out, clear east of the x=100 road
 ];
+// ---------- the prestige map remix ----------
+// First campaigns play the hardcoded town above. Run 2+ (new game plus) re-deals the five
+// OUTER landmark blocks — church+graveyard, jelly park, Red's Chili, Blob Lounge, Jelly
+// House — onto fresh anchors every run: a mystery layout with the same flow, spaced a
+// little wider than the classic map. The heart of town (main street, shops, bank +
+// fountain, hall, courthouse, plaza) never moves. Landmarks never land on a road or a
+// core block (layoutRectFits), and the Jelly House stays the farthest light out.
+const LAYOUT = { chili: { x: 117, z: 56 }, lounge: { x: 122, z: -121 } }; // live anchors the builders read
+const TOWN_BOUND = { x0: -50, x1: 160, z0: -145, z1: 205 }; // collider net, recomputed per layout
+const LM_EXT = { church: [23, 13], park: [17, 14], chili: [10, 9], lounge: [19, 18], jelly: [19, 18] };
+function defaultLayout() { return { church: [25, 81], park: [129, -42], chili: [117, 56], lounge: [122, -121], jelly: [124, 178] }; }
+let currentLayout = ''; // JSON of what's built, so an unchanged layout never rebuilds
+function layoutRectFits(x, z, hw, hd) {
+  // roads thread BETWEEN landmarks, never under one: both lattices must clear the block
+  const nv = Math.round((x + 20) / 120) * 120 - 20;   // nearest vertical road line
+  const dv = nv < x - hw ? (x - hw) - nv : nv > x + hw ? nv - (x + hw) : 0;
+  if (dv < 8.9) return false;
+  const nh = Math.round((z + 17) / 120) * 120 - 17;   // nearest horizontal road line
+  const dh = nh < z - hd ? (z - hd) - nh : nh > z + hd ? nh - (z + hd) : 0;
+  if (dh < 8.9) return false;
+  // and clear of the town's fixed heart (the first four rects) with breathing room
+  for (let i = 0; i < 4; i++) {
+    const r = TOWN_RECTS[i];
+    if (x + hw > r[0] - 6 && x - hw < r[2] + 6 && z + hd > r[1] - 6 && z - hd < r[3] + 6) return false;
+  }
+  return true;
+}
+function randomLayout() {
+  const C = { x: 45, z: -17 }; // the fixed heart the blocks deal out around
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const L = {}, placed = [];
+    let ok = true;
+    // the four mid landmarks ring the heart a touch wider than the classic map;
+    // the Jelly House deals onto its own far ring so the trek stays the epilogue
+    for (const [key, r0, r1] of [['church', 80, 150], ['park', 80, 150], ['chili', 80, 150], ['lounge', 90, 165], ['jelly', 190, 235]]) {
+      const [hw, hd] = LM_EXT[key];
+      let hit = null;
+      for (let t = 0; t < 240 && !hit; t++) {
+        const a = Math.random() * TAU, d = r0 + Math.random() * (r1 - r0);
+        const x = Math.round(C.x + Math.sin(a) * d), z = Math.round(C.z + Math.cos(a) * d);
+        if (!layoutRectFits(x, z, hw, hd)) continue;
+        if (placed.some(p => Math.hypot(p[0] - x, p[1] - z) < 95)) continue; // wider spacing than run one
+        hit = [x, z];
+      }
+      if (!hit) { ok = false; break; }
+      L[key] = hit; placed.push(hit);
+    }
+    if (ok) return L;
+  }
+  return defaultLayout(); // the dice never landed: the map keeps its classic bones
+}
+function setRect(r, x0, z0, x1, z1) { r[0] = x0; r[1] = z0; r[2] = x1; r[3] = z1; }
+// point every anchor in the game at the dealt layout: build positions, boss arenas,
+// cousin doorsteps, spawn-suppression rects and the collider net all move together
+function applyLayout(L) {
+  currentLayout = JSON.stringify(L);
+  const [chx, chz] = L.church;
+  CHURCH.x = chx; CHURCH.z = chz;
+  GRAVEYARD.x0 = chx + 15; GRAVEYARD.z0 = chz - 11; GRAVEYARD.x1 = chx + 33; GRAVEYARD.z1 = chz + 11;
+  CHURCHYARD.x = chx + 10; CHURCHYARD.z = chz;
+  setRect(TOWN_RECTS[4], chx - 9, chz - 13, chx + 37, chz + 13);
+  const [px, pz] = L.park;
+  PARK.x0 = px - 17; PARK.z0 = pz - 14; PARK.x1 = px + 17; PARK.z1 = pz + 14;
+  setRect(TOWN_RECTS[5], px - 17, pz - 14, px + 17, pz + 14);
+  const [cx, cz] = L.chili;
+  LAYOUT.chili.x = cx; LAYOUT.chili.z = cz;
+  setRect(TOWN_RECTS[6], cx - 9, cz - 8, cx + 11, cz + 10);
+  const [lx, lz] = L.lounge;
+  LAYOUT.lounge.x = lx; LAYOUT.lounge.z = lz;
+  setRect(TOWN_RECTS[7], lx - 19, lz - 19, lx + 19, lz + 17);
+  const [jx, jz] = L.jelly;
+  JELLY.x = jx; JELLY.z = jz; JELLY_G.x = jx; JELLY_G.z = jz + 4.2;
+  setRect(TOWN_RECTS[8], jx - 19, jz - 18, jx + 19, jz + 18);
+  // the cousins wait where their story says — wherever that story moved to this run
+  COUSIN_HOMES.blingo = [px, pz + 4.5];
+  COUSIN_HOMES.blazo = [cx + 2.5, cz + 5];
+  COUSIN_HOMES.blomba = [lx, lz + 10.5];
+  // stretch the town-collider net over whatever the deal spans
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+  for (const r of TOWN_RECTS) { x0 = Math.min(x0, r[0]); z0 = Math.min(z0, r[1]); x1 = Math.max(x1, r[2]); z1 = Math.max(z1, r[3]); }
+  TOWN_BOUND.x0 = x0 - 20; TOWN_BOUND.z0 = z0 - 20; TOWN_BOUND.x1 = x1 + 20; TOWN_BOUND.z1 = z1 + 20;
+}
 // The park keeps its perimeter sacred: no zombie ever spawns on it (they may still
 // wander in chasing you, which is exactly the picnic-crashing the plaque deserves).
 const PARK = { x0: 112, z0: -56, x1: 146, z1: -28 };
@@ -222,20 +304,23 @@ const glowTex = canvasTex(64, 64, ctx => {
 // of light riding above the top centre of whatever it marks. Crates wear it gold, the jelly
 // table purple, the chili pot red — and boss-wave guards wear it in their own body colour
 // so the shield-breakers read at a glance (the shielded boss glows his too, till they fall).
-function makeLootGlow(color, { r = 1, y = 0.9, s = 1.6 } = {}) {
+function makeLootGlow(color, { r = 1, y = 0.9, s = 1.6, dark = false } = {}) {
+  // dark = the black-ops read: a REAL shadow on the ground (normal-blended black) instead of
+  // an additive glow (which can never darken), with a smoky charcoal ring + orb over it
   const g = new THREE.Group();
+  const blend = dark ? THREE.NormalBlending : THREE.AdditiveBlending;
   const pool = new THREE.Mesh(new THREE.PlaneGeometry(r * 2.7, r * 2.7),
-    new THREE.MeshBasicMaterial({ map: glowTex, color, transparent: true, opacity: 0.45,
-      blending: THREE.AdditiveBlending, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ map: glowTex, color: dark ? 0x000000 : color, transparent: true, opacity: 0.45,
+      blending: blend, depthWrite: false }));
   pool.rotation.x = -Math.PI / 2; pool.position.y = 0.045; pool.renderOrder = 2;
   g.add(pool);
   const ring = new THREE.Mesh(new THREE.RingGeometry(r * 0.8, r, 28),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5,
-      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
+    new THREE.MeshBasicMaterial({ color: dark ? 0x0a0a0e : color, transparent: true, opacity: 0.5,
+      blending: blend, side: THREE.DoubleSide, depthWrite: false }));
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.07; ring.renderOrder = 2;
   g.add(ring);
-  const orb = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color, transparent: true,
-    opacity: 0.8, depthWrite: false }));
+  const orb = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: dark ? 0x2a2a34 : color, transparent: true,
+    opacity: 0.8, blending: dark ? THREE.NormalBlending : THREE.AdditiveBlending, depthWrite: false }));
   orb.scale.setScalar(s);
   orb.position.y = y;
   g.add(orb);
@@ -1048,24 +1133,21 @@ function buildGunMesh(id) {
     const stock = box(0.08, 0.12, 0.28, c); stock.position.set(0, 0.02, 0.24); g.add(stock); // stock lengthened a touch
     // longer barrel tube off the front end — the round leaves ITS tip now (muzzle anchor below)
     const barrel = cyl(0.03, 0.033, 0.4, 0x2a2c30); barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.06, -0.76); g.add(barrel);
-    // the front sight: one plate straddling the barrel like the letter ň — straight outer
-    // sides, a flush semicircular cutout riding the tube with ZERO gap (the arc matches
-    // the tube's radius and bites a hair into it, so nothing ever shows daylight around
-    // the join), and the little V notched from the top-centre to aim through
-    const BR = 0.0305;              // the tube's radius where the plate sits
+    // the front sight: a SLIM tab rising off the tube — its sides run exactly as wide as
+    // the tube itself (no overhang past the barrel at all), the bottom is the flush arch
+    // hugging the tube's upper half with zero gap, and the little V is notched from the
+    // top-centre to aim through. The whole piece reads as welded straight onto the metal.
+    const BR = 0.0305;              // the tube's radius where the plate sits = the tab's half-width
     const sShape = new THREE.Shape();
-    sShape.moveTo(-0.045, -0.026);  // left leg foot (outer)
-    sShape.lineTo(-0.045, 0.05);    // up the left outer edge
+    sShape.moveTo(-BR, 0);          // left side meets the tube at its equator
+    sShape.lineTo(-BR, 0.05);       // straight up the left side, tube-wide exactly
     sShape.lineTo(-0.008, 0.05);    // across the top to the divot
     sShape.lineTo(0, 0.036);        // down into the little V
     sShape.lineTo(0.008, 0.05);     // back up out of it
-    sShape.lineTo(0.045, 0.05);     // across to the right outer top
-    sShape.lineTo(0.045, -0.026);   // down the right outer edge
-    sShape.lineTo(BR, -0.026);      // in under the right leg
-    sShape.lineTo(BR, 0);           // up the inner edge to the tube's waistline
-    sShape.absarc(0, 0, BR, 0, Math.PI, false); // the flush arch, curved to the tube itself
-    sShape.lineTo(-BR, -0.026);     // down the inner left edge
-    sShape.closePath();             // back along the left leg's foot
+    sShape.lineTo(BR, 0.05);        // across to the right edge
+    sShape.lineTo(BR, 0);           // straight down to the tube's equator
+    sShape.absarc(0, 0, BR, 0, Math.PI, false); // the flush arch back over the tube — closes the outline
+    sShape.closePath();
     const sGeo = new THREE.ExtrudeGeometry(sShape, { depth: 0.02, bevelEnabled: false });
     sGeo.translate(0, 0, -0.01);
     const sight = new THREE.Mesh(sGeo, mat(0x101216));
@@ -2339,28 +2421,31 @@ function updateChunks(px, pz) {
     if (!chunks.has(key)) chunks.set(key, buildChunk(ccx + dx, ccz + dz));
   }
   for (const [key, ch] of chunks) {
-    if (Math.abs(ch.cx - ccx) > R + 1 || Math.abs(ch.cz - ccz) > R + 1) {
-      scene.remove(ch.group);
-      ch.group.traverse(o => {
-        if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose();
-        if (o.material && o.material.userData.owned) o.material.dispose(); // per-house shell clones
-      });
-      // drop any half-faded slab of this chunk before its materials go
-      if (ch.buildings) for (const bld of ch.buildings) for (const s of bld.shell) peeking.delete(s);
-      for (const cr of ch.crates) {
-        const i = allCrates.indexOf(cr);
-        if (i >= 0) allCrates.splice(i, 1);
-      }
-      // the flat pads leave with their houses, or the terrain here would stay ironed
-      // forever for a building that no longer exists
-      if (ch.pads) for (const p of ch.pads) {
-        const i = flatPads.indexOf(p);
-        if (i >= 0) flatPads.splice(i, 1);
-      }
-      chunks.delete(key);
-    }
+    if (Math.abs(ch.cx - ccx) > R + 1 || Math.abs(ch.cz - ccz) > R + 1) unloadChunk(key, ch);
   }
   updateClipmap(px, pz);
+}
+// tear one streamed chunk all the way down — shared by the distance cull above and the
+// prestige rebuild (which flushes EVERY chunk so the terrain re-irons to the new rects)
+function unloadChunk(key, ch) {
+  scene.remove(ch.group);
+  ch.group.traverse(o => {
+    if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose();
+    if (o.material && o.material.userData.owned) o.material.dispose(); // per-house shell clones
+  });
+  // drop any half-faded slab of this chunk before its materials go
+  if (ch.buildings) for (const bld of ch.buildings) for (const s of bld.shell) peeking.delete(s);
+  for (const cr of ch.crates) {
+    const i = allCrates.indexOf(cr);
+    if (i >= 0) allCrates.splice(i, 1);
+  }
+  // the flat pads leave with their houses, or the terrain here would stay ironed
+  // forever for a building that no longer exists
+  if (ch.pads) for (const p of ch.pads) {
+    const i = flatPads.indexOf(p);
+    if (i >= 0) flatPads.splice(i, 1);
+  }
+  chunks.delete(key);
 }
 function nearbyColliders(x, z) {
   const out = [];
@@ -2369,9 +2454,9 @@ function nearbyColliders(x, z) {
     const ch = chunks.get(chunkKey(ccx + dx, ccz + dz));
     if (ch) out.push(...ch.colliders);
   }
-  // box covers the whole permanent build now: town core, park, chili corner, Blob Lounge,
-  // and the Jelly House way out past the church
-  if (x > -50 && x < 160 && z > -145 && z < 205) out.push(...townColliders);
+  // box covers the whole permanent build — recomputed per layout, since a prestige remix
+  // can deal the landmark blocks anywhere around the heart of town
+  if (x > TOWN_BOUND.x0 && x < TOWN_BOUND.x1 && z > TOWN_BOUND.z0 && z < TOWN_BOUND.z1) out.push(...townColliders);
   return out;
 }
 function resolveCollision(x, z, r, y) {
@@ -2514,6 +2599,36 @@ function rayGround(ox, oy, oz, dx, dy, dz, maxT) {
 // ---------- town (built once, persistent) ----------
 const townGroup = new THREE.Group();
 const townCrates = [];
+const townPads = []; // the poured east-side pads, so a prestige rebuild can lift them back out
+// ---------- the prestige rebuild ----------
+// Tear the standing town down to bare ground and raise it again on the freshly dealt
+// anchors (applyLayout must run FIRST), then flush every streamed chunk so the terrain
+// re-irons itself to the new rects. The heart of town rebuilds identically (same seed);
+// only the five outer landmark blocks land somewhere new.
+function rebuildTownWorld() {
+  townGroup.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose(); });
+  townGroup.clear();
+  for (const cr of townCrates) { const i = allCrates.indexOf(cr); if (i >= 0) allCrates.splice(i, 1); }
+  townCrates.length = 0;
+  townColliders.length = 0;
+  townBuildings.length = 0;
+  graveSpots.length = 0;
+  shopDoors.length = 0;
+  parkFlowers.length = 0;
+  butterflies.length = 0;         // their groups died with townGroup; buildButterflies re-mints them
+  peeking.clear();                // no half-faded shell may outlive the walls it belonged to
+  for (const p of townPads) { const i = flatPads.indexOf(p); if (i >= 0) flatPads.splice(i, 1); }
+  townPads.length = 0;
+  jellyBar.jars.length = 0; jellyBar.glow = null;             // the consumable stations rebuild with their halls
+  chiliBar.bowls.length = 0; chiliBar.glow = null; chiliBar.surf = null;
+  fountainFx = null;
+  skylineSpecs.length = 0;        // the silhouette re-registers as the town rebuilds
+  skylineGroup.clear();
+  buildTown();
+  buildSkyline();
+  for (const [key, ch] of [...chunks]) unloadChunk(key, ch);
+  updateChunks(0, 0);             // runs start at the origin: iron the ground under the spawn now
+}
 const townBuildings = []; // permanent enterable buildings (the Blob Lounge) — buildingAt checks these too
 let fountainFx = null; // animated water on the plaza fountain — filled in buildTown, run by updateFountain
 
@@ -2805,8 +2920,8 @@ function buildChurchyard(rng) {
   // rusted-out breaches so the dead (and you) can squeeze through elsewhere
   const gaps = {
     w: [[gcz - 1.5, gcz + 1.5]],   // gate on the church-facing side
-    s: [[46, 48.5]],               // broken sections
-    n: [[50, 52.5]],
+    s: [[g.x0 + 6, g.x0 + 8.5]],   // broken sections (fence-relative: the plot moves on prestige remixes)
+    n: [[g.x0 + 10, g.x0 + 12.5]],
     e: [],
   };
   const inGap = (side, v) => gaps[side].some(([a, b]) => v > a && v < b);
@@ -2861,7 +2976,7 @@ function buildChurchyard(rng) {
     townGroup.add(fin);
   }
   // a fallen bar rusting by each breach
-  for (const [bx, bz, rot] of [[47.2, g.z0 + 0.7, 0.4], [51.4, g.z1 - 0.8, -0.7]]) {
+  for (const [bx, bz, rot] of [[g.x0 + 7.2, g.z0 + 0.7, 0.4], [g.x0 + 11.4, g.z1 - 0.8, -0.7]]) {
     const fallen = box(1.3, 0.07, 0.07, 0x2a2620);
     fallen.position.set(bx, groundHeight(bx, bz) + 0.08, bz);
     fallen.rotation.y = rot; fallen.rotation.z = 0.05;
@@ -2996,9 +3111,12 @@ function buildTown() {
   const rng = mulberry32(9001);
   // the east side's poured pads go in before ANY terrain samples heights: the Blob
   // Lounge needs a dead-flat floor and the chili stand a level counter, so both
-  // register like makeBuilding does — pad first, every mesh after answers to it
-  flatPads.push({ x: 122, z: -121, hw: 17, hd: 9.5, apron: 2.4, y: groundHeight(122, -121) });
-  flatPads.push({ x: 117, z: 57, hw: 8, hd: 6, apron: 2.0, y: groundHeight(117, 57) });
+  // register like makeBuilding does — pad first, every mesh after answers to it.
+  // Captured in townPads so a prestige rebuild can pull them back out of flatPads.
+  const loungePad = { x: LAYOUT.lounge.x, z: LAYOUT.lounge.z, hw: 17, hd: 9.5, apron: 2.4, y: groundHeight(LAYOUT.lounge.x, LAYOUT.lounge.z) };
+  const chiliPad = { x: LAYOUT.chili.x, z: LAYOUT.chili.z + 1, hw: 8, hd: 6, apron: 2.0, y: groundHeight(LAYOUT.chili.x, LAYOUT.chili.z + 1) };
+  flatPads.push(loungePad, chiliPad);
+  townPads.push(loungePad, chiliPad);
   // persistent low-res ground apron under the whole town footprint. Chunks only
   // stream in near the player, so without this the always-visible town buildings
   // sit on transparent void when seen from far away. Sunk slightly below the
@@ -3330,26 +3448,27 @@ function buildPark(rng) {
   for (let x = PARK.x0 + 4; x <= PARK.x1 - 2; x += 4.5) makeBush(rng, x, PARK.z0 + 1.6, townGroup, rng() < 0.3);
   for (let z = PARK.z0 + 6; z <= PARK.z1 - 4; z += 4.5) makeBush(rng, PARK.x1 - 1.6, z, townGroup, rng() < 0.3);
   // rock arrangements: three deliberate clusters, big stones ringed by small ones
-  for (const [rx, rz] of [[118, -52], [140.5, -51], [141.5, -31.5]]) {
+  // (everything below rides the park CENTRE, so a prestige remix carries the whole lawn)
+  for (const [rx, rz] of [[cx - 11, cz - 10], [cx + 11.5, cz - 9], [cx + 12.5, cz + 10.5]]) {
     makeRock(rng, rx, rz, townGroup, townColliders, true);
     makeRock(rng, rx + 1.1, rz + 0.4, townGroup, townColliders, true);
     for (let i = 0; i < 3; i++) makeRock(rng, rx + (rng() - 0.5) * 2.8, rz + (rng() - 0.5) * 2.8, townGroup, townColliders, false);
   }
   // picnic tables, angled like people actually dragged them
-  makePicnicTable(120.5, -37, 0.4);
-  makePicnicTable(137.5, -47.5, -0.7);
-  makePicnicTable(139, -37.5, 1.2);
+  makePicnicTable(cx - 8.5, cz + 5, 0.4);
+  makePicnicTable(cx + 8.5, cz - 5.5, -0.7);
+  makePicnicTable(cx + 10, cz + 4.5, 1.2);
   // flower beds — the butterflies' whole world
-  makeFlowerBed(rng, 119.5, -46.5, 1.9, 11);
-  makeFlowerBed(rng, 135.5, -42, 1.7, 10);
-  makeFlowerBed(rng, 124.5, -31.8, 1.8, 10);
-  makeFlowerBed(rng, 131, -51.5, 1.6, 9);
+  makeFlowerBed(rng, cx - 9.5, cz - 4.5, 1.9, 11);
+  makeFlowerBed(rng, cx + 6.5, cz, 1.7, 10);
+  makeFlowerBed(rng, cx - 4.5, cz + 10.2, 1.8, 10);
+  makeFlowerBed(rng, cx + 2, cz - 9.5, 1.6, 9);
   // the man himself, centre of the lawn
   buildBlingoStatue(cx, cz);
   // two park lamps so the statue reads at dusk — set diagonal off the apron corners,
   // never straight in front of the big fella's face
-  makeStreetLamp(122.5, -48.5, townGroup, 3.6);
-  makeStreetLamp(135.5, -35.5, townGroup, 3.6);
+  makeStreetLamp(cx - 6.5, cz - 6.5, townGroup, 3.6);
+  makeStreetLamp(cx + 6.5, cz + 6.5, townGroup, 3.6);
   buildButterflies();
 }
 
@@ -3458,7 +3577,7 @@ function makeChiliPot(x, z, r, h, opts = {}) {
   return pot;
 }
 function buildChiliStand(rng) {
-  const sx = 117, sz = 56;       // two blocks up the side road from the statue, its own corner plot
+  const sx = LAYOUT.chili.x, sz = LAYOUT.chili.z; // classic: two blocks up the side road; prestige: wherever the deal put it
   const y0 = groundHeight(sx, sz);
   const wood = 0x7a5230, woodDk = 0x64431f;
   // four posts and the cabana roof: two tan slabs pitched into a ridge, straw-fringed
@@ -3568,7 +3687,7 @@ function buildChiliStand(rng) {
 // the doors, roof pitched behind it, four doorways (two a side) so the room never
 // bottles you in, and every wall lined with stocked shelves. The loot run of the map.
 function buildBlobLounge(rng) {
-  buildLoungeHall(rng, { bx: 122, bz: -121,
+  buildLoungeHall(rng, { bx: LAYOUT.lounge.x, bz: LAYOUT.lounge.z,
     wallC: 0x584a66,  // lounge purple, like the bouncer who kept its door
     floorC: 0x453a4e, signText: 'BLOB LOUNGE', signBg: '#241a2e', signFg: '#d8a8ff',
     jars: 'good' }); // the mess-hall centrepiece: grandma's GOOD JELLY, still potent
@@ -4486,7 +4605,7 @@ const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
   hostPaused: false, hostGoreHorde: false };
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
-const prestige = { blocks: {}, bestTime: 0, bestHero: '' };
+const prestige = { blocks: {}, bestTime: 0, bestHero: '', campaign: 0 };
 // The block is not the block it was: the Infected One now stands between the Crimson One and
 // the street party, so every clear banked before him was banked on a shorter game and every
 // record time was set on one. Those runs don't compare, so the old save is dropped rather
@@ -4500,8 +4619,13 @@ try {
       for (const k in saved.blocks) if (Number.isInteger(saved.blocks[k]) && saved.blocks[k] > 0) prestige.blocks[k] = saved.blocks[k];
     if (typeof saved.bestTime === 'number' && saved.bestTime > 0) prestige.bestTime = saved.bestTime;
     if (typeof saved.bestHero === 'string') prestige.bestHero = saved.bestHero;
+    if (Number.isInteger(saved.campaign) && saved.campaign > 0) prestige.campaign = saved.campaign;
   }
 } catch (e) {}
+// a run is "new game plus" once the family has been made whole at least once: campaigns
+// cleared > 0 means Bluga and his black-ops blobs stalk the trek from here on. First-ever
+// campaigns never see him — clearing it the once is what puts you on his radar.
+function isPrestigeRun() { return (prestige.campaign | 0) > 0; }
 function recordPrestige() {
   prestige.blocks[selectedCousin] = (prestige.blocks[selectedCousin] | 0) + 1;
   if (!prestige.bestTime || game.time < prestige.bestTime) { prestige.bestTime = game.time; prestige.bestHero = selectedCousin; }
@@ -4577,8 +4701,11 @@ function scatterCousins() {
   }
   companions.length = 0;
   recruitCounter = 0;
-  // Blondie's roll happens first so Blizzy can take the opposite bearing
-  const blondieAng = Math.random() * TAU;
+  // Blondie's roll happens first so Blizzy can take the opposite bearing. On a prestige
+  // run the compass is fixed: Blondie draws SOUTH, which pins the scout to the true
+  // north — Blizzy stays the farthest out of everyone, holding the direction Bluga's
+  // smoke trick always escapes toward.
+  const blondieAng = game.prestigeRun ? (Math.random() - 0.5) * 0.6 : Math.random() * TAU;
   const blondieDist = 85 + Math.random() * 45;
   let i = 0;
   for (const data of COUSINS) {
@@ -5059,6 +5186,13 @@ function spawnPickup(kind, x, z, fromY) {
   if (kind === 'ammo') {
     const b = box(0.3, 0.2, 0.22, 0x3f6d3a, { emissive: 0x1a3a14, emissiveIntensity: 0.8 });
     b.position.y = 0.1; g.add(b);
+  } else if (kind === 'bestjelly') {
+    // a jar of the good stuff, dropped off a fallen perimeter guard — purple glass, waxed cap
+    const glass = cyl(0.13, 0.11, 0.26, 0xffffff, 10);
+    glass.material = new THREE.MeshLambertMaterial({ color: 0x8a4dd0, emissive: 0x2a0d4a, emissiveIntensity: 0.7 });
+    glass.position.y = 0.15; g.add(glass);
+    const lid = cyl(0.14, 0.14, 0.05, 0xe8dcc0, 10); lid.position.y = 0.3; g.add(lid);
+    const band = cyl(0.135, 0.135, 0.03, 0xb4642a, 10); band.position.y = 0.27; g.add(band);
   } else {
     const b = box(0.32, 0.22, 0.32, 0xd8dde5);
     b.position.y = 0.11; g.add(b);
@@ -5706,6 +5840,17 @@ function resetGame() {
   wxReset();
   game.cycle = 0; game.cleanup = false; game.clearTarget = 0; game.quotaN = 0;
   game.celebrateT = 0;
+  // new game plus: the host/solo decides if Bluga is in play this run (a client follows the
+  // host's world, so its own flag never spawns anything). Reset his whole state machine.
+  game.prestigeRun = net.role === 'client' ? false : isPrestigeRun();
+  resetBluga();
+  // the prestige remix: run 2+ deals the outer landmark blocks onto fresh anchors — a
+  // mystery layout every run. First campaigns (and any unchanged deal) keep the standing
+  // town. Clients never roll their own: the host's layout arrives in the welcome handshake.
+  if (net.role !== 'client') {
+    const want = game.prestigeRun ? randomLayout() : defaultLayout();
+    if (JSON.stringify(want) !== currentLayout) { applyLayout(want); rebuildTownWorld(); }
+  }
   updateQuotaHud();
   applyEnvironment();
   // clear ground gore from the last run
@@ -5787,7 +5932,8 @@ function respawnRun() {
       try {
         h.conn.send({ t: 'restart' });
         h.conn.send({ t: 'welcome', n: h.num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
-          w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills });
+          w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
+          lay: currentLayout }); // the fresh run's landmark deal rides the re-welcome
       } catch (e) {}
     }
     rebuildSquadBars();
@@ -6382,7 +6528,7 @@ function meleeTargets(w) {
   const out = [];
   const reach = w.range * (playerGiantOn() ? 2.3 : 1); // giant arms sweep a giant arc
   for (const z of zombies) {
-    if (z.state === 'dying') continue;
+    if (z.state === 'dying' || z.vanished) continue;
     const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
     if (Math.hypot(dx, dz) >= reach) continue;
     const diff = Math.abs(((Math.atan2(dx, dz) - yaw) % TAU + TAU + Math.PI) % TAU - Math.PI);
@@ -6395,8 +6541,11 @@ function meleeTarget(w) { return meleeTargets(w)[0] || null; }
 // execute's centre-mass treatment. Heavy hitters (the gib-class katana/sledge/axe) take
 // it from any airborne swing kill; the lighter arms (fists, pipe, bat, machete) have to
 // earn it out of a slide-hop. Runs AFTER the damage lands, on whatever actually died.
-function meleeMoveGib(w, z, kx, kz, hop) {
+function meleeMoveGib(w, z, kx, kz, hop, okFBI) {
   if (!(hop || (w.gib && !player.grounded))) return;
+  // FBI armour holds against ordinary move-kills: only the callers that vouch for a heavy
+  // hitter (chili giant, Blazo's leaping axe, Blomba's melee) burst a black-ops blob
+  if (z.fbi && !okFBI) return;
   if (z.state !== 'dying' || z.isBoss || z.netGhost || z.blob.bodyGone) return;
   popChest(z, kx, kz);
 }
@@ -6493,7 +6642,8 @@ function fireWeapon() {
       damageZombie(hit, base * player.meleeMult * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock,
         { weapon: w, dist: d, isHead: false });
       if (playerGiantOn() && !hit.isBoss && !hit.netGhost && hit.state === 'dying' && !wasDying && !hit.blob.bodyGone) popChest(hit, dx / d, dz / d);
-      meleeMoveGib(w, hit, dx / d, dz / d, hop);
+      meleeMoveGib(w, hit, dx / d, dz / d, hop,
+        playerGiantOn() || player.meleeMult > 1 || (selectedCousin === 'blazo' && w.id === 'axe'));
       blombaVamp(w, hit, dx / d, dz / d, wasDying);
     }
     if (hits.length) rumble(...w.rmb);
@@ -6557,7 +6707,7 @@ function fireWeapon() {
     // killing hit can hand the round on to whoever stood behind (stopping power, below)
     const line = [];
     for (const z of zombies) {
-      if (z.state === 'dying') continue;
+      if (z.state === 'dying' || z.vanished) continue; // Bluga in his smoke takes no rounds
       const gy = z.blob.root.position.y, s = z.scale;
       let zt = tMax, zh = null;
       // sleepers and carcasses lie flat — hit them where they actually are, not standing up
@@ -6676,7 +6826,10 @@ function killZombie(z, kx, kz, headPop) {
   rumble(70, 0.4, 0.3);
   spawnBlood(z.pos.x, z.blob.root.position.y + 0.8 * z.scale, z.pos.z, kx, kz, 2.2);
   if (headPop) popHead(z, kx, kz);
-  if (Math.random() < 0.22 * settings.lootSpawn) spawnPickup(Math.random() < 0.7 ? 'ammo' : 'medkit', z.pos.x, z.pos.z);
+  // black-ops blobs drop their own loot (ammo, and BEST JELLY off a perimeter guard); ordinary
+  // dead roll the usual ammo/medkit
+  if (z.fbi) fbiOnDeath(z);
+  else if (Math.random() < 0.22 * settings.lootSpawn) spawnPickup(Math.random() < 0.7 ? 'ammo' : 'medkit', z.pos.x, z.pos.z);
 }
 // sniper-class execute: the target detonates wherever it was struck — instant kill
 function executeZombie(z, kx, kz, limb, isHead) {
@@ -6690,6 +6843,7 @@ function executeZombie(z, kx, kz, limb, isHead) {
   killZombie(z, kx, kz, true);           // pops the head too
 }
 function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
+  if (z.vanished) return; // Bluga in his smoke is untouchable — cull the guards to unmask him
   // in a joined game the host owns every zombie: show feedback, send the hit upstream
   if (net.role === 'client') { if (z.state !== 'dying') netClientShot(z, dmg, kx, kz, opts); return; }
   if (z.state === 'dying') return;
@@ -6720,8 +6874,9 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
     return;
   }
 
-  // heavy weapons, or any hit on an already-exposed brain, burst the head: instant kill, head vanishes
-  if (isHead && !b.headGone && !z.isBoss && ((w && w.gib) || z.brainExposed)) {
+  // heavy weapons, or any hit on an already-exposed brain, burst the head: instant kill, head
+  // vanishes. Black-ops armour shrugs the ordinary gib class — only a magnum round earns it here.
+  if (isHead && !b.headGone && !z.isBoss && ((w && w.gib) || z.brainExposed) && !fbiArmored(z, w)) {
     spawnDamageNumber(z.pos.x, b.root.position.y + 1.45 * z.scale, z.pos.z, dmg);
     killZombie(z, kx, kz, true);
     return;
@@ -6757,9 +6912,10 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
 
   // the assault rifle takes an arm clean off in a single hit: a round that catches an arm
   // severs it outright, no roll (armSever). Legs and body shots still go through the chance.
-  if (w && w.armSever && !isHead && !z.isBoss && limb && limb.kind === 'arm' && !b.armGone[limb.idx]) {
+  // FBI armour holds both off — only magnum/sniper rounds delimb a black-ops blob.
+  if (w && w.armSever && !isHead && !z.isBoss && limb && limb.kind === 'arm' && !b.armGone[limb.idx] && !fbiArmored(z, w)) {
     blowLimb(z, kx, kz, limb);
-  } else if (!isHead && !z.isBoss && w && w.dismember) {
+  } else if (!isHead && !z.isBoss && w && w.dismember && !fbiArmored(z, w)) {
     // limb dismemberment — a direct hit on an arm/leg severs that exact limb; else a body-shot chance
     const base = limb ? 0.9 : 0.55;
     if (Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : base)) blowLimb(z, kx, kz, limb);
@@ -6767,11 +6923,18 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
 
   if (z.hp > 0) {
     // weak, far or skullcrack (marksman rifle) headshot that doesn't kill cracks the
-    // skull open, revealing the weak spot: one tap opens it, the next tap pops it
-    if (isHead && !z.brainExposed && !z.isBoss && w && (w.weak || w.skullcrack || dist > 26)) exposeBrain(z);
+    // skull open, revealing the weak spot: one tap opens it, the next tap pops it.
+    // A black-ops mask never cracks — there's no brain window through a shiesty.
+    if (isHead && !z.brainExposed && !z.isBoss && !z.fbi && w && (w.weak || w.skullcrack || dist > 26)) exposeBrain(z);
     return;
   }
-  killZombie(z, kx, kz, isHead && (!w || w.gib || z.brainExposed));
+  killZombie(z, kx, kz, isHead && !fbiArmored(z, w) && (!w || w.gib || z.brainExposed));
+}
+// FBI armour: black-ops blobs don't come apart under ordinary fire. The heavy dismember
+// class still gets through — magnum and sniper rounds here; a chili giant's blows, Blazo's
+// leaping axe and Blomba's melee are cleared at their own call sites (meleeMoveGib, blombaVamp).
+function fbiArmored(z, w) {
+  return !!z.fbi && !(w && (w.id === 'magnum' || w.id === 'sniper'));
 }
 function tryReload() {
   const w = player.weapon;
@@ -7431,6 +7594,7 @@ function stepFrame(dt) {
     updateCrows(dt);
     updateButterflies(dt);
     updateFountain(dt);
+    updateBluga(dt);       // Bluga's cameo, then his last stand — the new-game-plus overlay
     updateJelly(dt);       // grandma's beacon, ghost dance and the finale tally — every role
     updateCelebration(dt);
     const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
@@ -8262,7 +8426,7 @@ function updateCompanions(dt) {
           // AI Blomba swings with the same hidden bouncer trait the played one has
           const brawn = c.data.id === 'blomba' ? 1.5 : 1;
           damageZombie(tgt, cw.dmg * (air ? 1.7 : 1.1) * brawn, kx, kz, air ? 4.4 : 2.2, { weapon: cw, dist: tD, isHead: false });
-          if (air) meleeMoveGib(cw, tgt, kx, kz, true); // a leaping kill bursts the body, same as ours
+          if (air) meleeMoveGib(cw, tgt, kx, kz, true, c.data.id === 'blazo' || c.data.id === 'blomba'); // a leaping kill bursts the body, same as ours
           // and her kills come apart + feed her, the same vampirism the played Blomba gets
           if (brawn > 1 && tgt.state === 'dying' && !tgt.isBoss && !tgt.netGhost) {
             if (!tgt.blob.bodyGone) {
@@ -8514,7 +8678,10 @@ function updateZombies(dt) {
     // inside the haze — never in front of you on a clear long-draw day. In a lobby it's the
     // NEAREST player that holds the leash, not just the host, so a client roaming off on
     // their own keeps their horde instead of watching it despawn around them.
-    if (nearestPlayerDist(z.pos.x, z.pos.z) > scene.fog.far + (z.farBorn ? 46 : 26) && !z.isBoss) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
+    if (nearestPlayerDist(z.pos.x, z.pos.z) > scene.fog.far + (z.farBorn ? 46 : 26) && !z.isBoss && !z.fbi) { scene.remove(b.root); if (b.shadow) scene.remove(b.shadow); zombies.splice(i, 1); continue; }
+
+    // black-ops blobs run their own AI (aim + shoot), not the bite loop below
+    if (z.fbi) { updateFbi(z, dt); continue; }
 
     // boss: sleeps by the bank until approached, then sends waves at damage thresholds
     if (z.isBoss) {
@@ -9069,7 +9236,7 @@ const BOSS_ROTTEN = 0x77a12c, ROTTEN_HANDS = 0x3f5a14;
 const BOSS4_HP = Math.round(BOSS2_HP * 1.2);
 function spawnBoss4() {
   bossState.spawned4 = true;
-  const bx = 129, bz = -36;                   // the picnic ground, between the statue and the park gate
+  const bx = (PARK.x0 + PARK.x1) / 2, bz = (PARK.z0 + PARK.z1) / 2 + 6; // the picnic ground, between the statue and the park gate — wherever the park landed this run
   const scale = 2.7 * BOSS3_BIG;
   const blob = buildBlob({ color: BOSS_ROTTEN, zombie: true, scale, hands: ROTTEN_HANDS });
   attachBossGlow(blob, BOSS_ROTTEN);
@@ -9218,10 +9385,10 @@ function fireBossWave(z, n) {
     for (let k = 0; k < count; k++) {
       const kind = k % 3;
       if (kind === 0) {                        // purple horned shield-guard from the church
-        const [x, zz] = resolveCollision(30.5 + Math.random() * 3, 79 + Math.random() * 4, 0.5);
+        const [x, zz] = resolveCollision(CHURCHYARD.x - 4.5 + Math.random() * 3, CHURCHYARD.z - 2 + Math.random() * 4, 0.5);
         spawnZombie(x, zz, 1 + game.time / 240, { purple: true, horns: true });
       } else if (kind === 1) {                 // red speed+damage brute from the church
-        const [x, zz] = resolveCollision(30.5 + Math.random() * 3, 79 + Math.random() * 4, 0.5);
+        const [x, zz] = resolveCollision(CHURCHYARD.x - 4.5 + Math.random() * 3, CHURCHYARD.z - 2 + Math.random() * 4, 0.5);
         spawnZombie(x, zz, 1 + game.time / 240, { red: true });
       } else {                                 // standard dead rising from a grave mound
         const gs = graveSpots[(Math.random() * graveSpots.length) | 0];
@@ -9266,8 +9433,15 @@ function onBossDefeated(z) {
     setTimeout(() => toast('AHA, TO THE OLD JELLY HOUSE .ᐟ', true), 7400);
     for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xb8e03a, 0xfff3d0][k % 3], 1, 6, 1.2);
     rumble(600, 1, 1);
-    spawnJellyMarks();                        // the beacon + grandma's ghost inside
-    if (net.role === 'host') netBroadcast({ t: 'jelly' }); // every screen gets the light + the ghost
+    // new game plus: the porch light is BLUGA's now — grandma only comes once he falls.
+    // First-ever campaigns skip him and go straight to her.
+    if (game.prestigeRun) {
+      setTimeout(() => toast('BUT THE JELLY HOUSE IS SURROUNDED .ᐟ', true), 2800);
+      spawnBlugaFinal();
+    } else {
+      spawnJellyMarks();                      // the beacon + grandma's ghost inside
+      if (net.role === 'host') netBroadcast({ t: 'jelly' }); // every screen gets the light + the ghost
+    }
     return;
   }
   if (z.isBoss3) {
@@ -9437,6 +9611,10 @@ function startFinale() {
   jelly.awake = true; jelly.wakeT = 0;
   game.celebrateT = 16;                       // the long party: time to read the tally
   game.cleanup = false; updateQuotaHud();
+  // the family made whole: this campaign is in the books. From the next run on, Bluga's
+  // black-ops blobs are watching (isPrestigeRun). Banked on every screen that sees the party.
+  prestige.campaign = (prestige.campaign | 0) + 1;
+  try { localStorage.setItem(PRESTIGE_KEY, JSON.stringify(prestige)); } catch (e) {}
   initAudio(); playOpeningTheme();            // all six motifs + the soundoff — the family theme
   rumble(500, 0.8, 0.8);
   // the tally rows, captured now so late kills don't wiggle the numbers mid-count
@@ -9507,6 +9685,352 @@ function updateJelly(dt) {
     const txt = r.fmt ? r.fmt(v) : String(v);
     if (r.num.textContent !== txt) r.num.textContent = txt;
   });
+}
+
+// ---------- Bluga the Bad Blob + the Black-ops blobs ----------
+// New game plus (isPrestigeRun): clear the family's campaign once and Bluga starts stalking
+// the trek. FBI blobs are black head to toe with a shiesty ski-mask opening showing a random
+// cousin's colour around the eyes and FBI up the back in goopy yellow; Bluga's own opening is
+// Blizzy blue. They carry SMGs and ARs and shoot EVERYTHING — zombies, cousins, you. First he
+// cameos at the fountain (shoots a few walkers, wishes you luck, slide-hops off in a puff of
+// smoke). Then he's the run's true final boss, dug in around the Jelly House: he smoke-vanishes
+// while any guard stands, so you cull the black-glowing squad to drag him back into the open.
+const FBI_BLACK = 0x141519, FBI_BLACK_DK = 0x0a0b0e, BLUGA_FACE = 0x6fd8ff; // Bluga's opening is Blizzy blue
+const bluga = { phase: 'idle', boss: null, cameo: null, camT: 0, camDone: false, wave: 0, appearT: 0, smokeT: 0 };
+function resetBluga() {
+  if (bluga.cameo) { scene.remove(bluga.cameo.blob.root); if (bluga.cameo.blob.shadow) scene.remove(bluga.cameo.blob.shadow); }
+  bluga.phase = 'idle'; bluga.boss = null; bluga.cameo = null;
+  bluga.camT = 0; bluga.camDone = false; bluga.wave = 0; bluga.appearT = 0; bluga.smokeT = 0;
+}
+let fbiBackTex = null;
+function getFbiBackTex() {
+  if (!fbiBackTex) fbiBackTex = canvasTex(96, 64, ctx => {
+    ctx.clearRect(0, 0, 96, 64);
+    ctx.fillStyle = '#f2c21a';
+    ctx.font = "bold 44px 'OpenDyslexic','Comic Sans MS','Comic Sans',cursive";
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('FBI', 48, 36);
+  });
+  return fbiBackTex;
+}
+// the black-ops body: all-black blob + black mitts, a band of a cousin's colour around the
+// eyes (the ski-mask opening), and FBI up the back in the goopy yellow font
+function buildFbiBlob(faceColor, big) {
+  const blob = buildBlob({ color: FBI_BLACK, scale: big ? 1.4 : 1.0, hands: FBI_BLACK_DK });
+  // the shiesty opening: a clean SIDEWAYS OVAL of the cousin's colour laid flat on the face
+  // front (thin, riding proud of the black skull instead of buried in it), wide enough to
+  // frame both eyes — which still poke through in front of it
+  const face = ball(1, faceColor); face.scale.set(0.3, 0.15, 0.055); face.position.set(0, 0.05, 0.355);
+  blob.head.add(face);
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.44),
+    new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false }));
+  back.position.set(0, 0.95, -0.31); back.rotation.y = Math.PI; blob.wob.add(back);
+  return blob;
+}
+// stand up one black-ops blob in the zombie list (so the whole hitscan / damage / death /
+// client-ghost pipeline already sees it). wave guards never drop the jelly; perimeter ones do.
+function spawnFbi(x, z, { weapon, wave, bluga: isBluga } = {}) {
+  const faceColor = isBluga ? BLUGA_FACE : COUSINS[(Math.random() * COUSINS.length) | 0].color;
+  const wid = weapon || (Math.random() < 0.5 ? 'smg' : 'rifle');
+  const blob = buildFbiBlob(faceColor, isBluga);
+  const gun = buildGunMesh(wid); blob.gunSocket.add(gun);
+  const gy = groundHeight(x, z);
+  blob.root.position.set(x, gy, z);
+  scene.add(blob.root);
+  const gl = makeLootGlow(0, { r: isBluga ? 1.1 : 0.85, y: isBluga ? 2.6 : 2.0, s: isBluga ? 1.7 : 1.35, dark: true });
+  blob.root.add(gl); blob.guardGlow = gl;
+  // squad stats track the Crimson One's red minions spawned at this same moment: the same
+  // health pool and the same quick feet — armoured, but not spongier than the red brutes
+  const power = 1 + game.time / 240;
+  const minionHp = Math.round((9 + Math.random() * 6) * 1.2 * power);
+  const hp = isBluga ? Math.round(BOSS2_HP * 0.9) : minionHp;
+  const z2 = {
+    blob, pos: new THREE.Vector3(x, 0, z), yaw: Math.random() * TAU, scale: isBluga ? 1.4 : 1,
+    hp, maxHp: hp, state: 'chase', deadT: 0, walkPhase: Math.random() * 9,
+    speed: (1.5 + Math.random() * 1.4) * 1.25 * (0.9 + power * 0.1), // the red minions' pace
+    minionHp, // Bluga's own endgame line: at or under this he stops smoking out (see updateFbi)
+    fbi: true, fbiWave: !!wave, fbiFace: faceColor, fbiWeapon: wid, bluga: !!isBluga, gunMesh: gun,
+    homeX: x, homeZ: z, y: gy, vy: 0, grounded: true, aimPitch: 0, shootCd: Math.random() * 0.7,
+    attackT: 0, kvx: 0, kvz: 0, biteMult: 1, vanished: false, blind: false,
+  };
+  if (!z2.nid) z2.nid = ++net.zid;
+  zombies.push(z2);
+  return z2;
+}
+function fbiGuardsAlive() { return zombies.some(z => z.fbi && !z.bluga && z.state !== 'dying'); }
+// a black-ops blob's shot: a tracer from the muzzle to the mark, its own crack, and the
+// damage (guns miss sometimes — a far mark more than a near one)
+const _fbiFrom = new THREE.Vector3(), _fbiTo = new THREE.Vector3();
+function fbiShoot(z, tx, ty, tz, target, td) {
+  z.lastShotT = game.time;
+  const gm = z.gunMesh;
+  if (gm && gm.userData.muzzle) gm.userData.muzzle.getWorldPosition(_fbiFrom);
+  else { _fbiFrom.set(z.pos.x, groundHeight(z.pos.x, z.pos.z) + 1.1 * z.scale, z.pos.z); }
+  _fbiTo.set(tx, ty + 0.9, tz);
+  spawnTracer(_fbiFrom, _fbiTo);
+  const w = WEAPONS[z.fbiWeapon] || WEAPONS.rifle;
+  if (Math.hypot(z.pos.x - player.pos.x, z.pos.z - player.pos.z) < 32) play3d(z.pos.x, z.pos.z, () => SFX.shoot(w));
+  // hit chance falls off with range; a giant chili player only ever soaks 1
+  if (Math.random() > clamp(1 - td / 34, 0.28, 0.9)) return;
+  const dmg = z.bluga ? 6 : (z.fbiWeapon === 'rifle' ? 9 : 6);
+  if (target.kind === 'player') hurtPlayer(playerGiantOn() ? 1 : dmg, player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+  else if (target.kind === 'cousin') hurtCompanion(target.c, dmg);
+  else if (target.kind === 'zombie' && target.z.state !== 'dying') {
+    const zz = target.z, d2 = Math.hypot(zz.pos.x - z.pos.x, zz.pos.z - z.pos.z) || 1;
+    damageZombie(zz, dmg * 2.2, (zz.pos.x - z.pos.x) / d2, (zz.pos.z - z.pos.z) / d2, 1.5, { isHead: false });
+  }
+}
+// one black-ops blob's frame: pick the nearest thing that isn't FBI, face it, hold at range
+// (guards keep near their post), and put rounds on it. Bluga himself runs this too when he's
+// out of the smoke.
+const _fbiT = { kind: null };
+function updateFbi(z, dt) {
+  const b = z.blob;
+  const gy = groundHeight(z.pos.x, z.pos.z);
+  // Bluga vanishes in his own smoke while any guard still stands — invisible AND untargetable.
+  // But the trick runs out with him: once his health is down to a mere minion's worth, the
+  // smoke stays in the pocket and he can be finished like any other black-ops blob.
+  if (z.bluga) {
+    const hide = fbiGuardsAlive() && z.hp > (z.minionHp || 0);
+    if (hide !== z.vanished) {
+      z.vanished = hide; b.root.visible = !hide;
+      if (b.guardGlow) b.guardGlow.visible = false;
+      spawnParticles(z.pos.x, gy + 1.4 * z.scale, z.pos.z, 0x3a3a42, 24, 5, 1); // the smoke pop
+      play3d(z.pos.x, z.pos.z, () => noiseBurst(0.4, 300, 0.7));
+    }
+    if (hide) { b.root.position.set(z.pos.x, gy, z.pos.z); placeShadow(b, z.pos.x, z.pos.z, gy); return; }
+  }
+  b.root.position.set(z.pos.x, gy, z.pos.z);
+  // nearest non-FBI target: you, a cousin, or an ordinary zombie
+  let td = Infinity, tx = 0, ty = 0, tz = 0; _fbiT.kind = null;
+  const eye = (x, zz) => Math.hypot(x - z.pos.x, zz - z.pos.z);
+  if (!player.dead && !player.downed) { const d = eye(player.pos.x, player.pos.z); if (d < td) { td = d; tx = player.pos.x; ty = player.pos.y; tz = player.pos.z; _fbiT.kind = 'player'; } }
+  for (const c of companions) if (c.recruited && !c.downed) { const d = eye(c.pos.x, c.pos.z); if (d < td) { td = d; tx = c.pos.x; ty = c.y || 0; tz = c.pos.z; _fbiT.kind = 'cousin'; _fbiT.c = c; } }
+  for (const oz of zombies) if (!oz.fbi && oz.state !== 'dying' && oz.state !== 'corpse') { const d = eye(oz.pos.x, oz.pos.z); if (d < td) { td = d; tx = oz.pos.x; ty = oz.blob.root.position.y; tz = oz.pos.z; _fbiT.kind = 'zombie'; _fbiT.z = oz; } }
+  const range = z.bluga ? 24 : 18;
+  if (_fbiT.kind) {
+    const want = Math.atan2(tx - z.pos.x, tz - z.pos.z);
+    z.yaw = angLerp(z.yaw || 0, want, 1 - Math.exp(-9 * dt));
+    // close to a comfortable firing distance; a guard that's been pulled too far drifts back
+    // to its post instead of chasing across the whole block
+    const homeD = eye(z.homeX, z.homeZ);
+    let mx = 0, mz = 0;
+    if (td > range * 0.8) { mx = (tx - z.pos.x) / td; mz = (tz - z.pos.z) / td; }
+    else if (td < range * 0.45) { mx = -(tx - z.pos.x) / td; mz = -(tz - z.pos.z) / td; } // back off if crowded
+    if (!z.fbiWave && !z.bluga && (td > 30 || homeD > 12)) { const hd = homeD || 1; mx = (z.homeX - z.pos.x) / hd; mz = (z.homeZ - z.pos.z) / hd; }
+    if (mx || mz) {
+      const sp = (z.bluga ? 3.4 : (z.speed || 3)) * dt;
+      const [nx, nz] = resolveCollision(z.pos.x + mx * sp, z.pos.z + mz * sp, 0.42 * z.scale, gy);
+      const moved = Math.hypot(nx - z.pos.x, nz - z.pos.z);
+      z.pos.x = nx; z.pos.z = nz;
+      z.walkPhase = (z.walkPhase || 0) + moved * 6;
+    }
+    z.aimPitch = lerp(z.aimPitch || 0, Math.atan2((ty + 0.9) - (gy + 1.0 * z.scale), Math.max(td, 0.5)), 1 - Math.exp(-12 * dt));
+    z.shootCd -= dt;
+    const facing = Math.abs(angDiff(z.yaw, want)) < 0.3;
+    const w = WEAPONS[z.fbiWeapon] || WEAPONS.rifle;
+    if (facing && td < range * 1.4 && z.shootCd <= 0) {
+      z.shootCd = (w.auto ? 0.26 : 0.62) + Math.random() * 0.2;
+      fbiShoot(z, tx, ty, tz, _fbiT, td);
+    }
+  } else z.aimPitch = lerp(z.aimPitch || 0, 0, 1 - Math.exp(-6 * dt));
+  b.root.rotation.y = z.yaw;
+  // pose: the gun arm tracks the aim, the off arm swings with the stride, legs walk
+  b.arms[b.gunArm].rotation.x = -Math.PI / 2 - (z.aimPitch || 0) * 0.8 + (game.time - (z.lastShotT || -9) < 0.09 ? 0.3 : 0);
+  const sw = Math.sin(z.walkPhase) * 0.5;
+  b.arms[b.offArm].rotation.x = -sw * 0.7;
+  b.legs[0].rotation.x = sw; b.legs[1].rotation.x = -sw;
+  b.wob.scale.y = 1 + Math.sin((z.walkPhase || 0) * 2) * 0.03;
+  placeShadow(b, z.pos.x, z.pos.z, gy);
+  if (b.guardGlow) animateLootGlow(b.guardGlow, game.time + (z.walkPhase || 0));
+}
+// a fallen black-ops blob leaves ammo, and a perimeter guard has a 1-in-3 of dropping a BEST
+// JELLY — the wave guards never do (see the spec: only the ones already on the perimeter)
+function fbiOnDeath(z) {
+  spawnPickup('ammo', z.pos.x + 0.3, z.pos.z);
+  if (!z.fbiWave && !z.bluga && Math.random() < 0.33) spawnPickup('bestjelly', z.pos.x - 0.3, z.pos.z);
+  if (z.bluga) onBlugaDefeated(z);
+}
+// ---------- the arena cameo ----------
+// the opening beat of every prestige run, always in view from the spawn: Bluga stands on
+// the Two Horned One's own ground (the open arena between the fountain and the bank
+// steps) working a whole mob of walkers solo — moving, strafing, never missing — and he
+// holds that ground until the mob is down. Then he turns to face you, wishes you Good
+// Luck, and slide-HOPS north (the Blizzy direction, -z) faster than anyone could chase,
+// gone into a smoke grenade. One time only; camDone locks it.
+const FOUNTAIN = { x: 0, z: -28.2 };
+const CAMEO_SPOT = { x: 0, z: -37.7 };   // the Two Horned One's waking ground
+function maybeStartCameo() {
+  if (bluga.phase !== 'idle' || bluga.camDone || !game.prestigeRun || net.role === 'client') return;
+  if (game.time < 1.5 || bluga.boss) return; // no distance gate: the arena IS the view from spawn
+  startCameo();
+}
+function startCameo() {
+  bluga.phase = 'cameo'; bluga.camT = 0;
+  const cx = CAMEO_SPOT.x, cz = CAMEO_SPOT.z;
+  const blob = buildFbiBlob(BLUGA_FACE, true);
+  const gun = buildGunMesh('smg'); blob.gunSocket.add(gun);
+  blob.root.position.set(cx, groundHeight(cx, cz), cz);
+  scene.add(blob.root);
+  bluga.cameo = { blob, gunMesh: gun, pos: new THREE.Vector3(cx, 0, cz), yaw: 0, shootCd: 0, prey: [],
+    wanderT: 0, wx: cx, wz: cz };
+  // a proper mob, ringed all around him — the demonstration is the point
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * TAU + Math.random() * 0.5, d = 6 + Math.random() * 4;
+    bluga.cameo.prey.push(spawnZombie(cx + Math.sin(a) * d, cz + Math.cos(a) * d, 1, { mode: 'grave' }));
+  }
+  toast('WHO IS THAT BY THE FOUNTAIN .ᐟ', true);
+}
+function updateCameo(dt) {
+  const c = bluga.cameo; if (!c) return;
+  bluga.camT += dt;
+  const b = c.blob, gy = groundHeight(c.pos.x, c.pos.z);
+  const t = bluga.camT;
+  const alive = c.prey.filter(p => p && p.state !== 'dying');
+  if (t < 7 && !(alive.length === 0 && t > 1.2)) {
+    // the show: face the nearest live walker and put it down — while WORKING the ground,
+    // strafing to a fresh spot every second or so, but never leaving the arena
+    c.wanderT -= dt;
+    if (c.wanderT <= 0) {
+      c.wanderT = 0.9 + Math.random() * 0.8;
+      const a = Math.random() * TAU, d = 1.5 + Math.random() * 4;
+      c.wx = CAMEO_SPOT.x + Math.sin(a) * d; c.wz = CAMEO_SPOT.z + Math.cos(a) * d; // stays roughly on the Two Horned One's ground
+    }
+    const wd = Math.hypot(c.wx - c.pos.x, c.wz - c.pos.z);
+    if (wd > 0.3) {
+      const sp = 4.2 * dt;
+      const [nx, nz] = resolveCollision(c.pos.x + (c.wx - c.pos.x) / wd * sp, c.pos.z + (c.wz - c.pos.z) / wd * sp, 0.5);
+      c.walk = (c.walk || 0) + Math.hypot(nx - c.pos.x, nz - c.pos.z) * 6;
+      c.pos.x = nx; c.pos.z = nz;
+    }
+    const sw = Math.sin(c.walk || 0) * 0.5;
+    b.legs[0].rotation.x = sw; b.legs[1].rotation.x = -sw;
+    let tgt = null, td = Infinity;
+    for (const p of alive) { const d = Math.hypot(p.pos.x - c.pos.x, p.pos.z - c.pos.z); if (d < td) { td = d; tgt = p; } }
+    if (tgt) {
+      const want = Math.atan2(tgt.pos.x - c.pos.x, tgt.pos.z - c.pos.z);
+      c.yaw = angLerp(c.yaw, want, 1 - Math.exp(-10 * dt));
+      c.shootCd -= dt;
+      if (c.shootCd <= 0 && Math.abs(angDiff(c.yaw, want)) < 0.3) {
+        c.shootCd = 0.22;
+        _fbiFrom.set(c.pos.x, gy + 1.4, c.pos.z);
+        if (c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_fbiFrom);
+        _fbiTo.set(tgt.pos.x, tgt.blob.root.position.y + 0.8, tgt.pos.z);
+        spawnTracer(_fbiFrom, _fbiTo);
+        play3d(c.pos.x, c.pos.z, () => SFX.shoot(WEAPONS.smg));
+        const d2 = td || 1;
+        damageZombie(tgt, 40, (tgt.pos.x - c.pos.x) / d2, (tgt.pos.z - c.pos.z) / d2, 2, { isHead: false });
+        b.arms[b.gunArm].rotation.x = -Math.PI / 2 + 0.25;
+      }
+    }
+    c.showDone = t; // remember when the demonstration actually ended
+  } else if (!c.greetT) {
+    c.greetT = t;   // mob down (or the clock ran): the turn-and-greet starts NOW
+  }
+  if (c.greetT && t < c.greetT + 2.2) {
+    // turn to you and wish you luck, gun lowered
+    c.yaw = angLerp(c.yaw, Math.atan2(player.pos.x - c.pos.x, player.pos.z - c.pos.z), 1 - Math.exp(-8 * dt));
+    b.arms[b.gunArm].rotation.x = lerp(b.arms[b.gunArm].rotation.x, -0.15, 1 - Math.exp(-8 * dt));
+    b.legs[0].rotation.x = 0; b.legs[1].rotation.x = 0;
+    if (!c.greeted && t > c.greetT + 0.7) { c.greeted = true; spawnBubble(() => ({ x: c.pos.x, y: groundHeight(c.pos.x, c.pos.z) + 3.4, z: c.pos.z }), 'Good Luck .ᐟ', c); SFX.pickup(); }
+  } else if (c.greetT && t < c.greetT + 3.7) {
+    // slide-HOPS off to the north (Blizzy's frozen north = -z): the getaway bounces,
+    // low slide to low slide, faster than any cousin could ever close
+    c.yaw = angLerp(c.yaw, Math.PI, 1 - Math.exp(-10 * dt)); // face -z
+    c.pos.z -= 27 * dt;
+    const hop = Math.abs(Math.sin((t - c.greetT - 2.2) * 9));
+    b.root.position.y = groundHeight(c.pos.x, c.pos.z) + hop * 0.55;
+    b.wob.rotation.x = -0.7; b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.3;
+    if (!c.puffed && t > c.greetT + 3) {
+      c.puffed = true;
+      for (let k = 0; k < 3; k++) spawnParticles(c.pos.x, groundHeight(c.pos.x, c.pos.z) + 1 + k * 0.4, c.pos.z, 0x3a3a42, 20, 6, 1.1);
+      play3d(c.pos.x, c.pos.z, () => noiseBurst(0.5, 260, 0.8));
+    }
+  } else if (c.greetT) {
+    // gone into the nothing
+    scene.remove(b.root); if (b.shadow) scene.remove(b.shadow);
+    bluga.cameo = null; bluga.phase = 'idle'; bluga.camDone = true;
+    return;
+  }
+  if (!(c.greetT && t >= c.greetT + 2.2)) b.root.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z), c.pos.z);
+  else b.root.position.x = c.pos.x, b.root.position.z = c.pos.z;
+  b.root.rotation.y = c.yaw;
+  placeShadow(b, c.pos.x, c.pos.z, groundHeight(c.pos.x, c.pos.z));
+}
+// ---------- Bluga's last stand at the Jelly House ----------
+// on a prestige run the Rotten One's fall doesn't light grandma's porch — it lights BLUGA's.
+// He's dug in around the Jelly House with a perimeter of black-ops guards, smoke-vanished
+// until you cull them. Damage drags three waves of three spec-ops out of the surrounding
+// dark; only when he finally drops does grandma's spirit come (spawnJellyMarks).
+function spawnBlugaFinal() {
+  if (bluga.boss) return;
+  bluga.phase = 'final'; bluga.wave = 0;
+  // his beam over the Jelly House — his own cold blue, so the trek still has a star to steer by
+  const gy = groundHeight(JELLY.x, JELLY.z);
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 220, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x2b3550, transparent: true, opacity: 0.32, fog: false,
+      blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
+  beam.position.set(JELLY.x, gy + 100, JELLY.z);
+  scene.add(beam); bluga.beam = beam;
+  // Bluga himself, dead centre of her floor
+  bluga.boss = spawnFbi(JELLY_G.x, JELLY_G.z - 2, { weapon: 'rifle', bluga: true });
+  bluga.boss.vanished = true; bluga.boss.blob.root.visible = false;
+  // the perimeter: black-ops guards ringing the house (these are the ones that drop BEST JELLY)
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * TAU + 0.4;
+    const gx = JELLY.x + Math.sin(a) * 13, gz = JELLY.z + Math.cos(a) * 13;
+    const [px, pz] = resolveCollision(gx, gz, 0.5);
+    spawnFbi(px, pz, {});
+  }
+  dressBlugaBar();
+  bossBarEl.classList.add('show');
+  toast("BLUGA THE BAD BLOB .ᐟ CULL THE SQUAD TO UNMASK HIM .ᐟ", true);
+  if (net.role === 'host') netBroadcast({ t: 'bluga' });
+}
+function dressBlugaBar() {
+  bossLabelEl.textContent = 'Bluga the Bad Blob';
+  bossBarEl.classList.remove('crimson', 'infected', 'rotten');
+  bossBarEl.classList.add('bluga');
+}
+function blugaFireWave() {
+  const n = ++bluga.wave;
+  // three spec-ops out of the surrounding dark, all around the house
+  for (let i = 0; i < 3; i++) {
+    const a = Math.random() * TAU, dist = 16 + Math.random() * 8;
+    const gx = JELLY.x + Math.sin(a) * dist, gz = JELLY.z + Math.cos(a) * dist;
+    const [px, pz] = resolveCollision(gx, gz, 0.5);
+    spawnFbi(px, pz, { wave: true, mode: 'grave' });
+  }
+  toast(`WAVE ${n} .ᐟ SPEC OPS CLOSING IN .ᐟ`, true);
+  play3d(JELLY.x, JELLY.z, () => noiseBurst(0.4, 260, 0.7));
+}
+function onBlugaDefeated(z) {
+  bluga.boss = null; bluga.phase = 'done';
+  if (bluga.beam) { scene.remove(bluga.beam); bluga.beam = null; }
+  bossBarEl.classList.remove('show', 'bluga');
+  for (const zz of [...zombies]) if (zz.fbi && zz.state !== 'dying') killZombie(zz, 0, 0, false);
+  toast('BLUGA FALLS .ᐟ THE BLOCK IS FINALLY QUIET .ᐟ', true);
+  for (let k = 0; k < 40; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0x6fd8ff, 0xf2c21a, 0xffffff][k % 3], 1, 6, 1.2);
+  rumble(600, 1, 1);
+  spawnJellyMarks();                          // NOW grandma's spirit comes
+  if (net.role === 'host') netBroadcast({ t: 'jelly' });
+}
+// master tick: cameo script, then the final fight's waves + smoke-vanish + boss bar
+function updateBluga(dt) {
+  maybeStartCameo();
+  if (bluga.phase === 'cameo') updateCameo(dt);
+  const z = bluga.boss;
+  if (!z || z.state === 'dying') return;
+  // damage thresholds pull the waves (only once he's been unmasked and is taking hits)
+  if (!z.vanished) {
+    const taken = 1 - z.hp / z.maxHp;
+    if (bluga.wave < 1 && taken >= 0.30) blugaFireWave();
+    else if (bluga.wave < 2 && taken >= 0.55) blugaFireWave();
+    else if (bluga.wave < 3 && taken >= 0.80) blugaFireWave();
+  }
+  // his bar tracks his health for the whole lobby; the beam fades once he first unmasks
+  if (bossBarEl.classList.contains('show')) bossHpEl.style.width = clamp(z.hp / z.maxHp, 0, 1) * 100 + '%';
+  if (bluga.beam) { bluga.beam.material.opacity = z.vanished ? 0.24 + Math.sin(performance.now() * 0.004) * 0.08 : Math.max(0, bluga.beam.material.opacity - dt * 0.2); }
 }
 
 // ---------- crows ----------
@@ -10124,7 +10648,14 @@ function updatePickups(dt) {
     p.mesh.rotation.y += dt * 2;
     const d = Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z);
     if (d < 1.1 && Math.abs(p.mesh.position.y - player.pos.y) < 2.2 && !player.dead) {
-      if (p.kind === 'ammo' && !player.weapon.melee) {
+      if (p.kind === 'bestjelly') {
+        // the good stuff off a black-ops guard: the jelly consumable, but only if a hand is free
+        if (player.owned.includes('jelly') || player.owned.includes('chili')) continue; // one consumable at a time
+        if (playerGiantAny()) continue;
+        equipWeapon('jelly');
+        toast('BEST JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true);
+        spawnParticles(player.pos.x, player.pos.y + 1.4, player.pos.z, 0xb06fff, 14, 4, 0.8);
+      } else if (p.kind === 'ammo' && !player.weapon.melee) {
         const add = Math.ceil(player.weapon.mag * 0.8 * player.ammoMult);
         reserves[player.weapon.id] = (reserves[player.weapon.id] | 0) + add;
         toast(`+${add} AMMO`);
@@ -10346,7 +10877,7 @@ function updateFx(dt) {
       if (t > tSelf && t < tWall) tWall = t;
     }
     for (const z of zombies) {
-      if (z.state === 'dying') continue;
+      if (z.state === 'dying' || z.vanished) continue;
       const gy2 = z.blob.root.position.y;
       let t;
       if (z.state === 'sleep' || z.state === 'corpse') {
@@ -10579,6 +11110,7 @@ function wireHostConn(conn) {
           conn.send({ t: 'welcome', n: mine.netP, cousin: mine.data.id, x: mine.pos.x, z: mine.pos.z,
             w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
             zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0,
+            lay: currentLayout, // the host's landmark deal — a reconnecting screen must match it
             hp: game.state === 'paused' ? 1 : 0, resumed: 1 });
           toast(`PLAYER ${mine.netP} RECONNECTED .ᐟ`);
           rebuildSquadBars();
@@ -10612,6 +11144,7 @@ function wireHostConn(conn) {
       conn.send({ t: 'welcome', n: num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
         w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
         zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0, // the host's spawn dials + gore-horde flag
+        lay: currentLayout, // the host's landmark deal: prestige remixes rebuild on our screen too
         hp: game.state === 'paused' ? 1 : 0 });               // joined a held lobby: wait with it
       rebuildSquadBars();
       updatePauseLobby();   // a paused host sees the count tick up the moment they join
@@ -10814,6 +11347,9 @@ function netHostTick(dt) {
       he: z.rotE ? 1 : 0, rb: z.rotR ? 1 : 0, pb: z.rotB ? 1 : 0, // the rot variants ride the wire
       sh: (z.isBoss && shielded) ? 1 : 0, // boss invuln flag → clients blink it the same
       gd: (z.hornWave && !z.goreHorn) ? 1 : 0, // shield guard → clients dress the tell-tale glow
+      fb: z.fbi ? 1 : 0, bg: z.bluga ? 1 : 0, gv: z.vanished ? 1 : 0, // black-ops: FBI look, Bluga, his smoke-vanish
+      ff: z.fbi ? z.fbiFace : undefined,  // the cousin colour in the ski-mask opening
+      ar: z.fbi ? Math.round((z.aimPitch || 0) * 100) / 100 : undefined, // FBI gun-arm pitch
       dp: z.diedPop ? 1 : 0 });           // this death popped the head (gib/headshot) → clients burst it too
   }
   const boss = bossState.boss;
@@ -10822,6 +11358,7 @@ function netHostTick(dt) {
     b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), b4: !!(boss && boss.isBoss4), // which one is up: clients dress the bar in his colours
     ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
     cjm: jellyBar.mask, cct: chiliBar.taken, // the consumable shelves, so every screen shows the same jars + bowls left
+    blg: bluga.boss ? clamp(bluga.boss.hp / bluga.boss.maxHp, 0, 1) : -1, // Bluga's bar, streamed to every screen
     zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 }); // host's spawn dials + gore-horde, mirrored on every client
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs) {
@@ -10945,6 +11482,9 @@ function netClientData(m, conn, peer, code) {
   if (m.t === 'welcome') {
     net.peer = peer; net.role = 'client'; net.conns = [conn];
     net.playerNum = m.n; net.lobbyCode = code; net.leaving = false;
+    // the host's landmark deal comes first: if their town differs from ours (a prestige
+    // remix), rebuild OUR world on their anchors before anything walks through a wall
+    if (m.lay && m.lay !== currentLayout) { applyLayout(JSON.parse(m.lay)); rebuildTownWorld(); }
     applyCousin(m.cousin);
     startRun();
     // this world belongs to the host: no local squad, no local spawner
@@ -11034,8 +11574,22 @@ function netClientData(m, conn, peer, code) {
     netClientSkinSwap(m);
   } else if (m.t === 'cswapKit') {
     applySwapKit(m.kit); // the other half's kit, relayed through the host
+  } else if (m.t === 'bluga') {
+    // the host's Rotten One fell on a prestige run: Bluga's cold-blue light stands over the
+    // Jelly House instead of grandma's. Bluga + his squad arrive via the zombie snapshot.
+    const gy = groundHeight(JELLY.x, JELLY.z);
+    if (!bluga.beam) {
+      const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.6, 220, 12, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0x2b3550, transparent: true, opacity: 0.32, fog: false,
+          blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
+      beam.position.set(JELLY.x, gy + 100, JELLY.z); scene.add(beam); bluga.beam = beam;
+    }
+    toast('THE ROTTEN ONE FALLS .ᐟ', true);
+    setTimeout(() => toast('BUT THE JELLY HOUSE IS SURROUNDED .ᐟ BLUGA THE BAD BLOB .ᐟ', true), 2800);
   } else if (m.t === 'jelly') {
-    // the Rotten One fell on the host's watch: the same light + ghost + toasts, our screen
+    // the Rotten One fell on the host's watch: the same light + ghost + toasts, our screen.
+    // (On a prestige run this arrives only once Bluga is down — his beam clears with it.)
+    if (bluga.beam) { scene.remove(bluga.beam); bluga.beam = null; }
     spawnJellyMarks();
     toast('THE ROTTEN ONE FALLS .ᐟ', true);
     setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
@@ -11091,8 +11645,11 @@ function netApplySnapshot(m) {
   // and glide into the host's weather through the same 20s crossfade it used
   if (m.ck != null && Math.abs(m.ck - (game.clock ?? 0)) > 0.15) game.clock = m.ck;
   if (m.w && m.w !== wx.to) { wx.from = game.weather; wx.to = m.w; wx.u = 0; }
-  bossBarEl.classList.toggle('show', m.bb >= 0);
-  if (m.bb >= 0) { dressBossBar({ isBoss2: !!m.b2, isBoss3: !!m.b3, isBoss4: !!m.b4 }); bossHpEl.style.width = m.bb * 100 + '%'; }
+  // Bluga's bar outranks the usual boss bar when he's the one up (blg >= 0)
+  const blg = m.blg == null ? -1 : m.blg;
+  bossBarEl.classList.toggle('show', m.bb >= 0 || blg >= 0);
+  if (blg >= 0) { dressBlugaBar(); bossHpEl.style.width = blg * 100 + '%'; }
+  else if (m.bb >= 0) { dressBossBar({ isBoss2: !!m.b2, isBoss3: !!m.b3, isBoss4: !!m.b4 }); bossHpEl.style.width = m.bb * 100 + '%'; }
   // mirror the host's cleanup quota so the REMAIN readout ticks on every screen
   game.cleanup = (m.ct || 0) > 0; game.clearTarget = m.ct || 0; game.quotaN = m.cq || 0;
   // and the consumable shelves: same jars gone, same bowls left, on every screen
@@ -11169,30 +11726,40 @@ function netApplySnapshot(m) {
     if (!g) {
       // bosses wear their own livery: without this they fell through to a random
       // zombie colour, so a joiner met a differently-coloured monster than the host
-      const color = zs.bo ? (zs.b4 ? BOSS_ROTTEN : zs.b3 ? BOSS_INFECTED : zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
-        : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
-      const blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b4 ? ROTTEN_HANDS : zs.b3 ? INFECTED_HANDS : zs.b2 ? CRIMSON_HANDS : 0 });
-      // the Rotten One and his rotting walkers wear no horns — the rot is the whole crown
-      if ((zs.ho || zs.bo) && !zs.b4) for (const s of [-1, 1]) {
-        const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
-        horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
-        horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
-        blob.head.add(horn);
+      let blob;
+      if (zs.fb) {
+        // a black-ops blob: the FBI look, a gun in hand, and the dark shadow-glow tell
+        blob = buildFbiBlob(zs.ff != null ? zs.ff : 0xffffff, !!zs.bg);
+        const gun = buildGunMesh(zs.bg ? 'rifle' : 'smg'); blob.gunSocket.add(gun); blob.gunMesh = gun;
+        const gl = makeLootGlow(0, { r: zs.bg ? 1.1 : 0.85, y: zs.bg ? 2.6 : 2.0, s: zs.bg ? 1.7 : 1.35, dark: true });
+        blob.root.add(gl); blob.guardGlow = gl;
+      } else {
+        const color = zs.bo ? (zs.b4 ? BOSS_ROTTEN : zs.b3 ? BOSS_INFECTED : zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
+          : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
+        blob = buildBlob({ color, zombie: true, scale: zs.sc, hands: zs.b4 ? ROTTEN_HANDS : zs.b3 ? INFECTED_HANDS : zs.b2 ? CRIMSON_HANDS : 0 });
+        // the Rotten One and his rotting walkers wear no horns — the rot is the whole crown
+        if ((zs.ho || zs.bo) && !zs.b4) for (const s of [-1, 1]) {
+          const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
+          horn.position.set((zs.bo ? 0.22 : 0.2) * s, zs.bo ? 0.3 : 0.28, 0.02);
+          horn.rotation.z = -0.55 * s; horn.rotation.x = -0.25;
+          blob.head.add(horn);
+        }
+        if (zs.b4) addRotGore(blob, { hangEye: true, chestHole: true }); // boss always hangs left
+        else if (zs.he || zs.rb || zs.pb) addRotGore(blob, { hangEye: !!zs.he, ribs: !!zs.rb, belly: !!zs.pb, eyeSide: Math.random() < 0.5 ? 1 : -1 });
+        // the tell-tale glows travel: a boss ghost carries his shield glow, a guard ghost
+        // its own body-colour glow — the same reads the host sees, on every client screen
+        if (zs.bo) attachBossGlow(blob, color);
+        else if (zs.gd) { const gl = makeLootGlow(color, { r: 0.85, y: 2.1, s: 1.5 }); blob.root.add(gl); blob.guardGlow = gl; }
       }
-      if (zs.b4) addRotGore(blob, { hangEye: true, chestHole: true }); // boss always hangs left
-      else if (zs.he || zs.rb || zs.pb) addRotGore(blob, { hangEye: !!zs.he, ribs: !!zs.rb, belly: !!zs.pb, eyeSide: Math.random() < 0.5 ? 1 : -1 });
-      // the tell-tale glows travel: a boss ghost carries his shield glow, a guard ghost
-      // its own body-colour glow — the same reads the host sees, on every client screen
-      if (zs.bo) attachBossGlow(blob, color);
-      else if (zs.gd) { const gl = makeLootGlow(color, { r: 0.85, y: 2.1, s: 1.5 }); blob.root.add(gl); blob.guardGlow = gl; }
       scene.add(blob.root);
       g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2, isBoss3: !!zs.b3, isBoss4: !!zs.b4,
         state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false,
-        purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh };
+        purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh, fbi: !!zs.fb, bluga: !!zs.bg };
       net.ghosts.set(zs.i, g);
       zombies.push(g);              // lives in the same list so shots + crosshair see it
     }
     g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st; g.sh = !!zs.sh;
+    if (g.fbi) { g.gv = !!zs.gv; g.tar = zs.ar; }  // Bluga's smoke-vanish + FBI gun-arm pitch
     if (zs.st === 1 && g.state !== 'dying') {
       g.state = 'dying'; g.deadT = 0;
       // gore for a kill we didn't make: a blood burst + splat, and pop the head on a gib /
@@ -11290,6 +11857,24 @@ function netClientWorldTick(dt) {
     const gy = groundHeight(g.pos.x, g.pos.z);
     b.root.position.set(g.pos.x, gy, g.pos.z);
     b.root.rotation.y = g.yaw;
+    // black-ops ghosts: mirror Bluga's smoke-vanish, and hold the gun on the streamed pitch
+    if (g.fbi) {
+      b.root.visible = !g.gv;
+      if (b.guardGlow) b.guardGlow.visible = !g.gv;
+      if (!g.gv) {
+        b.root.rotation.x = 0;
+        g.walkPhase += dt * 2.4;
+        const sw = Math.sin(g.walkPhase);
+        b.legs[0].rotation.x = sw * 0.45; b.legs[1].rotation.x = -sw * 0.45;
+        g.arS = lerp(g.arS ?? -Math.PI / 2, -Math.PI / 2 - (g.tar || 0) * 0.8, 1 - Math.exp(-12 * dt));
+        b.arms[b.gunArm].rotation.x = g.arS;
+        b.arms[b.offArm].rotation.x = -sw * 0.5;
+        if (b.guardGlow) animateLootGlow(b.guardGlow, game.time + (g.walkPhase || 0));
+      }
+      placeShadow(b, g.pos.x, g.pos.z);
+      updateFlash(b, dt);
+      continue;
+    }
     if (g.netSt === 2) b.root.rotation.x = -1.45;   // still sprawled / clawing out
     else {
       b.root.rotation.x = 0;
@@ -11554,6 +12139,7 @@ addEventListener('beforeunload', () => {
 refreshControlsBar();
 renderPrestige();
 equipWeapon('fists');
+applyLayout(defaultLayout()); // the classic deal: currentLayout + the collider net start coherent
 buildTown();
 buildSkyline(); // every tall structure has registered by now — raise the far-off silhouette
 game.clock = 9; wxReset(); applyEnvironment(); // a gentle mid-morning behind the menus
@@ -11580,6 +12166,8 @@ window.__dbg = {
   toggleFPV, bossState, spawnBoss, spawnBoss2, spawnBoss3, spawnBoss4, maybeSpawnBoss, applyEnvironment, completeCleanup, tradeWeapons, findNearTrade,
   jellyBar, chiliBar, lootJelly, lootChili, grantJelly, grantChili, eatChili, jellyRevive, goDown, hurtPlayer, JELLY, JELLY_G, jelly,
   updateGiant, giantStomp, openCrate, allCrates,
+  bluga, prestige, spawnBlugaFinal, startCameo, spawnFbi, updateBluga, FOUNTAIN, CAMEO_SPOT,
+  randomLayout, defaultLayout, applyLayout, rebuildTownWorld, PARK, CHURCHYARD, CHURCH, GRAVEYARD, COUSIN_HOMES, TOWN_RECTS, TOWN_BOUND, LAYOUT, scatterCousins,
   // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad
   // out, drop everyone at the picnic ground and stand the Rotten One up for the fight + trek
   rotten: (recruit = true) => {
