@@ -2416,9 +2416,21 @@ function updateClipmap(px, pz) {
 function updateChunks(px, pz) {
   const R = settings.viewR; // live-chunk rings off the Draw Distance notch
   const ccx = Math.round(px / CHUNK), ccz = Math.round(pz / CHUNK);
+  // mid-run, chunk building is BUDGETED: crossing a chunk line used to raise every missing
+  // chunk in the ring in one frame — a visible hitch, worst on phones. Now at most two go
+  // up per frame, nearest first; the fog + the ground clipmap cover the beat a far chunk's
+  // dressing takes to arrive. Menus and run-starts still build the whole ring at once
+  // (nobody is watching the frame clock there, and spawning wants solid ground NOW).
+  const missing = [];
   for (let dx = -R; dx <= R; dx++) for (let dz = -R; dz <= R; dz++) {
     const key = chunkKey(ccx + dx, ccz + dz);
-    if (!chunks.has(key)) chunks.set(key, buildChunk(ccx + dx, ccz + dz));
+    if (!chunks.has(key)) missing.push([key, ccx + dx, ccz + dz, dx * dx + dz * dz]);
+  }
+  if (missing.length) {
+    missing.sort((a, b) => a[3] - b[3]);
+    const budget = game.state === 'playing' ? 2 : missing.length;
+    for (let i = 0; i < Math.min(budget, missing.length); i++)
+      chunks.set(missing[i][0], buildChunk(missing[i][1], missing[i][2]));
   }
   for (const [key, ch] of chunks) {
     if (Math.abs(ch.cx - ccx) > R + 1 || Math.abs(ch.cz - ccz) > R + 1) unloadChunk(key, ch);
@@ -4601,7 +4613,7 @@ let tabTitle = null;
 // settings UI is built at load and reads net.role for the gore-horde notch glow, well before
 // the lobby code runs — a later const would still be in its temporal dead zone at that point.
 const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
-  ghosts: new Map(), actors: new Map(), recruits: new Map(), txT: 0, zid: 0, scan: null, leaving: false, barSig: '',
+  ghosts: new Map(), actors: new Map(), recruits: new Map(), txT: 0, zid: 0, pkid: 0, scan: null, leaving: false, barSig: '',
   hostPaused: false, hostGoreHorde: false };
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
@@ -5203,8 +5215,11 @@ function spawnPickup(kind, x, z, fromY) {
   const restY = supportTop(x, z, fromY != null ? fromY : groundHeight(x, z) + 0.1, 0.5);
   g.position.set(x, fromY != null ? fromY : restY, z);
   scene.add(g);
-  pickups.push({ mesh: g, kind, pos: new THREE.Vector3(x, 0, z), t: 0,
-    y: g.position.y, vy: 0, falling: fromY != null, restY });
+  const p = { mesh: g, kind, pos: new THREE.Vector3(x, 0, z), t: 0,
+    y: g.position.y, vy: 0, falling: fromY != null, restY,
+    nid: ++net.pkid };   // network id: the host streams its drops so every screen can loot them
+  pickups.push(p);
+  return p;
 }
 
 // ---------- particles / tracers ----------
@@ -5821,6 +5836,7 @@ function resetGame() {
   playerFadeEnd();
   player.giantPhase = null; player.giantScale = 1; player.giantT = 0; player.giantHpBoost = 0;
   player.finaleTp = null; // no half-finished finale warp follows anyone into a fresh run
+  if (net.camG) { scene.remove(net.camG.blob.root); if (net.camG.blob.shadow) scene.remove(net.camG.blob.shadow); net.camG = null; } // nor a stale cameo ghost
   playerBlob.root.scale.setScalar(1);
   jellyBar.lootedBy.clear(); applyJellyMask(0);
   chiliBar.lootedBy.clear(); applyChiliTaken(0);
@@ -6766,7 +6782,17 @@ function fireWeapon() {
       const dHit = hit.t;
       let died;
       if (hit.crow) {
-        killCrow(hit.crow, rdx, rdz, w.dmg * player.dmgMult * 2 * closeBonus(w, dHit) * rangeFactor(w, dHit));
+        if (net.role === 'client') {
+          // the host owns the bird: show the hit now (feathers + the number), ask for the
+          // kill, and the ghost falls out of the next snapshot with the full pop + drop
+          const cb = hit.crow;
+          if (!cb.shotPending) {
+            cb.shotPending = true;
+            spawnDamageNumber(cb.g.position.x, cb.g.position.y + 0.6, cb.g.position.z, Math.round(w.dmg * player.dmgMult * 2));
+            spawnParticles(cb.g.position.x, cb.g.position.y + 0.35, cb.g.position.z, CROW_FEATHER, 4, 2, 0.5);
+            try { net.conns[0].send({ t: 'crowShot', i: cb.nid }); } catch (e) {}
+          }
+        } else killCrow(hit.crow, rdx, rdz, w.dmg * player.dmgMult * 2 * closeBonus(w, dHit) * rangeFactor(w, dHit));
         died = true; // crows carry 1hp: first contact pops them
       } else {
         const dmg = w.dmg * player.dmgMult * (hit.isHead ? 2 : 1) * closeBonus(w, dHit) * rangeFactor(w, dHit);
@@ -8385,6 +8411,7 @@ function updateCompanions(dt) {
           if (c.gunMesh && c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_cv);
           else _cv.set(c.pos.x, sy2, c.pos.z);
           spawnTracer(_cv.clone(), bird.g.position.clone());
+          relayTracerFx(gun.id, _cv, bird.g.position); // Blomba's bird-shot draws on every screen
           killCrow(bird, (bird.g.position.x - c.pos.x) / bD, (bird.g.position.z - c.pos.z) / bD, (gun.dmg || 5) * 2);
           game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
           c.gunAmmo = (c.gunAmmo ?? Infinity) - 1; // a crow round comes off the same count
@@ -9802,6 +9829,14 @@ function fbiGuardsAlive() { return zombies.some(z => z.fbi && !z.bluga && z.stat
 // a black-ops blob's shot: a tracer from the muzzle to the mark, its own crack, and the
 // damage (guns miss sometimes — a far mark more than a near one)
 const _fbiFrom = new THREE.Vector3(), _fbiTo = new THREE.Vector3();
+// every host-side NPC muzzle line (FBI squads, Bluga's cameo, a cousin's crow shot) is
+// relayed so clients draw the same tracer and hear the same crack — the fight LOOKS the
+// same on every screen, not just where the simulation lives
+function relayTracerFx(wid, from, to) {
+  if (net.role !== 'host' || !net.conns.length) return;
+  const q = v => Math.round(v * 10) / 10;
+  netBroadcast({ t: 'ftr', w: wid, a: [q(from.x), q(from.y), q(from.z), q(to.x), q(to.y), q(to.z)] });
+}
 function fbiShoot(z, tx, ty, tz, target, td) {
   z.lastShotT = game.time;
   const gm = z.gunMesh;
@@ -9809,6 +9844,7 @@ function fbiShoot(z, tx, ty, tz, target, td) {
   else { _fbiFrom.set(z.pos.x, groundHeight(z.pos.x, z.pos.z) + 1.1 * z.scale, z.pos.z); }
   _fbiTo.set(tx, ty + 0.9, tz);
   spawnTracer(_fbiFrom, _fbiTo);
+  relayTracerFx(z.fbiWeapon, _fbiFrom, _fbiTo);
   const w = WEAPONS[z.fbiWeapon] || WEAPONS.rifle;
   if (Math.hypot(z.pos.x - player.pos.x, z.pos.z - player.pos.z) < 32) play3d(z.pos.x, z.pos.z, () => SFX.shoot(w));
   // hit chance falls off with range; a giant chili player only ever soaks 1
@@ -9921,6 +9957,7 @@ function startCameo() {
     bluga.cameo.prey.push(spawnZombie(cx + Math.sin(a) * d, cz + Math.cos(a) * d, 1, { mode: 'grave' }));
   }
   toast('WHO IS THAT BY THE FOUNTAIN .ᐟ', true);
+  if (net.role === 'host') netBroadcast({ t: 'cam' }); // every screen gets the callout; the show itself streams (cm)
 }
 function updateCameo(dt) {
   const c = bluga.cameo; if (!c) return;
@@ -9958,6 +9995,7 @@ function updateCameo(dt) {
         if (c.gunMesh.userData.muzzle) c.gunMesh.userData.muzzle.getWorldPosition(_fbiFrom);
         _fbiTo.set(tgt.pos.x, tgt.blob.root.position.y + 0.8, tgt.pos.z);
         spawnTracer(_fbiFrom, _fbiTo);
+        relayTracerFx('smg', _fbiFrom, _fbiTo); // the demonstration plays on every screen
         play3d(c.pos.x, c.pos.z, () => SFX.shoot(WEAPONS.smg));
         const d2 = td || 1;
         damageZombie(tgt, 40, (tgt.pos.x - c.pos.x) / d2, (tgt.pos.z - c.pos.z) / d2, 2, { isHead: false });
@@ -10169,6 +10207,7 @@ function buildCrow(x, y, z, roost) {
     ang: Math.random() * TAU, angSpd: 0.6, cx: x, cz: z, ra: 12, rb: 10,
     cruiseY: y + 12, flyT: 0, lx: x, ly: y, lz: z, leaveDir: 0 };
   if (purple && Math.random() < 0.5) crowRedBeak(c); // half the purples kept a pecker's beak
+  c.nid = ++net.zid; // the flock streams to clients now: every bird wears a wire id
   crows.push(c);
   return c;
 }
@@ -10347,6 +10386,7 @@ function crowTakeoff(c) {
 }
 // gunfire / impacts near perched or pecking crows flush them
 function scareCrows(x, z, r) {
+  if (net.role === 'client') return; // ghost birds take their cues from the stream (the host flushes for everyone — see the pew hook)
   if (!crows.length) return;
   const r2 = r * r;
   for (const c of crows) {
@@ -10360,6 +10400,7 @@ function scareCrows(x, z, r) {
 // every state (perched, landed, mid-hop, taking off, in flight) — crows have no
 // invincibility frames and gib from first contact the instant they're under the aim.
 function crowRayT(ox, oy, oz, dx, dy, dz, cw) {
+  if (cw.shotPending) return Infinity; // a ghost already claimed by our shot: no double taps
   const cs = cw.g.scale.x;
   const airborne = cw.state === 'fly' || cw.state === 'leave' || cw.state === 'descend';
   const r = (airborne ? 0.85 : 0.7) * cs; // wings-out flight silhouette is a touch wider
@@ -10438,6 +10479,25 @@ function resetCrows() {
   };
 }
 function updateCrows(dt) {
+  // a client's flock is the HOST's flock: no local spawning or brains — just fly the
+  // streamed ghosts smoothly between the 10Hz marks (airborne birds flap on the flight
+  // beat, grounded ones fold up and breathe), so every screen watches the same murder
+  if (net.role === 'client') {
+    const k = 1 - Math.exp(-8 * dt);
+    for (const c of crows) {
+      c.t += dt;
+      if (c.tx != null) {
+        c.g.position.x = lerp(c.g.position.x, c.tx, k);
+        c.g.position.y = lerp(c.g.position.y, c.ty, k);
+        c.g.position.z = lerp(c.g.position.z, c.tz, k);
+        c.g.rotation.y = angLerp(c.g.rotation.y, c.tyw || 0, k);
+      }
+      c.foldT = lerp(c.foldT != null ? c.foldT : 1, c.air ? 0 : 1, 1 - Math.exp(-6 * dt));
+      c.flap += dt * (c.air ? 16 : 2.2);
+      crowPose(c, Math.sin(c.flap) * (c.air ? 0.9 : 0.05), c.foldT);
+    }
+    return;
+  }
   // trickle spawner: top up the civic roosts, a few house-ridge sitters, and peckers
   if (!crowsGone) {
     crowSpawnT -= dt;
@@ -10689,6 +10749,19 @@ function updatePickups(dt) {
     p.mesh.rotation.y += dt * 2;
     const d = Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z);
     if (d < 1.1 && Math.abs(p.mesh.position.y - player.pos.y) < 2.2 && !player.dead) {
+      // a host drop seen through the stream: ASK the host for it (its world owns the loot);
+      // the grant comes back as pkGive and the ghost leaves with the next snapshot. Pre-check
+      // what we can actually take, so a full hand never wastes the jar on the host's side.
+      if (p.netGhost) {
+        p.reqT = (p.reqT || 0) - dt;
+        if (p.reqT <= 0) {
+          if (p.kind === 'bestjelly' && (player.owned.includes('jelly') || player.owned.includes('chili') || playerGiantAny())) continue;
+          if (p.kind === 'ammo' && player.weapon.melee) continue;
+          p.reqT = 0.6;
+          try { net.conns[0].send({ t: 'pkTake', i: p.nid }); } catch (e) {}
+        }
+        continue;
+      }
       if (p.kind === 'bestjelly') {
         // the good stuff off a black-ops guard: the jelly consumable, but only if a hand is free
         if (player.owned.includes('jelly') || player.owned.includes('chili')) continue; // one consumable at a time
@@ -11212,6 +11285,7 @@ function wireHostConn(conn) {
       if (c) {
         netRemotePew(c.blob, c.gunMesh, c.weapon, m.x, m.y, m.z);
         game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
+        scareCrows(m.x, m.z, 12); // a client's gunfire flushes the flock for EVERY screen
         for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'pew', p: c.netP, x: m.x, y: m.y, z: m.z }); } catch (e) {} }
       }
     } else if (m.t === 'emote') {
@@ -11252,6 +11326,25 @@ function wireHostConn(conn) {
         chiliBar.lootedBy.add(key);
         try { conn.send({ t: 'chiliGive' }); } catch (e) {}
       }
+    } else if (m.t === 'pkTake') {
+      // a client walked up on one of our streamed ground drops: hand it over if it still
+      // exists and they're really standing on it — first ask wins, the snapshot clears the
+      // ghost from every other screen on the next tick
+      const pc = cousinByConn(conn);
+      const pi = pickups.findIndex(p => !p.netGhost && p.nid === m.i);
+      if (pc && pi >= 0) {
+        const p = pickups[pi];
+        if (Math.hypot(pc.pos.x - p.pos.x, pc.pos.z - p.pos.z) < 3.4) {
+          scene.remove(p.mesh);
+          pickups.splice(pi, 1);
+          try { conn.send({ t: 'pkGive', k: p.kind === 'ammo' ? 0 : p.kind === 'medkit' ? 1 : 2 }); } catch (e) {}
+        }
+      }
+    } else if (m.t === 'crowShot') {
+      // a client's round found a bird: the host lands the kill — the gore plays here, the
+      // drop spawns here (and streams back), and the ghost leaves every screen's flock
+      const cb2 = crows.find(cc => cc.nid === m.i);
+      if (cb2) killCrow(cb2, 0, 0, 10);
     } else if (m.t === 'cswapKit') {
       // the reply half of a bare-skin trade: this player's old kit, bound for their partner
       const c = cousinByConn(conn);
@@ -11411,6 +11504,23 @@ function netHostTick(dt) {
   //    SKIPS this snapshot instead of queueing seconds of stale world behind it — a struggling
   //    client degrades to a lower snapshot rate and recovers, rather than falling ever further
   //    behind on a reliable ordered channel that never forgets.
+  // the host's ground drops ride along too (ammo boxes, medkits, BEST JELLY off the black
+  // ops): kind coded small, so every screen can SEE and walk up on the same loot
+  const pk = pickups.filter(p => !p.netGhost).map(p => ({ i: p.nid,
+    k: p.kind === 'ammo' ? 0 : p.kind === 'medkit' ? 1 : 2, x: R(p.pos.x), z: R(p.pos.z) }));
+  // the murder streams whole (it's small): same birds on the same ledges on every screen,
+  // so when Blomba picks one out of the sky, everyone watches the SAME crow drop
+  base.cw = crows.map(c => ({ i: c.nid, x: R(c.g.position.x), y: R(c.g.position.y), z: R(c.g.position.z),
+    yw: R(c.g.rotation.y), st: (c.state === 'fly' || c.state === 'leave' || c.state === 'descend') ? 1 : 0,
+    pu: c.purple ? 1 : 0, rk: c.redBeak ? 1 : 0, sc: R(c.g.scale.x) }));
+  base.cg = crowsGone ? 1 : 0;
+  // and Bluga's arena cameo, while it plays: position + phase, so every screen watches the
+  // same show (his prey zombies already ride the zombie stream like any walker)
+  if (bluga.cameo) {
+    const cc = bluga.cameo;
+    base.cm = { x: R(cc.pos.x), z: R(cc.pos.z), yw: R(cc.yaw),
+      ph: cc.greetT ? (bluga.camT < cc.greetT + 2.2 ? 1 : 2) : 0 };
+  }
   const INTEREST = Math.max(150, (scene.fog && scene.fog.far || 0) + 50);
   for (const conn of net.conns) {
     try {
@@ -11419,10 +11529,11 @@ function netHostTick(dt) {
       const seat = cousinByConn(conn);
       const sx = seat ? seat.pos.x : player.pos.x, sz = seat ? seat.pos.z : player.pos.z;
       base.zb = zb.filter(e => e.bo || e.fb || Math.hypot(e.x - sx, e.z - sz) < INTEREST);
+      base.pk = pk.filter(e => Math.hypot(e.x - sx, e.z - sz) < INTEREST);
       conn.send(base);
     } catch (e) {}
   }
-  base.zb = null; // never let the last client's filtered list linger on the shared object
+  base.zb = null; base.pk = null; // never let the last client's filtered lists linger on the shared object
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs) {
   const R = v => Math.round(v * 20) / 20;
@@ -11661,6 +11772,35 @@ function netClientData(m, conn, peer, code) {
     grantJelly();   // the host honoured our jar: it lands in the hand
   } else if (m.t === 'chiliGive') {
     grantChili();   // the host ladled our serving: bowl in hand, RED'S on the button
+  } else if (m.t === 'cam') {
+    toast('WHO IS THAT BY THE FOUNTAIN .ᐟ', true); // Bluga's show opens on our screen too
+  } else if (m.t === 'ftr') {
+    // a black-ops round (or a cousin's crow shot) fired on the host: the same tracer line
+    // and the same crack land here, so the fight LOOKS identical on every screen
+    _fbiFrom.set(m.a[0], m.a[1], m.a[2]); _fbiTo.set(m.a[3], m.a[4], m.a[5]);
+    spawnTracer(_fbiFrom, _fbiTo);
+    if (Math.hypot(m.a[0] - player.pos.x, m.a[2] - player.pos.z) < 32)
+      play3d(m.a[0], m.a[2], () => SFX.shoot(WEAPONS[m.w] || WEAPONS.rifle));
+  } else if (m.t === 'pkGive') {
+    // the host handed over the ground drop we asked for: grant it here, same numbers as local
+    if (m.k === 2) {
+      if (!player.owned.includes('jelly') && !player.owned.includes('chili') && !playerGiantAny()) {
+        equipWeapon('jelly');
+        toast('BEST JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true);
+        spawnParticles(player.pos.x, player.pos.y + 1.4, player.pos.z, 0xb06fff, 14, 4, 0.8);
+      }
+    } else if (m.k === 0) {
+      const wid = player.weapon.melee ? 'pistol' : player.weapon.id; // a melee hand banks it for the pistol
+      const add = Math.ceil((WEAPONS[wid].mag || 18) * 0.8 * player.ammoMult);
+      reserves[wid] = (reserves[wid] | 0) + add;
+      toast(`+${add} AMMO`);
+    } else {
+      player.hp = Math.min(player.maxHp, player.hp + 25);
+      toast('+25 HP');
+    }
+    SFX.pickup();
+    rumble(50, 0.2, 0.4);
+    updateAmmoHUD();
   } else if (m.t === 'finale') {
     // grandma remembered: melt out of wherever we are (the splash blur), cross the map,
     // and bloom back in on the ring spot the host set for us (player.finaleTp, updateJelly)
@@ -11715,6 +11855,78 @@ function netApplySnapshot(m) {
   game.cleanup = (m.ct || 0) > 0; game.clearTarget = m.ct || 0; game.quotaN = m.cq || 0;
   // and the consumable shelves: same jars gone, same bowls left, on every screen
   if (m.cjm !== undefined && m.cjm !== net._cjm) { net._cjm = m.cjm; applyJellyMask(m.cjm); }
+  // the host's ground drops, mirrored as loot ghosts: walk up on one and updatePickups asks
+  // the host for it (pkTake) instead of granting locally — the host's world owns the loot.
+  // Entries slide out of our interest ring (or get taken) → their ghosts leave with them.
+  if (m.pk) {
+    const seenP = new Set();
+    for (const e of m.pk) {
+      seenP.add(e.i);
+      if (!pickups.some(p => p.netGhost && p.nid === e.i)) {
+        const g = spawnPickup(e.k === 0 ? 'ammo' : e.k === 1 ? 'medkit' : 'bestjelly', e.x, e.z);
+        g.netGhost = true; g.nid = e.i; g.reqT = 0;
+      }
+    }
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      const p = pickups[i];
+      if (p.netGhost && !seenP.has(p.nid)) { scene.remove(p.mesh); pickups.splice(i, 1); }
+    }
+  }
+  // the murder, mirrored: same birds, same ledges, same purple glares on every screen.
+  // A bird gone from the stream was SHOT (pop its feathers here too) — unless the whole
+  // flock is leaving town (cg), which goes quietly.
+  if (m.cw) {
+    const seenC = new Set();
+    for (const e of m.cw) {
+      seenC.add(e.i);
+      let c = crows.find(cc => cc.nid === e.i);
+      if (!c) {
+        c = buildCrow(e.x, e.y, e.z);
+        c.nid = e.i; c.netGhost = true; c.foldT = e.st ? 0 : 1;
+        if (e.sc) c.g.scale.setScalar(e.sc);
+        if (!!e.pu !== c.purple) { // the stream's roll outranks our local one
+          c.purple = !!e.pu;
+          const ec = c.purple ? CROW_EYE_PURPLE : CROW_EYE_NORMAL;
+          for (const ey of c.eyes) ey.material = mat(ec, { emissive: ec, emissiveIntensity: 0.6 });
+        }
+        if (e.rk && !c.redBeak) crowRedBeak(c);
+        else if (!e.rk && c.redBeak) { c.redBeak = false; c.beak.material = mat(CROW_GREY); }
+      }
+      c.tx = e.x; c.ty = e.y; c.tz = e.z; c.tyw = e.yw; c.air = !!e.st;
+    }
+    for (let i = crows.length - 1; i >= 0; i--) {
+      const c = crows[i];
+      if (!seenC.has(c.nid)) {
+        if (!m.cg) {
+          const p = c.g.position;
+          spawnParticles(p.x, p.y + 0.35, p.z, CROW_FEATHER, 6, 2.5, 0.6);
+          crowCaw(p.x, p.z, 'die');
+        }
+        removeCrow(c);
+      }
+    }
+  }
+  // Bluga's arena cameo, mirrored: the ghost stands up when the show starts and keeps its
+  // phase (working the mob / the Good Luck turn / the slide-hop getaway) in step. When the
+  // entry stops streaming he's gone into the smoke here too.
+  if (m.cm) {
+    if (!net.camG) {
+      const blob = buildFbiBlob(BLUGA_FACE, true);
+      const gun = buildGunMesh('smg'); blob.gunSocket.add(gun);
+      blob.root.position.set(m.cm.x, groundHeight(m.cm.x, m.cm.z), m.cm.z);
+      scene.add(blob.root);
+      net.camG = { blob, x: m.cm.x, z: m.cm.z, yaw: m.cm.yw || 0, ph: 0, t: 0, greeted: false };
+    }
+    net.camG.tx = m.cm.x; net.camG.tz = m.cm.z; net.camG.tyw = m.cm.yw; net.camG.ph = m.cm.ph;
+  } else if (net.camG) {
+    const g = net.camG;
+    if (g.ph >= 1) { // he finished the show: the same smoke-grenade exit
+      for (let k2 = 0; k2 < 3; k2++) spawnParticles(g.x, groundHeight(g.x, g.z) + 1 + k2 * 0.4, g.z, 0x3a3a42, 20, 6, 1.1);
+      play3d(g.x, g.z, () => noiseBurst(0.5, 260, 0.8));
+    }
+    scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow);
+    net.camG = null;
+  }
   if (m.cct !== undefined && m.cct !== net._cct) { net._cct = m.cct; applyChiliTaken(m.cct); }
   updateQuotaHud();
   applyHostNotches(m.zs, m.ls, m.hg); // and the host's spawn dials + gore-horde, in case a change slipped past
@@ -11960,6 +12172,35 @@ function netClientWorldTick(dt) {
     animateRotGore(g, b);                              // rot hearts beat + eyes swing here too
     placeShadow(b, g.pos.x, g.pos.z);
     updateFlash(b, dt);
+  }
+  // Bluga's cameo ghost: glide to the streamed marks and wear the phase's pose — working
+  // the mob gun-up, the lowered-gun Good Luck turn (bubble fired once), or the bouncing
+  // slide-hop getaway north
+  if (net.camG) {
+    const g = net.camG, b = g.blob;
+    g.t = (g.t || 0) + dt;
+    const kk = 1 - Math.exp(-8 * dt);
+    g.x = lerp(g.x, g.tx ?? g.x, kk); g.z = lerp(g.z, g.tz ?? g.z, kk);
+    g.yaw = angLerp(g.yaw, g.tyw || 0, kk);
+    const gy = groundHeight(g.x, g.z);
+    b.root.position.set(g.x, gy, g.z);
+    b.root.rotation.y = g.yaw;
+    const sw = Math.sin(g.t * 7) * 0.4;
+    if (g.ph === 2) {
+      b.root.position.y = gy + Math.abs(Math.sin(g.t * 9)) * 0.55; // hop to hop, low slide
+      b.wob.rotation.x = -0.7; b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.3;
+      b.arms[b.gunArm].rotation.x = -0.3;
+    } else {
+      b.wob.rotation.x = 0;
+      b.legs[0].rotation.x = sw; b.legs[1].rotation.x = -sw;
+      b.arms[b.gunArm].rotation.x = g.ph === 1 ? -0.15 : -Math.PI / 2 + 0.1;
+      if (g.ph === 1 && !g.greeted) {
+        g.greeted = true;
+        spawnBubble(() => ({ x: g.x, y: groundHeight(g.x, g.z) + 3.4, z: g.z }), 'Good Luck .ᐟ', g);
+        SFX.pickup();
+      }
+    }
+    placeShadow(b, g.x, g.z, gy);
   }
   // the waiting cousins: idle sway under a slow-turning, breathing beacon — the same read
   // the host gives them (see the unrecruited branch of updateCompanions)
