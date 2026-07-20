@@ -155,7 +155,10 @@
   #finalstats .fsrow { display:flex; justify-content:space-between; align-items:baseline;
     opacity:0; transform:translateY(14px); transition:opacity .45s ease, transform .45s ease; }
   #finalstats .fsrow.in { opacity:1; transform:translateY(0); }
-  #finalstats .fsrow span { color:#e8e2d8; font-size:12px; letter-spacing:.2em; }
+  #finalstats .fsrow span { color:#e8e2d8; font-size:12px; letter-spacing:.2em;
+    display:flex; align-items:center; gap:8px; }
+  #finalstats .fsrow span svg { width:18px; height:18px; flex:0 0 auto; color:#ffb347;
+    filter:drop-shadow(0 1px 2px #000); }
   #finalstats .fsrow b { color:#ffd24a; font-size:22px; font-weight:800; text-shadow:0 1px 3px #000; font-variant-numeric:tabular-nums; }
 
   #bottomright { position:absolute; right:calc(16px + env(safe-area-inset-right)); bottom:calc(14px + env(safe-area-inset-bottom)); text-align:right; color:#fff; }
@@ -310,6 +313,10 @@
      and swells in place, so it reads as "boss" at a glance without any text clutter */
   .ptag.boss b { display:none; }
   .ptag.boss i { font-size:24px; margin-top:0; animation:bossTagBounce 1.1s ease-in-out infinite; }
+  /* the hunt's last stragglers: a tiny label-less green chevron so the final ten of a
+     clear-the-block cleanup can be tracked down across the map */
+  .ptag.mini b { display:none; }
+  .ptag.mini i { font-size:11px; margin-top:0; }
   @keyframes bossTagBounce {
     0%, 100% { transform:translateY(0) scale(1); }
     50% { transform:translateY(-4px) scale(1.2); }
