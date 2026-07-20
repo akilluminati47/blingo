@@ -11394,13 +11394,35 @@ function netHostTick(dt) {
       dp: z.diedPop ? 1 : 0 });           // this death popped the head (gib/headshot) → clients burst it too
   }
   const boss = bossState.boss;
-  netBroadcast({ t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, zb, rc,
+  const base = { t: 's', tm: R(game.time), k: game.kills, w: game.weather, ph: game.phase, ck: R(game.clock * 100) / 100, ac, rc,
     bb: boss && boss.state !== 'dormant' && boss.state !== 'dying' ? clamp(boss.hp / boss.maxHp, 0, 1) : -1,
     b2: !!(boss && boss.isBoss2), b3: !!(boss && boss.isBoss3), b4: !!(boss && boss.isBoss4), // which one is up: clients dress the bar in his colours
     ct: game.cleanup ? game.clearTarget : 0, cq: game.quotaN || 0, // cleanup quota, so every screen runs the REMAIN readout
     cjm: jellyBar.mask, cct: chiliBar.taken, // the consumable shelves, so every screen shows the same jars + bowls left
     blg: bluga.boss ? clamp(bluga.boss.hp / bluga.boss.maxHp, 0, 1) : -1, // Bluga's bar, streamed to every screen
-    zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 }); // host's spawn dials + gore-horde, mirrored on every client
+    zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0 }; // host's spawn dials + gore-horde, mirrored on every client
+  // --- per-connection delivery, tuned for laggy coop ---
+  // 1) INTEREST FILTER: each client only receives the zombies near ITS OWN hero (plus every
+  //    boss and black-ops blob, whose bars/beams must sync at any range). A gore-horde of 30
+  //    walkers used to ride every snapshot to every phone, 10 times a second — most of them
+  //    two blocks away in the fog. The ghost machinery already grows/culls from the stream,
+  //    so entries appearing and vanishing at the interest ring costs nothing extra.
+  // 2) BACKPRESSURE: a connection whose send buffer is backing up (weak wifi mid-retransmit)
+  //    SKIPS this snapshot instead of queueing seconds of stale world behind it — a struggling
+  //    client degrades to a lower snapshot rate and recovers, rather than falling ever further
+  //    behind on a reliable ordered channel that never forgets.
+  const INTEREST = Math.max(150, (scene.fog && scene.fog.far || 0) + 50);
+  for (const conn of net.conns) {
+    try {
+      const dc = conn.dataChannel;
+      if (dc && dc.bufferedAmount > 65536) continue; // let the pipe drain; the next tick retries
+      const seat = cousinByConn(conn);
+      const sx = seat ? seat.pos.x : player.pos.x, sz = seat ? seat.pos.z : player.pos.z;
+      base.zb = zb.filter(e => e.bo || e.fb || Math.hypot(e.x - sx, e.z - sz) < INTEREST);
+      conn.send(base);
+    } catch (e) {}
+  }
+  base.zb = null; // never let the last client's filtered list linger on the shared object
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs) {
   const R = v => Math.round(v * 20) / 20;
@@ -12373,11 +12395,40 @@ let splashRenderer = null, splashScene = null, splashCam = null, splashBlobs = n
   splash.sizeFn = splashSize; // splashTick re-checks each frame: a pane that reported
   // zero width at boot (hidden tab, prerender) heals itself the moment it has a size
 }
-// assets in (window load covers the icon images), and the door opens for input
+// LOADING . . holds the door until the game is actually warm, not just until the icon
+// images landed. The warmup builds one of everything a run will need (guns, a black-ops
+// blob, a rotting walker, the loot glow) into a hidden pocket to prime the material +
+// geometry caches, then renderer.compile() bakes every shader the standing town uses —
+// so the first firefight never stutters on a mid-frame shader compile. Spread across
+// idle frames; the click/tap prompt only appears once it's all done.
+let splashWarmed = false;
+function splashWarmup() {
+  if (splashWarmed) return;
+  splashWarmed = true;
+  const pocket = new THREE.Group();
+  pocket.position.set(0, -60, 0);          // under the world: present for compile, never seen
+  try {
+    for (const id of Object.keys(WEAPONS)) if (id !== 'fists') pocket.add(buildGunMesh(id));
+    const fbi = buildFbiBlob(0x6fd8ff, false); pocket.add(fbi.root); if (fbi.shadow) scene.remove(fbi.shadow);
+    const rot = buildBlob({ color: 0x6fae4e, zombie: true });
+    addRotGore(rot, { hangEye: true, ribs: true, belly: true });
+    pocket.add(rot.root); if (rot.shadow) scene.remove(rot.shadow);
+    pocket.add(makeLootGlow(0xffdc78, {}));
+    pocket.add(makeLootGlow(0, { dark: true }));
+    scene.add(pocket);
+    renderer.compile(scene, camera);       // every material in town + the pocket, baked now
+  } catch (e) {}
+  setTimeout(() => {                       // one beat later: the pocket leaves, caches stay warm
+    scene.remove(pocket);
+    pocket.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose(); });
+    splash.ready = true;
+    document.getElementById('splashHint').textContent = IS_TOUCH ? 'TAP ANYWHERE .ᐟ' : 'CLICK .ᐟ ANY KEY .ᐟ ANY BUTTON .ᐟ';
+  }, 120);
+}
 function splashReady() {
-  if (splash.ready) return;
-  splash.ready = true;
-  document.getElementById('splashHint').textContent = IS_TOUCH ? 'TAP ANYWHERE .ᐟ' : 'CLICK .ᐟ ANY KEY .ᐟ ANY BUTTON .ᐟ';
+  if (splash.ready || splashWarmed) return;
+  // give the splash a frame to paint LOADING . . before the warmup blocks the thread
+  requestAnimationFrame(() => requestAnimationFrame(splashWarmup));
 }
 if (document.readyState === 'complete') splashReady();
 else addEventListener('load', splashReady);
