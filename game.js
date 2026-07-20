@@ -5820,6 +5820,7 @@ function resetGame() {
   player.jellyT = 0;
   playerFadeEnd();
   player.giantPhase = null; player.giantScale = 1; player.giantT = 0; player.giantHpBoost = 0;
+  player.finaleTp = null; // no half-finished finale warp follows anyone into a fresh run
   playerBlob.root.scale.setScalar(1);
   jellyBar.lootedBy.clear(); applyJellyMask(0);
   chiliBar.lootedBy.clear(); applyChiliTaken(0);
@@ -8150,18 +8151,25 @@ function updateCompanions(dt) {
       continue;
     }
     // mid-teleport: the splash melt. Fade out where they stand, cross over, fade back in
-    // at the formation slot — no walking, no fighting, just the dissolve.
+    // at the formation slot — no walking, no fighting, just the dissolve. A tp carrying its
+    // own tx/tz (the finale gather) crosses to THAT spot instead; a negative starting t is
+    // a stagger delay, so the family melts out one after another instead of as one flash.
     if (c.tp) {
       c.tp.t += dt;
-      const k = Math.min(c.tp.t / 0.32, 1);
+      const k = Math.min(Math.max(c.tp.t, 0) / 0.32, 1);
       if (c.tp.phase === 0) {
         setBlobFade(c, 1 - k);
         if (k >= 1) {
-          const ii = c.slotIdx || 0;
-          let tx = player.pos.x + bkX * (2 + ii * 1.5), tz = player.pos.z + bkZ * (2 + ii * 1.5);
+          let tx, tz;
+          if (c.tp.tx !== undefined) { tx = c.tp.tx; tz = c.tp.tz; }
+          else {
+            const ii = c.slotIdx || 0;
+            tx = player.pos.x + bkX * (2 + ii * 1.5); tz = player.pos.z + bkZ * (2 + ii * 1.5);
+          }
           [tx, tz] = resolveCollision(tx, tz, 0.42);
           c.pos.x = tx; c.pos.z = tz;
           c.y = groundHeight(tx, tz); c.vy = 0; c.grounded = true;
+          if (c.tp.burst) spawnParticles(tx, c.y + 1.2, tz, c.data.color, 10, 4, 0.8); // arrival sparkle
           c.tp.phase = 1; c.tp.t = 0;
         }
       } else {
@@ -8253,7 +8261,9 @@ function updateCompanions(dt) {
     // teleport catch-up only when left FAR behind — 60m now, not 30, so a slide-hopping
     // cousin gets to show she can close a real gap on her own legs before the world
     // cheats for her. Never during a Wait: they were told to stay put, and stay they do.
-    if (pd > 60 && cmd !== 'wait' && !playerGiantOn()) {
+    if (pd > 60 && cmd !== 'wait' && !playerGiantOn() && !jelly.awake) {
+      // (never during the finale party: the family was gathered onto grandma's ring on
+      // purpose — the catch-up must not yank anyone back out of the reunion)
       c.tp = { t: 0, phase: 0 };   // the splash-screen melt, worldside (handled above)
       beginBlobFade(c);
       continue;
@@ -9586,21 +9596,29 @@ function grandmaWake() {
   if (jelly.awake) return;
   recordPrestige();
   startFinale();
-  // gather every cousin to the reunion: AI cousins are placed straight onto the ring
-  // (wounds healed — the jelly stops the rot); human-run cousins are asked to step
-  // through on their own screens (tpJelly), and the host pre-moves their bodies so the
-  // room fills the same instant everywhere
+  // gather every cousin to the reunion — THEATRICALLY. Each AI cousin melts out in turn
+  // (the splash blur, staggered a beat apart), crosses the whole map, and blooms back in
+  // on the ring around her, healed — the jelly stops the rot. Human-run cousins get the
+  // same melt on their OWN screens (the 'finale' message drives player.finaleTp there),
+  // and their host-side bodies wear it too when the teleported pose stream lands
+  // (netPoseCompanion's long-jump melt). Nobody ever just blinks into the room.
   const ring = companions.filter(c => c.recruited);
   ring.forEach((c, i) => {
     const a = (i / Math.max(ring.length, 1)) * TAU + 0.6;
     const x = JELLY_G.x + Math.sin(a) * 2.5, z = JELLY_G.z + Math.cos(a) * 2.5; // ringed round her, clear of the table
-    c.pos.x = x; c.pos.z = z; c.y = jelly.gy;
     c.downed = false; c.hp = c.maxHp;
     if (c.beacon) { scene.remove(c.beacon); c.beacon = null; }
-    if (c.netPose) { c.netPose.x = x; c.netPose.z = z; c.netPose.y = jelly.gy; }
-    if (c.netP && c.netConn) { try { c.netConn.send({ t: 'finale', x, z }); } catch (e) {} }
-    spawnParticles(x, jelly.gy + 1.2, z, c.data.color, 10, 4, 0.8);
+    if (c.netP) {
+      if (c.netConn) { try { c.netConn.send({ t: 'finale', x, z }); } catch (e) {} }
+    } else {
+      if (!c.tpMats) beginBlobFade(c);
+      c.tp = { t: -0.22 * i, phase: 0, tx: x, tz: z, burst: true }; // one after another, oldest cousin first
+    }
   });
+  // and the hero who DIDN'T reach her first (a client triggered the wake): the host's own
+  // body joins the family through the same melt instead of missing its own party
+  if (Math.hypot(player.pos.x - JELLY_G.x, player.pos.z - JELLY_G.z) > 12)
+    player.finaleTp = { t: 0, x: JELLY_G.x + Math.sin(-0.9) * 2.5, z: JELLY_G.z + Math.cos(-0.9) * 2.5 };
   rebuildSquadBars();
   toast('GRANDMA BLINGO .ᐟ THE FAMILY IS WHOLE AGAIN .ᐟ', true);
 }
@@ -9642,6 +9660,29 @@ function buildFinalStats() {
 function hideFinalStats() { finalStatsEl.classList.add('hidden'); finalStatsEl.innerHTML = ''; }
 function updateJelly(dt) {
   if (!jelly.beacon) return;
+  // the finale warp on your OWN body: the splash melt — fade out where you stood, cross
+  // the whole map at the dip, bloom back in on grandma's ring, healed on arrival. Runs on
+  // whichever screen owns this hero (the host pulled to a client's wake, or a client
+  // answering the 'finale' call), so ending a run reads smooth on every screen at once.
+  if (player.finaleTp) {
+    const ft = player.finaleTp;
+    if (!ft.began) { ft.began = true; if (!player.giantPhase) playerFadeBegin(); }
+    ft.t += dt;
+    const k = Math.min(ft.t / 0.9, 1);
+    if (player._fade) setBlobFade(player._fade, Math.max(k < 0.5 ? 1 - k * 2 : (k - 0.5) * 2, 0.06));
+    if (!ft.crossed && k >= 0.5) {
+      ft.crossed = true;
+      player.pos.set(ft.x, groundHeight(ft.x, ft.z), ft.z);
+      player.vy = 0;
+      if (player.downed) { // the jelly stops the rot: the party stands you up whole
+        player.downed = false; player.downT = 0; player.jellyT = 0; player.hp = player.maxHp;
+        if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
+        playerBlob.wob.rotation.x = 0;
+      }
+      spawnParticles(ft.x, player.pos.y + 1.2, ft.z, myCousinData().color, 10, 4, 0.8);
+    }
+    if (k >= 1) { if (!player.giantPhase) playerFadeEnd(); player.finaleTp = null; }
+  }
   jelly.beacon.material.opacity = 0.24 + Math.sin(performance.now() * 0.0035) * 0.1;
   jelly.beacon.rotation.y += dt * 0.3;
   const b = jelly.ghost;
@@ -11599,11 +11640,9 @@ function netClientData(m, conn, peer, code) {
   } else if (m.t === 'chiliGive') {
     grantChili();   // the host ladled our serving: bowl in hand, RED'S on the button
   } else if (m.t === 'finale') {
-    // grandma remembered: step into the ring spot the host set for us and join the party
-    player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
-    player.vy = 0;
-    if (player.downed) { player.downed = false; player.hp = player.maxHp; } // the jelly stops the rot
-    spawnParticles(m.x, player.pos.y + 1.2, m.z, myCousinData().color, 10, 4, 0.8);
+    // grandma remembered: melt out of wherever we are (the splash blur), cross the map,
+    // and bloom back in on the ring spot the host set for us (player.finaleTp, updateJelly)
+    player.finaleTp = { t: 0, x: m.x, z: m.z };
     recordPrestige();                 // the family clear counts toward your badges too
     startFinale();
     toast('GRANDMA BLINGO .ᐟ THE FAMILY IS WHOLE AGAIN .ᐟ', true);
@@ -11795,6 +11834,18 @@ function netClientWorldTick(dt) {
   const k = 1 - Math.exp(-10 * dt);
   for (const [, g] of net.actors) {
     const b = g.blob;
+    // a streamed TELEPORT (the finale gather): this actor just crossed the whole map —
+    // snap them over with the splash melt instead of letting the lerp slide them there
+    if (g.tx != null && Math.hypot(g.tx - b.root.position.x, g.tz - b.root.position.z) > 25) {
+      if (!g.tpMats) beginBlobFade(g);
+      g.meltT = 0.5;
+      b.root.position.x = g.tx; b.root.position.z = g.tz;
+    }
+    if (g.meltT > 0) {
+      g.meltT -= dt;
+      setBlobFade(g, clamp(1 - Math.max(g.meltT, 0) / 0.5, 0.05, 1));
+      if (g.meltT <= 0) endBlobFade(g);
+    }
     b.root.position.x = lerp(b.root.position.x, g.tx ?? b.root.position.x, k);
     b.root.position.z = lerp(b.root.position.z, g.tz ?? b.root.position.z, k);
     b.root.position.y = g.ty ?? b.root.position.y;
@@ -11827,7 +11878,7 @@ function netClientWorldTick(dt) {
       const ns = lerp(gsNow, gsTgt, 1 - Math.exp(-6 * dt));
       b.root.scale.setScalar(ns);
       setBlobFade(g, 0.35 + 0.65 * Math.abs(ns - (gsNow < gsTgt ? 1 : GIANT_SCALE)) / (GIANT_SCALE - 1));
-    } else if (g.tpMats && !g.dn) { endBlobFade(g); b.root.scale.setScalar(gsTgt); }
+    } else if (g.tpMats && !g.dn && !(g.meltT > 0)) { endBlobFade(g); b.root.scale.setScalar(gsTgt); }
     placeShadow(b, b.root.position.x, b.root.position.z, b.root.position.y);
     updateFlash(b, dt);
   }
@@ -12089,6 +12140,18 @@ function netPoseCompanion(c, dt) {
   const p = c.netPose;
   const b = c.blob;
   if (p) {
+    // a streamed TELEPORT (the finale gather warping this player across the map): snap
+    // over with the splash melt — blooming in from nothing — never a cross-map slide
+    if (Math.hypot(p.x - c.pos.x, p.z - c.pos.z) > 25) {
+      if (!c.tpMats) beginBlobFade(c);
+      c.meltT = 0.5;
+      c.pos.x = p.x; c.pos.z = p.z;
+    }
+    if (c.meltT > 0) {
+      c.meltT -= dt;
+      setBlobFade(c, clamp(1 - Math.max(c.meltT, 0) / 0.5, 0.05, 1));
+      if (c.meltT <= 0 && !c.tp) { endBlobFade(c); }
+    }
     const k = 1 - Math.exp(-12 * dt);
     c.pos.x = lerp(c.pos.x, p.x, k);
     c.pos.z = lerp(c.pos.z, p.z, k);
@@ -12124,7 +12187,7 @@ function netPoseCompanion(c, dt) {
     const ns = lerp(cgNow, cgTgt, 1 - Math.exp(-6 * dt));
     b.root.scale.setScalar(ns);
     setBlobFade(c, 0.35 + 0.65 * Math.abs(ns - (cgNow < cgTgt ? 1 : GIANT_SCALE)) / (GIANT_SCALE - 1));
-  } else if (c.tpMats && !c.tp && !c.downed) { endBlobFade(c); b.root.scale.setScalar(cgTgt); }
+  } else if (c.tpMats && !c.tp && !c.downed && !(c.meltT > 0)) { endBlobFade(c); b.root.scale.setScalar(cgTgt); }
   placeShadow(b, c.pos.x, c.pos.z, c.y);
   updateFlash(b, dt);
 }
@@ -12167,6 +12230,7 @@ window.__dbg = {
   jellyBar, chiliBar, lootJelly, lootChili, grantJelly, grantChili, eatChili, jellyRevive, goDown, hurtPlayer, JELLY, JELLY_G, jelly,
   updateGiant, giantStomp, openCrate, allCrates,
   bluga, prestige, spawnBlugaFinal, startCameo, spawnFbi, updateBluga, FOUNTAIN, CAMEO_SPOT,
+  spawnJellyMarks, grandmaWake, findNearGrandma,
   randomLayout, defaultLayout, applyLayout, rebuildTownWorld, PARK, CHURCHYARD, CHURCH, GRAVEYARD, COUSIN_HOMES, TOWN_RECTS, TOWN_BOUND, LAYOUT, scatterCousins,
   // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad
   // out, drop everyone at the picnic ground and stand the Rotten One up for the fight + trek
@@ -12211,7 +12275,7 @@ window.__dbg = {
   setSky: (phase, weather) => { game.clock = [8, 13, 18.7, 23][phase] ?? 13; if (weather) wxSet(weather); applyEnvironment(); },
   setClock: (h) => { game.clock = h % 24; applyEnvironment(); },
   recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),
-  step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateCelebration(dt); updateFx(dt); },
+  step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateJelly(dt); updateCelebration(dt); updateFx(dt); },
 };
 
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------
