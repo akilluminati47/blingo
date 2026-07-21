@@ -749,8 +749,19 @@ function initAudio() {
   masterGain = actx.createGain(); masterGain.gain.value = settings.master; masterGain.connect(actx.destination);
   sfxGain = actx.createGain(); sfxGain.gain.value = settings.sfx; sfxGain.connect(masterGain);
   musicGain = actx.createGain(); musicGain.gain.value = settings.music; musicGain.connect(masterGain);
-  ambGain = actx.createGain(); ambGain.gain.value = settings.ambience; ambGain.connect(masterGain);
+  // the world starts silent: the picker is a quiet, black stage. Ambience only rises once a
+  // run begins (rampWorldAudio, from startRun) and falls back to nothing on the way to the menu.
+  ambGain = actx.createGain(); ambGain.gain.value = game.state === 'menu' ? 0 : settings.ambience; ambGain.connect(masterGain);
   startAmbience();
+}
+// fade the world's ambience up (run start) or down (back to the menu), so the world audio
+// arrives and leaves with its black-veil visual instead of snapping on
+function rampWorldAudio(target, secs) {
+  if (!actx || !ambGain) return;
+  const t = actx.currentTime;
+  ambGain.gain.cancelScheduledValues(t);
+  ambGain.gain.setValueAtTime(Math.max(0.0001, ambGain.gain.value), t);
+  ambGain.gain.linearRampToValueAtTime(Math.max(0.0001, target), t + secs);
 }
 // iOS / iPadOS keeps a fresh AudioContext 'suspended' until it's resumed INSIDE a real user
 // gesture AND a buffer has actually played through it — a bare resume() isn't enough, and a
@@ -779,7 +790,7 @@ function applyAudioSettings() {
   masterGain.gain.value = blurMuted ? 0 : settings.master;
   sfxGain.gain.value = settings.sfx;
   musicGain.gain.value = settings.music;
-  ambGain.gain.value = settings.ambience;
+  ambGain.gain.value = game.state === 'menu' ? 0 : settings.ambience; // the menu stays a silent stage
 }
 function noiseBurst(dur, freq, vol, type = 'lowpass') {
   if (!actx) return;
@@ -6079,6 +6090,9 @@ function startRun() {
   document.body.classList.add('playing');
   resetGame();
   game.state = 'playing';
+  // the black stage lifts and the world's own audio rises with it (the veil fade is CSS,
+  // keyed off body.playing) — single or multi, the block comes up out of the dark
+  rampWorldAudio(settings.ambience, 1.1);
   // now that we're in as a cousin, lock the tab title to them: spell it once more, then hold
   tabTitle && tabTitle.lockTo(COUSINS.findIndex(c => c.id === selectedCousin));
   if (input.device === 'kbm') grabPointer();
@@ -6251,6 +6265,7 @@ function quitToMenu(keepChain) {
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   hideFinalStats(); // grandma's tally never follows you onto the menu
   if (!keepChain) { sessionCampaign = 0; lastLmD = null; }
+  rampWorldAudio(0, 0.6); // the world sinks back to a silent black stage behind the picker
   stopTheme();
   netLeave();
   tabTitle && tabTitle.unlock(); // back at the menu: the tab title cycles the family again

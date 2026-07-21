@@ -22,6 +22,11 @@
   :root { --hero:#ff8c42; }
   #c { position:fixed; inset:0; display:block; }
   body.playing:not(.touchmode) #c { cursor:none; } /* the game draws its own X cursor */
+  /* the black stage: the world sits vignetted-to-black behind the picker, and lifts on run
+     start (body.playing) in step with the ambience fade — the block rises out of the dark */
+  #worldveil { position:fixed; inset:0; z-index:2; pointer-events:none; opacity:1;
+    background:radial-gradient(125% 105% at 50% 42%, #05060a 28%, #000 100%); transition:opacity 1.1s ease; }
+  body.playing #worldveil { opacity:0; }
 
   /* ---------- HUD ---------- */
   #hud { position:fixed; inset:0; pointer-events:none; z-index:10; }
@@ -251,8 +256,10 @@
     font-size:16px; font-weight:700; letter-spacing:2px; padding:13px 30px; transition:color .12s; }
   .modebtn:first-child { border-right:2px solid var(--hero); }
   .modebtn:hover, .modebtn.focus { background:var(--hero); color:#10131a; }
-  /* discreet footer link to the policies + live cousin-theme player */
-  #policieslink { pointer-events:auto; margin-top:16px; font-size:12px; letter-spacing:1px; opacity:.55;
+  /* discreet link to the policies + live cousin-theme player, pinned to the picker's
+     bottom-right corner (fixed, so it escapes the centred column and hides with the screen) */
+  #policieslink { pointer-events:auto; position:fixed; right:16px; bottom:14px; margin:0; z-index:31;
+    font-size:12px; letter-spacing:1px; opacity:.6;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   #policieslink a { color:#9aa4b2; text-decoration:none; border-bottom:1px solid rgba(154,164,178,.35); }
   #policieslink a:hover { color:#6fd8ff; border-bottom-color:#6fd8ff; opacity:1; }
@@ -624,6 +631,9 @@
 </head>
 <body>
 <canvas id="c"></canvas>
+<!-- the black stage: the world sits fully vignetted-to-black behind the picker and fades
+     up the moment a run starts (body.playing), in step with the ambience rising -->
+<div id="worldveil"></div>
 
 <div id="hud">
   <div id="vignette"></div>
