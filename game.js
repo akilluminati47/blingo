@@ -6238,16 +6238,19 @@ function resumeGame() {
   scheduleControlsFade();
   if (net.role === 'host') netBroadcast({ t: 'hpause', on: 0 }); // the lobby resumes with us
 }
-function quitToMenu() {
+// keepChain: true only when the family was just made whole (the finale sends us here). A WIN
+// banks the campaign so the very next solo run is new-game-plus — Bluga stalking, the landmark
+// ladder pushed farther out — exactly as in a held-open lobby. Every OTHER way back to the menu
+// (dying, the pause-menu quit, a dropped connection) is a give-up that starts the session over:
+// the hardcoded Bluga-less classic town again, the distance ladder reset.
+function quitToMenu(keepChain) {
   game.state = 'menu';
   pauseScreen.classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   hideFinalStats(); // grandma's tally never follows you onto the menu
-  // quitting to the menu restarts the session's campaign: the next run is the hardcoded
-  // Bluga-less classic town again, and the landmark-distance ladder starts over
-  sessionCampaign = 0; lastLmD = null;
+  if (!keepChain) { sessionCampaign = 0; lastLmD = null; }
   stopTheme();
   netLeave();
   tabTitle && tabTitle.unlock(); // back at the menu: the tab title cycles the family again
@@ -6258,7 +6261,9 @@ function togglePause() {
   else if (game.state === 'paused') resumeGame();
 }
 document.getElementById('resumebtn').addEventListener('click', resumeGame);
-document.getElementById('quitbtn').addEventListener('click', quitToMenu);
+// wrapped, not passed straight: a click hands the listener a (truthy) MouseEvent, which
+// quitToMenu would read as keepChain — the pause-menu quit is a give-up and must reset
+document.getElementById('quitbtn').addEventListener('click', () => quitToMenu());
 addEventListener('keydown', e => {
   if (e.code === 'Escape' || e.code === 'KeyP') {
     // pointer-lock release already paused us on this same Esc press
@@ -9758,7 +9763,9 @@ function updateCelebration(dt) {
   }
   if (game.celebrateT <= 1) fadeEl.classList.add('show');
   if (game.celebrateT <= 0) {
-    quitToMenu();
+    // jelly.awake means this was the grandma finale (a win), not a mid-run block clear: bank
+    // the campaign so the next solo run rolls into new-game-plus (Bluga + the farther deal)
+    quitToMenu(jelly.awake);
     setTimeout(() => fadeEl.classList.remove('show'), 300);
   }
 }
