@@ -53,8 +53,22 @@
   .nowmid{flex:1;min-width:0}
   .nowmeta{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--dim);margin-bottom:7px}
   .nowmeta b{color:var(--ink);font-family:var(--blob);font-weight:700;letter-spacing:.5px}
-  .bar{height:7px;background:rgba(255,255,255,.1);border-radius:6px;overflow:hidden}
-  .bar>i{display:block;height:100%;width:0;background:var(--c,#6fd8ff);border-radius:6px;transition:width .12s linear}
+  /* the scrubber is seekable: tap/click anywhere on it, or grab the coloured ball at the
+     play-head and drag — the song snaps to that spot on release. overflow stays visible so
+     the ball rides proud of the 7px track; a taller invisible ::before widens the hit area. */
+  .bar{height:7px;background:rgba(255,255,255,.1);border-radius:6px;position:relative;
+    cursor:pointer;touch-action:none}
+  .bar::before{content:'';position:absolute;left:0;right:0;top:-9px;bottom:-9px}
+  .bar>i{position:relative;display:block;height:100%;width:0;background:var(--c,#6fd8ff);
+    border-radius:6px;transition:width .12s linear}
+  /* the play-head ball: a coloured knob riding the right edge of the fill */
+  #nowHandle{position:absolute;right:-8px;top:50%;width:16px;height:16px;margin-top:-8px;
+    border-radius:50%;background:var(--c,#6fd8ff);border:2px solid rgba(255,255,255,.9);
+    box-shadow:0 0 10px var(--c,#6fd8ff),0 1px 3px rgba(0,0,0,.55);cursor:grab;
+    transition:transform .12s ease}
+  #nowHandle:hover,.now.scrub #nowHandle{transform:scale(1.18);cursor:grabbing}
+  .now.scrub #nowFill{transition:none}         /* the ball tracks the finger 1:1 while scrubbing */
+  .now:not(.armed) #nowHandle{display:none}    /* no play-head until a song is loaded */
   /* notch volume, sitting directly under the scrubber and the same width */
   /* ten notches spanning the full scrubber width, so they sit centred right under it */
   .vol{margin-top:10px}
@@ -114,7 +128,7 @@
       <div class="eq" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
       <div class="nowmid">
         <div class="nowmeta"><b id="nowName">Pick a cousin</b><span id="nowInfo">live MIDI player</span></div>
-        <div class="bar"><i id="nowFill"></i></div>
+        <div class="bar" id="scrub" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="nowFill"><span id="nowHandle" aria-hidden="true"></span></i></div>
         <div class="vol"><div class="pips" id="pips" role="group" aria-label="Volume"></div></div>
       </div>
     </div>
@@ -267,7 +281,9 @@ const midiHz = m => 440 * Math.pow(2, (m-69)/12);
 
 const P = { ctx:null, master:null, noise:null, cache:{},
             notes:null, dur:0, program:null, idx:0, startAt:0,
-            timer:null, raf:null, cousin:null, playing:false, nodes:[], vol:0.8 };
+            timer:null, raf:null, cousin:null, playing:false, nodes:[], vol:0.8, scrubbing:false };
+const nowEl = document.getElementById('now');
+const barEl = document.getElementById('scrub');
 
 function ensureCtx(){
   if(P.ctx) return;
@@ -333,9 +349,12 @@ function scheduler(){
 }
 function frame(){
   if(!P.playing) return;
-  const el=Math.min(P.ctx.currentTime-P.startAt, P.dur);
-  document.getElementById('nowFill').style.width=(el/P.dur*100)+'%';
-  document.getElementById('nowInfo').textContent=fmt(el)+' / '+fmt(P.dur);
+  if(!P.scrubbing){                            // while dragging the head, the drag owns the fill
+    const el=Math.min(P.ctx.currentTime-P.startAt, P.dur), pct=el/P.dur*100;
+    document.getElementById('nowFill').style.width=pct+'%';
+    document.getElementById('nowInfo').textContent=fmt(el)+' / '+fmt(P.dur);
+    barEl.setAttribute('aria-valuenow', Math.round(pct));
+  }
   P.raf=requestAnimationFrame(frame);
 }
 const fmt = s => { s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
@@ -357,6 +376,8 @@ async function play(id){
   P.raf=requestAnimationFrame(frame);
   const wave=(LEAD_WAVE[song.program[0]]||'square');
   setNow(id, c.name, wave+' · '+song.bpm+' BPM · '+fmt(song.duration), c.hex);
+  nowEl.classList.add('armed');                  // the seek head appears now there's a song to scrub
+  barEl.setAttribute('aria-valuenow', 0);
   setPlayingBlob(id);
   renderPips();
 }
@@ -386,6 +407,63 @@ function renderPips(){
   const box=document.getElementById('pips');
   [...box.children].forEach((pip,i)=>pip.classList.toggle('on', i<volN));
 }
+
+/* ------------------------------------------------------------------ *
+ *  Scrubbing: tap/click or drag-release the head to any spot         *
+ * ------------------------------------------------------------------ */
+// pointer x -> fraction 0..1 along the track
+function barFrac(clientX){
+  const r=barEl.getBoundingClientRect();
+  return Math.max(0, Math.min(1, (clientX-r.left)/r.width));
+}
+// paint the head at a fraction (the live drag preview — no audio yet)
+function showScrub(frac){
+  const pct=frac*100;
+  document.getElementById('nowFill').style.width=pct+'%';
+  if(P.dur) document.getElementById('nowInfo').textContent=fmt(frac*P.dur)+' / '+fmt(P.dur);
+  barEl.setAttribute('aria-valuenow', Math.round(pct));
+}
+// jump playback to a fraction of the song and (re)start it there
+async function seekTo(frac){
+  if(!P.notes || !P.dur) return;
+  ensureCtx();
+  if(P.ctx.state==='suspended') await P.ctx.resume();
+  const target=Math.max(0, Math.min(P.dur, frac*P.dur));
+  for(const n of P.nodes){ try{ n.stop(); }catch(e){} }   // cut whatever's ringing at the old spot
+  P.nodes=[];
+  P.startAt=P.ctx.currentTime-target+0.03;                // move the virtual t=0
+  let lo=0, hi=P.notes.length;                            // first note at/after the new head
+  while(lo<hi){ const mid=(lo+hi)>>1; if(P.notes[mid].t<target) lo=mid+1; else hi=mid; }
+  P.idx=lo;
+  if(!P.playing){                                         // scrubbing a stopped/ended song picks it back up
+    P.playing=true;
+    P.timer=setInterval(scheduler, 25);
+    P.raf=requestAnimationFrame(frame);
+    nowEl.classList.remove('idle'); nowEl.classList.add('playing');
+    setPlayingBlob(P.cousin);
+  }
+  showScrub(target/P.dur);
+}
+let scrubFrac=0;
+barEl.addEventListener('pointerdown', e=>{
+  if(!P.notes || !P.dur) return;                          // nothing loaded — nothing to scrub
+  e.preventDefault();
+  P.scrubbing=true; nowEl.classList.add('scrub');
+  try{ barEl.setPointerCapture(e.pointerId); }catch(_){}
+  scrubFrac=barFrac(e.clientX); showScrub(scrubFrac);
+});
+barEl.addEventListener('pointermove', e=>{
+  if(!P.scrubbing) return;
+  scrubFrac=barFrac(e.clientX); showScrub(scrubFrac);
+});
+function endScrub(e){
+  if(!P.scrubbing) return;
+  P.scrubbing=false; nowEl.classList.remove('scrub');
+  try{ barEl.releasePointerCapture(e.pointerId); }catch(_){}
+  seekTo(scrubFrac);                                      // release snaps the song to the head
+}
+barEl.addEventListener('pointerup', endScrub);
+barEl.addEventListener('pointercancel', endScrub);
 
 /* ------------------------------------------------------------------ *
  *  Build the badge grid                                              *
