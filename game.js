@@ -4741,7 +4741,7 @@ const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
   hostPaused: false, hostGoreHorde: false };
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
-const prestige = { blocks: {}, bestTime: 0, bestHero: '', campaign: 0 };
+const prestige = { blocks: {}, bestTime: 0, bestHero: '', campaign: 0, bestStreak: 0 };
 // The block is not the block it was: the Infected One now stands between the Crimson One and
 // the street party, so every clear banked before him was banked on a shorter game and every
 // record time was set on one. Those runs don't compare, so the old save is dropped rather
@@ -4756,6 +4756,7 @@ try {
     if (typeof saved.bestTime === 'number' && saved.bestTime > 0) prestige.bestTime = saved.bestTime;
     if (typeof saved.bestHero === 'string') prestige.bestHero = saved.bestHero;
     if (Number.isInteger(saved.campaign) && saved.campaign > 0) prestige.campaign = saved.campaign;
+    if (Number.isInteger(saved.bestStreak) && saved.bestStreak > 0) prestige.bestStreak = saved.bestStreak;
   }
 } catch (e) {}
 // a run is "new game plus" once the family has been made whole THIS SESSION: the first
@@ -4772,8 +4773,8 @@ function recordPrestige() {
   renderPrestige();
 }
 function fmtTime(t) { return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); }
-// badge strip: the total blocks secured, plus the record time in the colour of the
-// hero who set it (single + multiplayer runs both feed these)
+// badge strip: the best block streak (most reunions chained back-to-back), plus the record
+// time in the colour of the hero who set it (single + multiplayer runs both feed these)
 function renderPrestige() {
   const el = document.getElementById('prestige');
   el.innerHTML = '';
@@ -4784,9 +4785,10 @@ function renderPrestige() {
     b.textContent = txt;
     el.appendChild(b);
   };
-  let total = 0;
-  for (const k in prestige.blocks) total += prestige.blocks[k] | 0;
-  if (total > 0) mkBadge(`BLOCKS SECURED x${total}`, '#ffffff'); // white, so it never reads as Blondie's
+  // BLOCKS SECURED is the best STREAK — the most reunions strung together consecutively, not
+  // the lifetime tally. One win is one block; each Bluga run that follows without a quit-to-menu
+  // adds another, so a big number means a long unbroken chain, the prestige worth showing.
+  if (prestige.bestStreak > 0) mkBadge(`BLOCKS SECURED x${prestige.bestStreak}`, '#ffffff'); // white, so it never reads as Blondie's
   if (prestige.bestTime > 0) {
     const hero = COUSINS.find(c => c.id === prestige.bestHero);
     mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#' + (hero ? hero.color : 0xffd24a).toString(16).padStart(6, '0'));
@@ -9865,6 +9867,11 @@ function startFinale() {
   // black-ops blobs are watching (isPrestigeRun). Banked on every screen that sees the party.
   prestige.campaign = (prestige.campaign | 0) + 1;
   sessionCampaign++; // this session has a clear on the books: the next run is Bluga's
+  // BLOCKS SECURED is now a streak, not a tally: the most grandma-reunions strung together
+  // back-to-back without dropping the chain (win = 1, each consecutive Bluga run = 2+). The
+  // session chain (sessionCampaign) IS that streak — quitting to the menu breaks it — so its
+  // high-water mark is the prestige worth banking next to the fastest time.
+  if (sessionCampaign > (prestige.bestStreak | 0)) prestige.bestStreak = sessionCampaign;
   try { localStorage.setItem(PRESTIGE_KEY, JSON.stringify(prestige)); } catch (e) {}
   initAudio(); playOpeningTheme();            // all six motifs + the soundoff — the family theme
   rumble(500, 0.8, 0.8);
