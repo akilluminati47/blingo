@@ -251,6 +251,11 @@
     font-size:16px; font-weight:700; letter-spacing:2px; padding:13px 30px; transition:color .12s; }
   .modebtn:first-child { border-right:2px solid var(--hero); }
   .modebtn:hover, .modebtn.focus { background:var(--hero); color:#10131a; }
+  /* discreet footer link to the policies + live cousin-theme player */
+  #policieslink { pointer-events:auto; margin-top:16px; font-size:12px; letter-spacing:1px; opacity:.55;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
+  #policieslink a { color:#9aa4b2; text-decoration:none; border-bottom:1px solid rgba(154,164,178,.35); }
+  #policieslink a:hover { color:#6fd8ff; border-bottom-color:#6fd8ff; opacity:1; }
   #lobbylist { display:flex; flex-direction:column; gap:10px; margin:14px 0 4px; min-height:40px; }
   .lobbyrow { --bc:#8a8f9a; display:flex; align-items:center; gap:12px; border:2px solid var(--bc); border-radius:14px;
     padding:10px 20px; color:var(--bc); font-weight:700; letter-spacing:1.5px; pointer-events:auto; cursor:pointer;
@@ -715,6 +720,7 @@
     <button class="modebtn" id="playbtn">SINGLE PLAYER</button>
     <button class="modebtn" id="mpbtn">MULTIPLAYER</button>
   </div>
+  <p id="policieslink"><a href="policies/">Cousin Themes ♪ · Terms &amp; Privacy</a></p>
 </div>
 
 <div class="screen hidden" id="lobbyscreen">
