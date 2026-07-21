@@ -369,6 +369,26 @@
   #prestige .badge { --bc:#ffd24a; border:2px solid var(--bc); color:var(--bc); border-radius:20px; padding:5px 14px;
     font-size:11px; font-weight:700; letter-spacing:1.5px; background:rgba(0,0,0,.35);
     box-shadow:0 0 12px -3px var(--bc); text-shadow:0 0 9px var(--bc); }
+  /* BLOCKS SECURED is grandma's spirit: on entry the whole family's colours chase round the
+     pill's outline like a fast rainbow snake for 3s, then it settles to its plain white glow.
+     A conic gradient (two full rounds of the six cousins) is masked to a ring and spun via
+     an animated @property angle; the ring fades out at the end to reveal the white border. */
+  @property --snakeAng { syntax:'<angle>'; inherits:false; initial-value:0deg; }
+  #prestige .badge.grandma { position:relative; isolation:isolate; }
+  #prestige .badge.grandma::before {
+    content:''; position:absolute; inset:-2px; border-radius:22px; padding:2px; pointer-events:none;
+    background:conic-gradient(from var(--snakeAng),
+      #ff8c42,#ff4f42,#6fd8ff,#b06fff,#3fd8b0,#ffd84a,
+      #ff8c42,#ff4f42,#6fd8ff,#b06fff,#3fd8b0,#ffd84a,#ff8c42);
+    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+            mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor; mask-composite:exclude;
+    filter:drop-shadow(0 0 7px rgba(255,255,255,.45));
+    animation:grandmaSnake 3s linear forwards; }
+  @keyframes grandmaSnake {
+    0%   { --snakeAng:0deg;    opacity:1; }
+    82%  { opacity:1; }
+    100% { --snakeAng:1440deg; opacity:0; } }
 
   /* ---------- start / death screens ---------- */
   /* menus scroll on touch (the game canvas keeps touch-action:none, screens override it) */

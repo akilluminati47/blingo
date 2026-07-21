@@ -4784,11 +4784,14 @@ function renderPrestige() {
     if (hex) b.style.setProperty('--bc', hex);
     b.textContent = txt;
     el.appendChild(b);
+    return b;
   };
   // BLOCKS SECURED is the best STREAK — the most reunions strung together consecutively, not
   // the lifetime tally. One win is one block; each Bluga run that follows without a quit-to-menu
   // adds another, so a big number means a long unbroken chain, the prestige worth showing.
-  if (prestige.bestStreak > 0) mkBadge(`BLOCKS SECURED x${prestige.bestStreak}`, '#ffffff'); // white, so it never reads as Blondie's
+  // white base glow, so at rest it never reads as Blondie's — the rainbow only rides the
+  // entry animation (the .grandma class), then it settles back to white (grandma's spirit)
+  if (prestige.bestStreak > 0) mkBadge(`BLOCKS SECURED x${prestige.bestStreak}`, '#ffffff').classList.add('grandma');
   if (prestige.bestTime > 0) {
     const hero = COUSINS.find(c => c.id === prestige.bestHero);
     mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#' + (hero ? hero.color : 0xffd24a).toString(16).padStart(6, '0'));
