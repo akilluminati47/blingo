@@ -159,6 +159,9 @@
 
 <script type="module">
 import * as THREE from '../libs/three.module.js';
+// the six themes are baked into a shared module now (no .mid files) — the game reads the
+// same tracks for its in-game music. Here they play once through, sting chord and all.
+import { getSong } from '../themes.js';
 
 /* ------------------------------------------------------------------ *
  *  Cousins — same six, same colours as the in-game picker            *
@@ -182,7 +185,10 @@ function makeBlob(hex){
   const g = new THREE.Group();
   const mat = c => new THREE.MeshLambertMaterial({color:c});
   const box = (w,h,d,c)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat(c));return m;};
-  const ball= (r,c)=>{const m=new THREE.Mesh(new THREE.SphereGeometry(r,16,12),mat(c));return m;};
+  // match the in-game buildBlob exactly: a UNIT sphere scaled by r, so a following
+  // scale.set() overwrites cleanly. Baking r into the geometry AND then scaling (the old
+  // way) shrank the body + skull to a fraction of size while the eyes/limbs stayed put.
+  const ball= (r,c)=>{const m=new THREE.Mesh(new THREE.SphereGeometry(1,16,12),mat(c));m.scale.setScalar(r);return m;};
   const body = ball(0.55,color); body.scale.set(0.55,0.62,0.5); body.position.y=0.62; g.add(body);
   const head = new THREE.Group(); head.position.y=1.28; g.add(head);
   const skull= ball(0.42,color); skull.scale.set(0.42,0.4,0.4); head.add(skull);
@@ -251,56 +257,6 @@ function setPlayingBlob(id){
   }
   if(id){ poseBlob(id,true); spinYaw = 0; spinId = id; if(!spinRaf) spinRaf = requestAnimationFrame(spinFrame); }
   else { spinId = null; }
-}
-
-/* ------------------------------------------------------------------ *
- *  Minimal Standard MIDI File parser (format 0/1) -> note list       *
- * ------------------------------------------------------------------ */
-function parseMidi(buf){
-  const dv = new DataView(buf); let p = 0;
-  const u8=()=>dv.getUint8(p++), u16=()=>{const v=dv.getUint16(p);p+=2;return v}, u32=()=>{const v=dv.getUint32(p);p+=4;return v};
-  const vlq=()=>{let n=0,b; do{b=u8(); n=(n<<7)|(b&0x7f);}while(b&0x80); return n;};
-  if(u32()!==0x4d546864) throw new Error('not a MIDI file');
-  u32();
-  const fmt=u16(); const ntrk=u16(); const div=u16();
-  const tempos=[]; const notes=[]; const program={};
-  for(let t=0;t<ntrk;t++){
-    if(u32()!==0x4d54726b) throw new Error('bad track');
-    const len = u32(); const end = p + len;      // read length first: u32() advances p past it
-    let tick=0, running=0; const active={};
-    while(p<end){
-      tick += vlq();
-      let status = dv.getUint8(p);
-      if(status & 0x80){ p++; running=status; } else { status=running; }
-      const hi=status&0xf0, ch=status&0x0f;
-      if(status===0xff){
-        const type=u8(); const l=vlq();
-        if(type===0x51) tempos.push({tick, us:(dv.getUint8(p)<<16)|(dv.getUint8(p+1)<<8)|dv.getUint8(p+2)});
-        p+=l;
-      } else if(status===0xf0 || status===0xf7){ p += vlq(); }
-      else if(hi===0xc0 || hi===0xd0){ const v=u8(); if(hi===0xc0) program[ch]=v; }
-      else {
-        const a=u8(), b=u8();
-        if(hi===0x90 && b>0){ active[ch*128+a]={start:tick, vel:b}; }
-        else if(hi===0x80 || (hi===0x90 && b===0)){
-          const k=ch*128+a, s=active[k];
-          if(s){ notes.push({ch, note:a, vel:s.vel, start:s.start, len:tick-s.start}); delete active[k]; }
-        }
-      }
-    }
-    p = end;
-  }
-  tempos.sort((x,y)=>x.tick-y.tick);
-  if(!tempos.length) tempos.push({tick:0, us:500000});
-  const tickToSec = tk=>{
-    let sec=0, last=0, cur=tempos[0].us;
-    for(const tm of tempos){ if(tm.tick>tk) break; sec+=(tm.tick-last)/div*(cur/1e6); last=tm.tick; cur=tm.us; }
-    return sec + (tk-last)/div*(cur/1e6);
-  };
-  let dur=0;
-  for(const n of notes){ n.t=tickToSec(n.start); n.d=Math.max(.03, tickToSec(n.start+n.len)-n.t); dur=Math.max(dur, n.t+n.d); }
-  notes.sort((a,b)=>a.t-b.t);
-  return {notes, duration:dur, program, bpm:Math.round(60e6/tempos[0].us)};
 }
 
 /* ------------------------------------------------------------------ *
@@ -391,18 +347,9 @@ async function play(id){
   if(P.playing) stop(false);
   if(wasSame) return;                            // clicking the playing cousin stops it
   const c = COUSINS.find(x=>x.id===id);
-  document.querySelector('.tile[data-id="'+id+'"]').classList.add('loading');
-  let song = P.cache[id];
-  if(!song){
-    try{
-      const r = await fetch('../'+id+'-theme.mid');
-      if(!r.ok) throw new Error(r.status);
-      song = parseMidi(await r.arrayBuffer());
-      P.cache[id]=song;
-    }catch(e){ document.querySelector('.tile[data-id="'+id+'"]').classList.remove('loading');
-      document.getElementById('nowInfo').textContent='could not load '+id+'-theme.mid'; return; }
-  }
-  document.querySelector('.tile[data-id="'+id+'"]').classList.remove('loading');
+  let song;
+  try{ song = getSong(id); }
+  catch(e){ document.getElementById('nowInfo').textContent='could not load '+id+' theme'; return; }
   P.notes=song.notes; P.dur=song.duration; P.program=song.program;
   P.idx=0; P.cousin=id; P.playing=true; P.nodes=[];
   P.startAt=P.ctx.currentTime+0.08;

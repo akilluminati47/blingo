@@ -973,9 +973,10 @@ function startTheme(id) {
   const t = THEMES[id] || THEMES.blingo;
   themeStep = 0;
   const tick = () => {
-    // hero music lives in the pause menu / screens; it only plays during
-    // gameplay when the music bar is maxed at 5/5 notches
-    const audible = actx && (game.state !== 'playing' || notches.music >= 5);
+    // the persona beat is MENU music now — the picker, screens and the pause menu. During an
+    // actual run the full looping cousin track (startGameMusic) owns the music bed instead,
+    // so this stays quiet in gameplay to keep the two from stacking.
+    const audible = actx && game.state !== 'playing';
     if (audible) {
       const note = t.seq[themeStep % t.seq.length];
       tone(NF(note), t.tempo * 0.9, 0.13, t.wave, undefined, musicGain);
@@ -1041,6 +1042,71 @@ function playOpeningTheme() {
   // the sting: everyone lands together
   setTimeout(() => { for (const n of [0, 4, 7, 12]) tone(NF(n), 1.4, 0.09, 'square', undefined, musicGain); },
     COUSINS.length * per * tempo * 1000 + 120);
+}
+
+// ---------- in-game music: the full cousin track, looped ----------
+// The same six arrangements the /policies page previews (baked into themes.js, no .mid files),
+// but run as a proper gameplay bed: the track's BODY (everything before its closing sting)
+// plays through, then plays AGAIN a touch fuller — an octave lead laid over the lead line —
+// and from there loops that second half forever. Twice as long as the preview, and it rolls
+// into the loop instead of landing on the sting. It rides musicGain, so the pause-menu Music
+// notch is its volume; at 0 it's silent (and the scheduler idles without emitting).
+let ThemeAPI = null;             // themes.js, dynamically imported on first run that needs it
+let themeApiPending = null;
+let gameMusicGain = null;        // a fixed bed level under musicGain, so the arrangement sits
+                                 // below the SFX rather than drowning them
+const gmusic = { on: false, id: null, timer: null, body: null, bodyEnd: 0, program: null,
+  idx: 0, pass: 0, passBase: 0 };
+function ensureThemeAPI() {
+  if (ThemeAPI) return Promise.resolve(ThemeAPI);
+  if (!themeApiPending) themeApiPending = import('./themes.js').then(m => (ThemeAPI = m)).catch(() => (ThemeAPI = false));
+  return themeApiPending;
+}
+async function startGameMusic(id) {
+  if (!actx) return;
+  await ensureThemeAPI();
+  if (!ThemeAPI) return;
+  stopGameMusic();
+  const song = ThemeAPI.getSong(id);
+  if (!song) return;
+  if (!gameMusicGain) { gameMusicGain = actx.createGain(); gameMusicGain.gain.value = 0.6; gameMusicGain.connect(musicGain); }
+  const be = ThemeAPI.songBodyEnd(song);
+  gmusic.body = song.notes.filter(n => n.t < be - 0.001);   // drop the closing sting; loop the body
+  gmusic.bodyEnd = be; gmusic.program = song.program;
+  gmusic.id = id; gmusic.idx = 0; gmusic.pass = 0; gmusic.on = true;
+  gmusic.passBase = actx.currentTime + 0.12;
+  gmusic.timer = setInterval(gameMusicTick, 40);
+}
+function stopGameMusic() {
+  gmusic.on = false;
+  if (gmusic.timer) { clearInterval(gmusic.timer); gmusic.timer = null; }
+}
+// look-ahead scheduler: walk the body notes in order, wrapping at the end and bumping the
+// loop base by one body-length each pass. Emits only what's inside the next 0.2s. When the
+// music notch is 0, the tab is backgrounded, or we've slipped out of gameplay it keeps the
+// clock rolling but stays silent, so raising the notch resumes right where it should.
+function gameMusicTick() {
+  if (!gmusic.on || !actx || !ThemeAPI) return;
+  const emit = settings.music > 0 && game.state === 'playing' && !blurMuted;
+  const now = actx.currentTime, look = now + 0.2;
+  let guard = 0;
+  while (guard++ < 600) {
+    if (gmusic.idx >= gmusic.body.length) { gmusic.idx = 0; gmusic.passBase += gmusic.bodyEnd; gmusic.pass++; }
+    const n = gmusic.body[gmusic.idx];
+    const when = gmusic.passBase + n.t;
+    if (when > look) break;
+    if (emit && when > now - 0.05) {
+      if (n.ch === 9) ThemeAPI.themeDrum(actx, gameMusicGain, n.note, when, n.vel);
+      else {
+        ThemeAPI.themeVoice(actx, gameMusicGain, n, gmusic.program, when);
+        // from the second pass on, thicken the lead an octave up — the "new second half"
+        // the track rolls into before it settles into its loop
+        if (gmusic.pass >= 1 && n.ch === 0)
+          ThemeAPI.themeVoice(actx, gameMusicGain, { ch: 0, note: n.note + 12, vel: n.vel, d: n.d }, gmusic.program, when, 0.45);
+      }
+    }
+    gmusic.idx++;
+  }
 }
 
 // ---------- rumble ----------
@@ -6095,6 +6161,8 @@ function startRun() {
   rampWorldAudio(settings.ambience, 1.1);
   // now that we're in as a cousin, lock the tab title to them: spell it once more, then hold
   tabTitle && tabTitle.lockTo(COUSINS.findIndex(c => c.id === selectedCousin));
+  stopTheme();                       // the menu persona beat steps aside for the full track
+  startGameMusic(selectedCousin);    // the looping in-game bed, at the Music notch's volume
   if (input.device === 'kbm') grabPointer();
 }
 document.getElementById('playbtn').addEventListener('click', () => { netLeave(); startRun(); });
@@ -6167,6 +6235,7 @@ const deathFadeEl = document.getElementById('deathfade');
 function die(gameOver) {
   if (player.dead || deathFx.on) return;
   player.dead = true;
+  stopGameMusic();   // the run's music ends with the run; the menu medley plays on the way back
   rumble(500, 1, 1);
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   // a dead host stalls the sim for the whole lobby, so a host death IS the lobby's game over
@@ -6234,7 +6303,8 @@ function pauseGame() {
   pauseScreen.classList.remove('hidden');
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
-  if (!themeTimer) startTheme(selectedCousin); // hero music plays over the pause menu
+  stopGameMusic();                             // the in-game bed stops for the pause menu...
+  if (!themeTimer) startTheme(selectedCousin); // ...and the persona beat plays over it instead
   if (input.device === 'xbox' || input.device === 'ps' || input.device === 'switch') setPadFocus(0);
   else clearPadFocus();
   updateHostPauseLock();
@@ -6248,6 +6318,8 @@ function resumeGame() {
   pauseScreen.classList.add('hidden');
   document.body.classList.add('playing');
   game.state = 'playing';
+  stopTheme();                       // drop the pause-menu persona beat...
+  startGameMusic(selectedCousin);    // ...and pick the looping track back up
   if (input.device === 'kbm') grabPointer();
   scheduleControlsFade();
   if (net.role === 'host') netBroadcast({ t: 'hpause', on: 0 }); // the lobby resumes with us
@@ -6266,6 +6338,7 @@ function quitToMenu(keepChain) {
   hideFinalStats(); // grandma's tally never follows you onto the menu
   if (!keepChain) { sessionCampaign = 0; lastLmD = null; }
   rampWorldAudio(0, 0.6); // the world sinks back to a silent black stage behind the picker
+  stopGameMusic();
   stopTheme();
   netLeave();
   tabTitle && tabTitle.unlock(); // back at the menu: the tab title cycles the family again
@@ -6380,13 +6453,12 @@ function refreshRow(key) {
     if (on && !p.classList.contains('on')) { p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop'); }
     p.classList.toggle('on', on);
   });
-  // Two of these rows have a live state their pips can't show. Extra Gore does nothing at
-  // all unless Gore is maxed under it, and the hero themes only play during a run at a full
-  // 5/5 — below that they're menu music only. Both light their name only while the thing
-  // they name is actually running, and both read it off the same test the game itself uses
-  // rather than a second opinion here that could quietly drift out of step with it.
+  // Extra Gore has a live state its pips can't show: it does nothing at all unless Gore is
+  // maxed under it, so it lights its name only while it's actually running, read off the same
+  // test the game itself uses rather than a second opinion here that could drift out of step.
+  // (Music no longer has a hidden threshold — the full cousin track now plays in-game at any
+  // level above zero, so the pips already tell the whole story.)
   if (key === 'extraGore') row.classList.toggle('live', extraGoreOn());
-  if (key === 'music') row.classList.toggle('live', notches.music >= 5);
 }
 function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); updateGoreHordeUI(); }
 // light the Extra Gore + Zombies pips while the gore horde is on. The owner (single player,
@@ -9898,7 +9970,8 @@ function startFinale() {
   // high-water mark is the prestige worth banking next to the fastest time.
   if (sessionCampaign > (prestige.bestStreak | 0)) prestige.bestStreak = sessionCampaign;
   try { localStorage.setItem(PRESTIGE_KEY, JSON.stringify(prestige)); } catch (e) {}
-  initAudio(); playOpeningTheme();            // all six motifs + the soundoff — the family theme
+  initAudio(); stopGameMusic();               // the looping bed hands the floor to the family theme
+  playOpeningTheme();                         // all six motifs + the soundoff — the family theme
   rumble(500, 0.8, 0.8);
   // the tally rows, captured now so late kills don't wiggle the numbers mid-count
   jelly.statRows = [
@@ -12884,6 +12957,7 @@ window.__dbg = {
   blowLimb: z => blowLimb(z, 0, 1),
   popHead: z => popHead(z, 0, 1),
   squadCmd, issueSquadCmd, executeHoldTrade, executeSkinTrade, applySwapKit, playSwapTheme, updateSkinNudge, tradeRing, updateHoldTrades, fireWeapon, updateCompanions,
+  startGameMusic, stopGameMusic, get gmusic() { return gmusic; }, gameMusicTick,
   exposeBrain, killZombie, pauseGame, resumeGame, scene, allCrates, cycleWeapon,
   get playerBlob() { return playerBlob; },
   fire: () => fireWeapon(),
