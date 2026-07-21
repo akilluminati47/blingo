@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Blingo — Cousin Themes &amp; Policies</title>
+<title>Cousin Themes and Policies</title>
 <meta name="theme-color" content="#0a0c10">
 <meta name="description" content="Blingo cousin themes played live in your browser, plus the short version of our terms and privacy policy.">
 <link href="https://fonts.cdnfonts.com/css/opendyslexic" rel="stylesheet">
@@ -20,13 +20,9 @@
     background:radial-gradient(120% 80% at 50% -10%, #14181f 0%, #0a0c10 60%)}
   .wrap{max-width:760px;margin:0 auto}
 
-  header{text-align:center;margin-bottom:22px}
-  .mark{font-family:var(--blob);font-weight:700;font-size:clamp(34px,9vw,58px);letter-spacing:2px;
-    text-decoration:none;color:var(--ink);display:inline-block;line-height:1}
-  .mark .i{color:#ffd24a;text-shadow:0 0 18px rgba(255,210,74,.5)}
-  .sub{font-family:var(--blob);color:var(--dim);margin-top:6px;font-size:14px;letter-spacing:1px}
-  .lede{color:var(--dim);text-align:center;max-width:52ch;margin:14px auto 0;line-height:1.5;font-size:14px}
-  .lede code{color:#cfe8ff;background:rgba(111,216,255,.1);padding:1px 6px;border-radius:6px;font-size:12px}
+  header{text-align:center;margin-bottom:26px}
+  .mark{font-family:var(--blob);font-weight:700;font-size:clamp(28px,7vw,46px);letter-spacing:1px;
+    color:var(--ink);line-height:1.06;margin:0 auto;max-width:16ch}
 
   /* ---- cousin theme badges: a small 3D blob per cousin, blurred until its song plays ---- */
   .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:24px 0 8px}
@@ -60,12 +56,12 @@
   .bar{height:7px;background:rgba(255,255,255,.1);border-radius:6px;overflow:hidden}
   .bar>i{display:block;height:100%;width:0;background:var(--c,#6fd8ff);border-radius:6px;transition:width .12s linear}
   /* notch volume, sitting directly under the scrubber and the same width */
-  .vol{display:flex;align-items:center;gap:9px;margin-top:9px}
-  .vol .vlab{font-size:11px;letter-spacing:1.5px;color:var(--dim);font-weight:700}
-  .pips{display:flex;gap:5px}
-  .pip{width:26px;height:11px;border-radius:3px;background:rgba(255,255,255,.13);cursor:pointer;
+  /* ten notches spanning the full scrubber width, so they sit centred right under it */
+  .vol{margin-top:10px}
+  .pips{display:flex;gap:4px}
+  .pip{flex:1;height:10px;border-radius:3px;background:rgba(255,255,255,.13);cursor:pointer;
     transition:background .1s,box-shadow .1s}
-  .pip.on{background:var(--c,#6fd8ff);box-shadow:0 0 7px var(--c,#6fd8ff)}
+  .pip.on{background:var(--c,#6fd8ff);box-shadow:0 0 6px var(--c,#6fd8ff)}
 
   /* ---- policies ---- */
   .policies{margin-top:34px;display:grid;gap:16px}
@@ -81,14 +77,23 @@
   /* ---- footer: the chili "TO THE BLOCK" sign + authorship ---- */
   footer{text-align:center;margin-top:32px}
   .ret{display:flex;justify-content:center}
-  .chili{display:inline-flex;align-items:center;gap:11px;cursor:pointer;font-family:var(--blob);
-    font-weight:700;font-size:16px;letter-spacing:2px;color:#ffd7c2;
-    background:linear-gradient(180deg,#3a0f0c,#25090a);border:2px solid #ff4f42;border-radius:14px;
-    padding:12px 24px;transition:color .18s,border-color .18s,box-shadow .18s,background .18s,transform .18s}
-  .chili:hover,.chili.navfocus,.chili:focus-visible{color:#fff;border-color:#ff8c42;outline:none;
-    transform:translateY(-2px);background:linear-gradient(180deg,#5a1a0f,#3a0f0c);
-    box-shadow:0 0 24px -2px #ff8c42, inset 0 0 20px -9px #ff8c42}
-  .chili svg{width:22px;height:24px;flex:0 0 auto}
+  /* the return sign IS the in-game RED'S CHILI board: dark-red plate (#421511), cream inset
+     border + goopy lettering (#ffe2b0), stood up on two dark-wood masts. Glows orange on
+     hover / swipe / gamepad-focus. */
+  .signboard{position:relative;display:inline-block;padding-bottom:15px}
+  .signboard::before,.signboard::after{content:'';position:absolute;bottom:0;width:8px;height:17px;
+    background:linear-gradient(#6a4820,#432c14);border-radius:2px;z-index:-1}
+  .signboard::before{left:24%}
+  .signboard::after{right:24%}
+  .chilisign{position:relative;cursor:pointer;font-family:var(--blob);font-weight:700;
+    letter-spacing:3px;text-transform:uppercase;font-size:clamp(15px,4.4vw,21px);color:#ffe2b0;
+    background:#421511;border:0;border-radius:4px;padding:15px 32px;
+    box-shadow:0 5px 0 #2a0d0a,0 9px 16px rgba(0,0,0,.5);transition:color .18s,box-shadow .18s}
+  .chilisign::before{content:'';position:absolute;inset:6px;border:2px solid rgba(255,226,176,.55);
+    border-radius:2px;pointer-events:none;transition:border-color .18s}
+  .chilisign:hover,.chilisign.navfocus,.chilisign:focus-visible{color:#fff;outline:none;
+    box-shadow:0 0 26px -1px #ff8c42,0 5px 0 #2a0d0a,0 9px 16px rgba(0,0,0,.5)}
+  .chilisign:hover::before,.chilisign.navfocus::before,.chilisign:focus-visible::before{border-color:#ff8c42}
   .credit{color:var(--dim);font-size:12px;line-height:1.8;margin:18px auto 0;max-width:46ch}
   .credit a{color:#ff8c42;text-decoration:none;border-bottom:1px solid rgba(255,140,66,.4);font-weight:700}
   .credit a:hover{color:#ffd24a;border-bottom-color:#ffd24a}
@@ -99,11 +104,7 @@
 <body>
 <div class="wrap">
   <header>
-    <a class="mark" href="../" aria-label="Back to Blingo">BL<span class="i">I</span>NGO</a>
-    <div class="sub">Cousin Themes &amp; Policies</div>
-    <p class="lede">Tap a cousin to hear their theme. Each one is parsed <b>live</b> from its
-      <code>&lt;cousin&gt;-theme.mid</code> and synthesized right here in your browser, in the
-      same chip-voices the game uses. No streaming, nothing uploaded.</p>
+    <h1 class="mark">Cousin Themes and Policies</h1>
   </header>
 
   <main>
@@ -114,7 +115,7 @@
       <div class="nowmid">
         <div class="nowmeta"><b id="nowName">Pick a cousin</b><span id="nowInfo">live MIDI player</span></div>
         <div class="bar"><i id="nowFill"></i></div>
-        <div class="vol"><span class="vlab">VOL</span><div class="pips" id="pips" role="group" aria-label="Volume"></div></div>
+        <div class="vol"><div class="pips" id="pips" role="group" aria-label="Volume"></div></div>
       </div>
     </div>
 
@@ -146,13 +147,9 @@
 
   <footer>
     <div class="ret">
-      <button id="toblock" class="chili" title="Return to the block">
-        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
-          <path d="M11 6c1.6-2.2 4-2.6 5.4-1.9" stroke="#8bd23a" stroke-width="1.8" stroke-linecap="round"/>
-          <path d="M12 6c4.2 0 7 3 7 7 0 3.4-3.2 5.5-6.4 5.5C7.4 18.5 4 14.6 4 10.8 4 9 5.4 8 6.6 8.6 8.3 9.4 8.6 12 12 12c0-2.4-1.2-4.6-1-6Z" fill="#ff4f42" stroke="#c62f28" stroke-width="1"/>
-        </svg>
-        <span>TO THE BLOCK</span>
-      </button>
+      <div class="signboard">
+        <button id="toblock" class="chilisign" title="Return to the block">TO THE BLOCK</button>
+      </div>
     </div>
     <p class="credit">BLINGO is an original game created by
       <a href="https://guns.lol/akilluminati47" target="_blank" rel="noopener noreferrer">AK &amp; Co.</a>
@@ -436,8 +433,8 @@ function setNow(id, name, info, hex){
 }
 
 /* ---- notch volume, tied under the scrubber ---- */
-let volN = 4;                                     // 0..5 notches (default 4/5)
-function setVol(n){ volN=n; P.vol=n/5; if(P.master) P.master.gain.value=P.vol*0.9; renderPips(); }
+let volN = 8;                                     // 0..10 notches (default 8/10 = 0.8)
+function setVol(n){ volN=n; P.vol=n/10; if(P.master) P.master.gain.value=P.vol*0.9; renderPips(); }
 function renderPips(){
   const box=document.getElementById('pips');
   [...box.children].forEach((pip,i)=>pip.classList.toggle('on', i<volN));
@@ -461,7 +458,7 @@ for(const c of COUSINS){
 }
 // volume pips
 const pipBox=document.getElementById('pips');
-for(let i=0;i<5;i++){ const pip=document.createElement('div'); pip.className='pip';
+for(let i=0;i<10;i++){ const pip=document.createElement('div'); pip.className='pip';
   pip.addEventListener('click', ()=>setVol(i+1)); pipBox.appendChild(pip); }
 renderPips();
 
