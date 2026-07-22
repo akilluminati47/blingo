@@ -9466,7 +9466,7 @@ function maybeSpawnBoss() {
 function spawnBoss() {
   bossState.spawned = true;
   const bx = 0, bz = -37.7;                   // the open ground between the fountain and the bank steps
-  const blob = buildBlob({ color: BOSS_PURPLE, zombie: true, scale: 2.7 });
+  const blob = buildBlob({ color: BOSS_PURPLE, zombie: true, scale: 2.7, hands: 0x4a1a7a });
   attachBossGlow(blob, BOSS_PURPLE);
   for (const s of [-1, 1]) {                  // horns — folded in so they flash when he's shot
     const horn = cyl(0.02, 0.15, 0.55, 0x2a1a3a, 6);
@@ -12475,7 +12475,7 @@ function netApplySnapshot(m) {
           : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
         blob = buildBlob({ color, zombie: true, scale: zs.sc,
           hands: zs.b4 ? ROTTEN_HANDS : zs.b3 ? INFECTED_HANDS : zs.b2 ? CRIMSON_HANDS
-            : zs.pu ? 0x4a1a7a : zs.re ? CRIMSON_HANDS : 0 }); // ghost guards wear the dark mitts too
+            : zs.bo ? 0x4a1a7a : zs.pu ? 0x4a1a7a : zs.re ? CRIMSON_HANDS : 0 }); // ghost guards + Two Horned One wear the dark mitts too
         // the Rotten One and his rotting walkers wear no horns — the rot is the whole crown
         if ((zs.ho || zs.bo) && !zs.b4) for (const s of [-1, 1]) {
           const horn = cyl(zs.bo ? 0.02 : 0.015, zs.bo ? 0.15 : 0.12, zs.bo ? 0.55 : 0.42, 0x2a1a3a, 6);
