@@ -1673,7 +1673,7 @@ function groundLift(x, z) {
 function supportTop(x, z, feetY, maxStep = 0.45) {
   let top = groundHeight(x, z) + groundLift(x, z);
   for (const c of nearbyColliders(x, z)) {
-    const ct = c.roof ? roofTopAt(c, x, z) : c.y1; // sloped roofs support at the shingle surface
+    const ct = colTop(c, x, z); // roofs support at the shingle surface, wrecks at the tilted steel
     if (ct > feetY + maxStep || ct <= top) continue;
     let lx = x - c.x, lz = z - c.z;
     if (c.rot) {
@@ -1923,6 +1923,14 @@ function roofSlope(colliders, bx, by, bz, axis, ridgeHalf, slopeHalf, rh) {
 function roofTopAt(c, x, z) {
   const d = c.roof.axis === 'x' ? Math.abs(z - c.z) : Math.abs(x - c.x);
   return c.y0 + c.roof.rh * clamp(1 - d / c.roof.slopeHalf, 0, 1);
+}
+// standable top of any collider under (x,z): a roof rides its pitched shingles, a flipped
+// wreck rides its tilted undercarriage (a plane sloped in world x/z), everything else is the
+// flat box top. One place so feet AND the side-shove gate agree on where the surface is.
+function colTop(c, x, z) {
+  if (c.roof) return roofTopAt(c, x, z);
+  if (c.slope) return c.y1 + c.slope.gx * (x - c.x) + c.slope.gz * (z - c.z);
+  return c.y1;
 }
 // pitched shingle roof + gables. Returns the peek entry (materials + the blocker box) so
 // the house can fade its own roof out from over the hero — see updateHousePeek.
@@ -2255,13 +2263,12 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   g.position.set(x, y0, z);
   const yaw = opts.rotY !== undefined ? opts.rotY : rng() * TAU;
   g.rotation.y = yaw;
+  let flipRoll = 0;
   if (opts.flipped) {
-    // roof-down and resting SQUARE: the undercarriage you stand on is a flat face, and the
-    // collider under it (below) is a flat-topped box. The old ±0.15rad roll slanted the visible
-    // steel away from that flat top, floating feet over the low edge / burying them at the high
-    // one. Keeping it level lines the two up. (rng draw kept so the rest of world-gen doesn't shift.)
-    rng();
-    g.rotation.z = Math.PI;
+    // rolled a little as it came to rest — lies askew, not primly square. The collider below
+    // carries this same roll as a slope so feet ride the tilted steel instead of a flat lid.
+    flipRoll = (rng() - 0.5) * 0.3;
+    g.rotation.z = Math.PI + flipRoll;
     g.position.y = y0 + (truck ? 2.0 : van ? 2.3 : 1.7); // roof-rest height rode the +25% up too
   }
   group.add(g);
@@ -2278,6 +2285,12 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
     const restY = truck ? 2.0 : van ? 2.3 : 1.7;   // same roof-rest heights the flip sets above
     const flipCol = aabb(x, z, hw + 0.07, hl, restY - bodyH / 2, y0, yaw);
     flipCol.car = carFoot;
+    // feet ride the tilted undercarriage, not a flat lid: the roll tips the steel about the
+    // car's length axis, so the standable top is a plane sloped by that roll (walked like a
+    // pitched roof's shingles). gx/gz are that plane's world-space height gradients — derived
+    // from the flip's roll + yaw, so colTop rises toward the raised edge and falls to the low one.
+    const tr = Math.tan(flipRoll);
+    flipCol.slope = { gx: tr * Math.cos(yaw), gz: -tr * Math.sin(yaw) };
     colliders.push(flipCol);
   } else {
     const bodyCol = aabb(x, z, hw, hl, bodyTop, y0, yaw);
@@ -2658,7 +2671,7 @@ function resolveCollision(x, z, r, y) {
     if (y !== undefined) {
       // standing on top of it (roofs: on the local shingle surface, so the box never
       // shoves us sideways while we're walking the pitch)
-      if (y >= (c.roof ? roofTopAt(c, x, z) : c.y1) - 0.25) continue;
+      if (y >= colTop(c, x, z) - 0.25) continue;
       if (c.y0 > y + 1.5) continue;     // walking underneath (awnings etc.)
     }
     if (c.rot) {
