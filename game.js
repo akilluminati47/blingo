@@ -1874,11 +1874,16 @@ function wallWithWindow(group, colliders, x, z, horiz, len, t, h, y0, wallC, var
   if (variant > 0) { // boarded over: planks nailed across the opening, past its edges
     const wood = [0x6a4a2c, 0x7a5836, 0x5c3f24];
     const midY = y0 + WIN_SILL + WIN_H / 2;
-    // three layouts: lazy pair, threefold, the X-and-bar special
+    // three layouts: lazy pair, threefold, the X-and-bar special. The 4th number is a depth
+    // bias (metres, further proud of the wall): in the X-and-bar the two diagonals cross and
+    // the top bar laps over both, so they'd co-plane and z-fight. Staggering their depth makes
+    // the bar trump the two diagonals, and one diagonal trump the other where the X meets —
+    // every overlap now has one clear winner. The other two layouts never overlap (their dy
+    // gaps beat a board's own 0.16 height), so they stay flush at bias 0.
     const layouts = [
       [[0, -0.18, 0.1], [0, 0.2, -0.14]],
       [[0, -0.26, 0.06], [0, 0.02, -0.08], [0, 0.3, 0.12]],
-      [[0, 0, 0.55], [0, 0, -0.55], [0, 0.34, 0.03]],
+      [[0, 0, 0.55, 0], [0, 0, -0.55, 0.02], [0, 0.34, 0.03, 0.045]],
     ];
     // boarded from BOTH sides, and never the same pattern twice: whoever held this
     // room reinforced the outside, then braced the inside with a different lattice —
@@ -1886,8 +1891,8 @@ function wallWithWindow(group, colliders, x, z, horiz, len, t, h, y0, wallC, var
     // cycles deterministically off the outer so a restreamed chunk rebuilds identical.
     const innerVariant = (variant % 3) + 1;
     for (const [v, side] of [[variant, outDir], [innerVariant, -outDir]]) {
-      const proud = side * (t / 2 + 0.05);
-      for (const [off, dy, tilt] of layouts[v - 1]) {
+      for (const [off, dy, tilt, dep = 0] of layouts[v - 1]) {
+        const proud = side * (t / 2 + 0.05 + dep); // dep lifts a board proud of its neighbours
         const b = box(WIN_W + 0.5, 0.16, 0.06, wood[(Math.abs(dy * 100) | 0) % 3]);
         b.position.set(horiz ? x + off : x + proud, midY + dy, horiz ? z + proud : z + off);
         b.rotation.z = horiz ? tilt : 0;
@@ -1983,6 +1988,23 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
   // clone of the cached wall material and pairs with the collider just pushed for it.
   const shell = [];
   const peekSlab = (m) => shell.push({ mats: [ownMat(m)], box: colliders[colliders.length - 1], op: 1, want: 1 });
+  // interior keep-out boxes in front of every opening: a shelf parked in a doorway walls you
+  // out, one across a window plugs the firing port. Each opening is centred on its wall, so
+  // its box spans the opening (± a shelf half-width) and reaches OPEN_IN into the room.
+  const openings = [];
+  const OPEN_IN = 2.2, OPEN_SIDE = 1.0;
+  const keepOut = (wall, half) => {
+    const horiz = wall.hw > wall.hd;
+    if (horiz) {                                   // wall runs along x at z=wall.z; room is toward bz
+      const z2 = wall.z + (Math.sign(bz - wall.z) || 1) * OPEN_IN;
+      openings.push({ xlo: wall.x - half - OPEN_SIDE, xhi: wall.x + half + OPEN_SIDE,
+                      zlo: Math.min(wall.z, z2), zhi: Math.max(wall.z, z2) });
+    } else {                                       // wall runs along z at x=wall.x; room is toward bx
+      const x2 = wall.x + (Math.sign(bx - wall.x) || 1) * OPEN_IN;
+      openings.push({ zlo: wall.z - half - OPEN_SIDE, zhi: wall.z + half + OPEN_SIDE,
+                      xlo: Math.min(wall.x, x2), xhi: Math.max(wall.x, x2) });
+    }
+  };
   for (const wall of walls) {
     if (wall.side === doorSide) {
       const horiz = wall.hw > wall.hd;
@@ -1998,6 +2020,7 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
         colliders.push(aabb(sx, sz, horiz ? segLen / 2 : t / 2, horiz ? t / 2 : segLen / 2, h + 0.6, y0 - 0.6));
         peekSlab(m);
       }
+      keepOut(wall, gap / 2);
     } else if (rng() < 0.75) {
       // a windowed wall is a REAL opening now, not painted glass: half the houses keep
       // the cutout bare (a firing port you can shoot in and out through), the other half
@@ -2008,6 +2031,7 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
       const outDir = horiz ? (wall.z > bz ? 1 : -1) : (wall.x > bx ? 1 : -1);
       wallWithWindow(group, colliders, wall.x, wall.z, horiz,
         horiz ? wall.hw * 2 : wall.hd * 2, t, h, y0, wallC, variant, shell, outDir);
+      keepOut(wall, WIN_W / 2);
     } else {
       const m = box(wall.hw * 2, h + 0.6, wall.hd * 2, wallC);
       m.position.set(wall.x, y0 + h / 2 - 0.3, wall.z);
@@ -2024,7 +2048,17 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
   colliders.push(aabb(bx, bz, w / 2 - t, d / 2 - t, 0.56, y0 - 0.5));
   const roofPeek = addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders, wallC); // roof sits down onto the walls, standable
   if (roofPeek) shell.push(roofPeek); // the roof clears too, or looking down at the hero shows only shingles
-  if (rng() < 0.85) makeShelf(rng, bx + (rng() - 0.5) * (w - 3), bz + (rng() - 0.5) * (d - 3), (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList, y0 + 0.06);
+  if (rng() < 0.85) {
+    // hunt for interior floor the shelf can stand on without capping a door or a window; a
+    // handful of tries almost always finds it, and if a small all-openings house has none the
+    // shelf just sits this one out rather than walling something off
+    for (let t2 = 0; t2 < 14; t2++) {
+      const sx = bx + (rng() - 0.5) * (w - 3), sz = bz + (rng() - 0.5) * (d - 3);
+      if (openings.some(o => sx > o.xlo && sx < o.xhi && sz > o.zlo && sz < o.zhi)) continue;
+      makeShelf(rng, sx, sz, (rng() * 4 | 0) * Math.PI / 2, group, colliders, crateList, y0 + 0.06);
+      break;
+    }
+  }
   // the floor crate lands somewhere the shelf that just went in isn't standing
   if (rng() < 0.7) {
     for (let t = 0; t < 10; t++) {
@@ -2039,8 +2073,14 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
     const side = rng() < 0.5 ? -1 : 1;
     const truck = rng() < 0.4, van = !truck && rng() < 0.12;
     const cxr = bx + side * (w / 2 + (truck ? 3.2 : van ? 3.0 : 2.6)), czr = bz + (rng() - 0.5) * d;
-    // never on a road, and never lapping into a town landmark (the truck-in-the-Jelly-House bug)
-    if (!onRoad(cxr, czr, 1) && !inTown(cxr, czr, 2)) makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6, truck, van });
+    // parked ~parallel to the wall it pulled up beside (a fixed yaw, not dice) so the clearance
+    // test below knows its footprint — and it reads as parked, not abandoned mid-spin
+    const carYaw = (rng() < 0.5 ? 0 : Math.PI) + (rng() - 0.5) * 0.1;
+    const chw = (truck ? 2.0 : van ? 1.9 : 1.8) / 2 + 0.15, chl = (truck ? 5.4 : van ? 4.8 : 4) / 2 + 0.15;
+    // never on a road, never lapping a town landmark (the truck-in-the-Jelly-House bug), and
+    // never into another vehicle already parked or piled up nearby
+    if (!onRoad(cxr, czr, 1) && !inTown(cxr, czr, 2) && carSpotClear(cxr, czr, carYaw, chw, chl, colliders))
+      makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6, truck, van, rotY: carYaw });
   }
   // barrels leaning against the outside walls
   const nBar = (rng() * 3) | 0;
@@ -2216,21 +2256,32 @@ function makeCar(rng, x, z, group, colliders, opts = {}) {
   const yaw = opts.rotY !== undefined ? opts.rotY : rng() * TAU;
   g.rotation.y = yaw;
   if (opts.flipped) {
-    g.rotation.z = Math.PI + (rng() - 0.5) * 0.3;
+    // roof-down and resting SQUARE: the undercarriage you stand on is a flat face, and the
+    // collider under it (below) is a flat-topped box. The old ±0.15rad roll slanted the visible
+    // steel away from that flat top, floating feet over the low edge / burying them at the high
+    // one. Keeping it level lines the two up. (rng draw kept so the rest of world-gen doesn't shift.)
+    rng();
+    g.rotation.z = Math.PI;
     g.position.y = y0 + (truck ? 2.0 : van ? 2.3 : 1.7); // roof-rest height rode the +25% up too
   }
   group.add(g);
   // tight oriented boxes: low body + narrower cabin. bullets skim past the hood
   // instead of hitting an invisible wall, and you can hop trunk -> roof.
   const hw = bodyW / 2 - 0.05, hl = bodyLen / 2 + 0.02;
+  // full silhouette + a hand of daylight, tagged onto the body box so carSpotClear can run a
+  // real oriented test against this wreck when the next car looks for a place to spawn
+  const carFoot = { hw: bodyW / 2 + 0.15, hl: bodyLen / 2 + 0.15 };
   if (opts.flipped) {
     // roof-down, you stand on the UNDERCARRIAGE: the body's underside now faces the sky at
     // rest height minus half the body's thickness. The old tops (1.8/2.4/2.1) were set at
     // the upturned wheels, leaving feet floating half a metre over the visible steel.
     const restY = truck ? 2.0 : van ? 2.3 : 1.7;   // same roof-rest heights the flip sets above
-    colliders.push(aabb(x, z, hw + 0.07, hl, restY - bodyH / 2, y0, yaw));
+    const flipCol = aabb(x, z, hw + 0.07, hl, restY - bodyH / 2, y0, yaw);
+    flipCol.car = carFoot;
+    colliders.push(flipCol);
   } else {
     const bodyCol = aabb(x, z, hw, hl, bodyTop, y0, yaw);
+    bodyCol.car = carFoot;
     // a rider standing on an upright truck's body top is standing down IN the tub —
     // the bite gate below (inTruckBed) reads this flag and calls them unbiteable
     if (truck) bodyCol.bed = true;
@@ -2264,25 +2315,32 @@ function spotClearOf(x, z, r, colliders) {
   }
   return true;
 }
+// do two oriented rectangles overlap? SAT over both boxes' face normals (4 axes) — exact for
+// rectangles, unlike spotClearOf's axis-aligned test which under-reads a spun car's diagonal
+// and lets two wrecks pass while their panels still lie into each other.
+function carsOverlap(ax, az, ayaw, ahw, ahl, bx, bz, byaw, bhw, bhl) {
+  const dx = bx - ax, dz = bz - az;
+  const rects = [[ayaw, ahw, ahl, byaw, bhw, bhl], [byaw, bhw, bhl, ayaw, ahw, ahl]];
+  for (const [ry, rhw, rhl, oy, ohw, ohl] of rects) {
+    const c = Math.cos(ry), s = Math.sin(ry), oc = Math.cos(oy), os = Math.sin(oy);
+    for (const [nx, nz, half] of [[c, -s, rhw], [s, c, rhl]]) {           // r's two face normals
+      const reach = Math.abs(oc * nx - os * nz) * ohw + Math.abs(os * nx + oc * nz) * ohl;
+      if (Math.abs(dx * nx + dz * nz) > half + reach) return false;       // a separating axis
+    }
+  }
+  return true;
+}
+// is this footprint clear of every car already placed in `colliders`? Every wreck tags its body
+// box with `.car`, so this catches cross-pileup pileups and parked cars that spotClearOf's AABB
+// pass would miss — nothing spawns lying into another vehicle.
+function carSpotClear(x, z, yaw, hw, hl, colliders) {
+  for (const c of colliders) {
+    if (c.car && carsOverlap(x, z, yaw, hw, hl, c.x, c.z, c.rot, c.car.hw, c.car.hl)) return false;
+  }
+  return true;
+}
 function makePileup(rng, x, z, along, group, colliders) {
   const n = 3 + ((rng() * 3) | 0);
-  // exact footprints of this pileup's wrecks so far. spotClearOf reads a spun neighbour's
-  // stored LOCAL half-extents as if they were world-aligned, which undersells its corners —
-  // two wrecks could pass the check and still kiss body panels. Within the pileup (where
-  // spacing is tight and every yaw is dice) each new wreck runs a real oriented-box test.
-  const placed = [];
-  const clips = (a, b) => {
-    const dx = b.x - a.x, dz = b.z - a.z;
-    for (const r of [a, b]) {
-      const o = r === a ? b : a;
-      const c = Math.cos(r.yaw), s = Math.sin(r.yaw), oc = Math.cos(o.yaw), os = Math.sin(o.yaw);
-      for (const [ax, az, half] of [[c, -s, r.hw], [s, c, r.hl]]) {   // r's two face axes
-        const reach = Math.abs(oc * ax - os * az) * o.hw + Math.abs(os * ax + oc * az) * o.hl;
-        if (Math.abs(dx * ax + dz * az) > half + reach) return false; // a separating axis
-      }
-    }
-    return true;
-  };
   for (let i = 0; i < n; i++) {
     const off = (i - n / 2) * 4.6 + (rng() - 0.5) * 1.6;
     const jitter = (rng() - 0.5) * 5.6; // scattered across both lanes now that roads are two-way
@@ -2298,10 +2356,10 @@ function makePileup(rng, x, z, along, group, colliders) {
     // silhouette: a car is ~4.4 long (2.4 covers it however it spun), a van 4.8 (2.7),
     // a truck 5.4 (3.0) — so the longer bodies can never lie into a neighbour.
     if (!spotClearOf(px, pz, truck ? 3.0 : van ? 2.7 : 2.4, colliders)) continue;
-    const spot = { x: px, z: pz, yaw: rotY, hw, hl };
-    if (placed.some(p => clips(p, spot))) continue;
+    // oriented pass on top of the coarse spotClearOf: no wreck lies into another, whether it's
+    // one already dropped in this pileup, the cross-street pileup, or a truck parked by a house
+    if (!carSpotClear(px, pz, rotY, hw, hl, colliders)) continue;
     makeCar(rng, px, pz, group, colliders, { broken: true, flipped: rng() < 0.3, truck, van, rotY });
-    placed.push(spot);
   }
 }
 
