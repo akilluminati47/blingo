@@ -4235,12 +4235,16 @@ const JELLY = { x: 124, z: 178 };
 // where grandma's ghost actually stands: beside the long table, not inside it
 const JELLY_G = { x: JELLY.x, z: JELLY.z + 4.2 };
 function buildJellyHouse(rng) {
-  buildLoungeHall(rng, { bx: JELLY.x, bz: JELLY.z,
+  // grandma's porch faces HOME: sign + lamps on whichever long side looks back toward
+  // the town's centre — and since a prestige re-deal can drop the house anywhere on its
+  // far ring, the facing is computed off the live layout bounds, not hardcoded
+  const face = JELLY.z >= (TOWN_BOUND.z0 + TOWN_BOUND.z1) / 2 ? -1 : 1;
+  buildLoungeHall(rng, { bx: JELLY.x, bz: JELLY.z, face,
     wallC: 0xb4642a,  // jelly orange, sun-faded like the label on her jars
     floorC: 0x6b4a30, signText: 'JELLY HOUSE', signBg: '#3a2210', signFg: '#ffb347',
     jars: 'empty' }); // her table too — but the jars here were eaten long ago: no loot, no mess
 }
-function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg, jars }) {
+function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg, jars, face = 1 }) {
   const w = 30, d = 16, h = 6.0;
   const y0 = groundHeight(bx, bz);
   // it sits past the town's far ground apron, so it brings its own: the building must
@@ -4302,12 +4306,14 @@ function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg,
   makeCrate(rng, bx - 4.5, y0 + 0.08, bz - 4.9, townGroup, townColliders, townCrates, false, true);
   makeCrate(rng, bx + 4.5, y0 + 0.08, bz + 4.9, townGroup, townColliders, townCrates, false, true);
   buildMessTables(bx, bz, y0, jars);
-  // the name big on the flat frontage, above the doors, below the eaves
+  // the name big on the flat frontage, above the doors, below the eaves — on the FACE
+  // side (face flips sign + porch lamps to whichever long side the hall fronts)
   const sign = textPlate(signText, 8, 1.8, signBg, signFg);
-  sign.position.set(bx, y0 + (DOOR_H + h) / 2 + 0.15, bz + d / 2 + t / 2 + 0.04);
+  sign.position.set(bx, y0 + (DOOR_H + h) / 2 + 0.15, bz + face * (d / 2 + t / 2 + 0.04));
+  if (face < 0) sign.rotation.y = Math.PI; // the plate reads +z by default
   townGroup.add(sign);
-  makeStreetLamp(bx - 5.5, bz + d / 2 + 2.4, townGroup, 3.6);
-  makeStreetLamp(bx + 5.5, bz + d / 2 + 2.4, townGroup, 3.6);
+  makeStreetLamp(bx - 5.5, bz + face * (d / 2 + 2.4), townGroup, 3.6);
+  makeStreetLamp(bx + 5.5, bz + face * (d / 2 + 2.4), townGroup, 3.6);
   // register it enterable, four doors: pathing picks whichever is nearest
   const doors = [];
   for (const s of [-1, 1]) for (const dx of [-DOOR_X, DOOR_X])
@@ -6345,14 +6351,16 @@ function popChest(z, kx, kz) {
 
 const tracers = [];
 const tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: true, opacity: 0.85 });
+// tracers render CURVE-EXEMPT: a round should read as a straight line of light, not a
+// dramatic arc. The globe cheat stays in the hit math; the drawn line just goes straight
+// to the drawn impact point (fireWeapon hands us that point directly).
+tracerMat.defines = { NO_CURVE: 1 };
 function spawnTracer(from, to) {
   const len = from.distanceTo(to);
   if (len < 0.2) return;
-  // segmented along its length so the globe bend can sag the WHOLE line: with only end
-  // vertices a long round drew a straight chord that floated over the curved world
-  // mid-flight — now every ~8u of tracer gets its own vertices to sink with the terrain
-  const g = new THREE.BoxGeometry(0.025, 0.025, len, 1, 1, Math.max(1, Math.ceil(len / 8)));
+  const g = new THREE.BoxGeometry(0.025, 0.025, len);
   const m = new THREE.Mesh(g, tracerMat.clone());
+  m.material.defines = { NO_CURVE: 1 }; // clones don't reliably carry defines across
   m.position.copy(from).lerp(to, 0.5);
   m.lookAt(to);
   scene.add(m);
@@ -7440,14 +7448,16 @@ function fireWeapon() {
       if (!pierce) { stopT = dHit; stopped = true; break; }
     }
     _to.set(_from.x + rdx * stopT, _from.y + rdy * stopT, _from.z + rdz * stopT);
-    // the endpoint is stored flat but DRAWN sunk — raise it by its own globe sink so the
-    // tracer's drawn tip (and the impact dust) lands exactly on the drawn target, not one
-    // curve-drop beneath it
-    _to.y += curveDrop(_to.x, _to.z);
     if (gunMesh) {
+      // the curve-exempt tracer goes STRAIGHT to this flat endpoint — which is exactly
+      // where the eye sees the hit, since the drawn world sank by the same amount the
+      // hit test was lifted. No arc, same landing spot.
       (gunMesh.userData.muzzle || gunMesh).getWorldPosition(_gp);
       spawnTracer(_gp.clone(), _to.clone());
     }
+    // the impact dust and the wire DO render through the curve, so their endpoint takes
+    // the world-space raise that lands their drawn position on the drawn target
+    _to.y += curveDrop(_to.x, _to.z);
     if (!stopped && stopT < REACH) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
     }
