@@ -6244,6 +6244,14 @@ function trackedActors() {
   out.push({ key: 'landmark', label: LANDMARK.label, color: LANDMARK.color,
     x: LANDMARK.x, y: groundHeight(LANDMARK.x, LANDMARK.z) + 11, z: LANDMARK.z,
     downed: false, boss: false, landmark: true });
+  // grandma's own marker only exists once there's somewhere to point: the trek only
+  // becomes a real destination once the Rotten One falls and spawnJellyMarks stands the
+  // real beacon up. Same orange as her actual pillar, so the chevron and the thing it's
+  // promising are visibly the same light.
+  if (jelly.beacon) {
+    out.push({ key: 'jellyhouse', label: 'JELLY HOUSE', color: 0xffa040,
+      x: JELLY.x, y: jelly.gy + 60, z: JELLY.z, downed: false, boss: false, landmark: true });
+  }
   return out;
 }
 // is the line from the eye to this point blocked by terrain or a solid? Rebuilding the
@@ -6344,8 +6352,12 @@ function updatePlayerTags(dt) {
     // so it stops shouting over the blob it names without ever letting go of it. Once it's
     // fallen back to the horizon-clamped edge, distance stops being a meaningful read (the
     // number could be 60 or 600) so it just holds a steady, legible full strength instead.
-    const near = pr.edge ? 1 : clamp((dist - 3) / 4, 0, 1);
-    t.op = lerp(t.op, 0.35 + 0.65 * near, k);
+    // Landmarks play a different game entirely: they're only there to point at something
+    // you can't see yet. The instant the real thing — the Bank, grandma's own beacon pillar
+    // — swings back into honest view, pr.edge drops false and the chevron has nothing left
+    // to add, so it fades all the way out and lets the actual landmark take over the job.
+    const near = a.landmark ? (pr.edge ? 1 : 0) : (pr.edge ? 1 : clamp((dist - 3) / 4, 0, 1));
+    t.op = lerp(t.op, a.landmark ? near : 0.35 + 0.65 * near, k);
     t.el.style.opacity = t.op.toFixed(3);
     const scale = pr.edge ? 0.8 : clamp(26 / Math.max(dist, 1), 0.55, 1.5);   // perspective, roughly
     t.el.style.transform = `translate(-50%,-100%) scale(${scale.toFixed(3)})`;
