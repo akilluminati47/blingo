@@ -6283,7 +6283,7 @@ const _edgeFlat = new THREE.Vector3();
 function edgeClampedProject(x, y, z) {
   const o = camera.position;
   _edgeReal.set(x, y - curveDrop(x, z), z).project(camera);
-  if (_edgeReal.z <= 1 && Math.abs(_edgeReal.x) <= 1 && _edgeReal.y >= -1 && _edgeReal.y <= 1) {
+  if (_edgeReal.z <= 1 && Math.abs(_edgeReal.x) <= 1 && _edgeReal.y >= 0 && _edgeReal.y <= 1) {
     return { x: _edgeReal.x, y: _edgeReal.y, visible: true, edge: false };
   }
   const dx = x - o.x, dz = z - o.z;
@@ -6323,7 +6323,8 @@ function updatePlayerTags(dt) {
     const o = camera.position;
     const dist = Math.hypot(a.x - o.x, hy - o.y, a.z - o.z);
     const pr = edgeClampedProject(a.x, hy, a.z);
-    t.el.style.display = '';   // never fully hidden any more — edgeClampedProject always lands SOMEWHERE onscreen
+    if (!pr.visible) { t.el.style.display = 'none'; continue; }
+    t.el.style.display = '';
     if (t.label !== a.label) { t.label = a.label; t.b.textContent = a.label; }
     const hex = '#' + a.color.toString(16).padStart(6, '0');
     if (t.hex !== hex) {
@@ -6338,9 +6339,7 @@ function updatePlayerTags(dt) {
     t.el.classList.toggle('edge', pr.edge);
     t.el.style.left = ((pr.x * 0.5 + 0.5) * innerWidth) + 'px';
     t.el.style.top = ((-pr.y * 0.5 + 0.5) * innerHeight) + 'px';
-    // pinned to the horizon and clamped inside the frame, the chevron itself turns to keep
-    // pointing the true bearing — the same read a compass needle gives, not a guess
-    t.i.style.transform = pr.edge ? `rotate(${(Math.atan2(-pr.x, -pr.y) * 180 / Math.PI).toFixed(1)}deg)` : '';
+    // chevron stays upright — no rotation, no compass-needle pointing, just a signpost at the bearing
     // the tag is the wayfinding layer now: never lost to distance (a kiting player or
     // a boss arena has to read from right across the map) and never blocked by world
     // geometry — it punches through everything. Up close it only steps halfway back,
