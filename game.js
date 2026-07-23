@@ -6283,7 +6283,7 @@ const _edgeFlat = new THREE.Vector3();
 function edgeClampedProject(x, y, z) {
   const o = camera.position;
   _edgeReal.set(x, y - curveDrop(x, z), z).project(camera);
-  if (_edgeReal.z <= 1 && Math.abs(_edgeReal.x) <= 1 && _edgeReal.y >= 0 && _edgeReal.y <= 1) {
+  if (_edgeReal.z <= 1 && Math.abs(_edgeReal.x) <= 1 && _edgeReal.y >= -1 && _edgeReal.y <= 1) {
     return { x: _edgeReal.x, y: _edgeReal.y, visible: true, edge: false };
   }
   const dx = x - o.x, dz = z - o.z;
@@ -6346,11 +6346,11 @@ function updatePlayerTags(dt) {
     // so it stops shouting over the blob it names without ever letting go of it. Once it's
     // fallen back to the horizon-clamped edge, distance stops being a meaningful read (the
     // number could be 60 or 600) so it just holds a steady, legible full strength instead.
-    // Landmarks play a different game entirely: they're only there to point at something
-    // you can't see yet. The instant the real thing — the Bank, grandma's own beacon pillar
-    // — swings back into honest view, pr.edge drops false and the chevron has nothing left
-    // to add, so it fades all the way out and lets the actual landmark take over the job.
-    const near = a.landmark ? (pr.edge ? 1 : 0) : (pr.edge ? 1 : clamp((dist - 3) / 4, 0, 1));
+    // Landmarks fade on approach — the chevron stays fully visible from the
+    // horizon line at any range, and only dims once you're close enough to
+    // make out the actual landmark (fade band 60–120 units).
+    const lmFade = clamp((dist - 60) / 60, 0, 1);
+    const near = a.landmark ? (pr.edge ? 1 : lmFade) : (pr.edge ? 1 : clamp((dist - 3) / 4, 0, 1));
     t.op = lerp(t.op, a.landmark ? near : 0.35 + 0.65 * near, k);
     t.el.style.opacity = t.op.toFixed(3);
     const scale = pr.edge ? 0.8 : clamp(26 / Math.max(dist, 1), 0.55, 1.5);   // perspective, roughly
