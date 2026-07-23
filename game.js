@@ -2983,6 +2983,15 @@ function resolveCollision(x, z, r, y) {
       // shoves us sideways while we're walking the pitch)
       if (y >= colTop(c, x, z) - 0.25) continue;
       if (c.y0 > y + 1.5) continue;     // walking underneath (awnings etc.)
+      // pitched roofs (the chili cabana, house roofs) are standable tops only, never a
+      // side wall: the collider is one flat-height box across the WHOLE footprint even
+      // though the shingles taper down toward the eaves, so jumping up near a low roof
+      // can land your centre "inside" that big flat footprint while still well under the
+      // real sloped surface. That used to fall into the tunnelling rescue below, which
+      // ejects through the nearest face of the box — for a roof this size, an instant
+      // snap clear across the footprint (read as a teleport). Skip roofs outright here;
+      // the on-top check above already keeps their surface standable and solid.
+      if (c.roof) continue;
     }
     if (c.rot) {
       // oriented box: work in the collider's local frame
@@ -4204,26 +4213,30 @@ function buildChiliStand(rng) {
   townGroup.add(dribble);
   // the signage: civic-plate sized RED'S CHILI over the ridge — and a little platforming
   // prize with it: counter -> pot lid -> straw slope -> ridge -> up onto the pegs. The
-  // support pegs are SHORT now, perched on the straw's surface out front instead of
-  // running down through the tent, and pegs, straw and plate are all real standable
+  // pegs stand right on the ridge's own centerline (the roof's peak, not partway down
+  // the front slope), based on the ridge cap's actual top so they sit clean on the wood
+  // instead of dipping into the straw, and pegs, straw and plate are all real standable
   // colliders (the plate top is the crown for slide-hoppers).
   roofSlope(townColliders, sx, y0 + 2.68, sz, 'x', 3.8, 2.9, 1.14); // the straw is walkable
+  const ridgeTop = y0 + 3.88; // top face of the ridge cap mesh (y0+3.82 centre + half its 0.12 height)
   for (const s of [-1, 1]) {
     const peg = cyl(0.09, 0.11, 0.6, woodDk, 7);
-    peg.position.set(sx + s * 2.6, y0 + 3.98, sz - 0.42);
+    peg.position.set(sx + s * 2.6, ridgeTop + 0.3, sz);
     townGroup.add(peg);
-    townColliders.push(aabb(sx + s * 2.6, sz - 0.42, 0.15, 0.15, 0.6, y0 + 3.66)); // jump-on pegs
+    townColliders.push(aabb(sx + s * 2.6, sz, 0.15, 0.15, 0.6, ridgeTop)); // jump-on pegs
   }
+  const pegTop = ridgeTop + 0.6; // where the sign's underside should land
   const sign = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
-  sign.position.set(sx, y0 + 5.1, sz);
+  sign.position.set(sx, pegTop + 0.85, sz);
   sign.rotation.y = Math.PI; // face the main-street crossing the park sign points from
   townGroup.add(sign);
   const signBack = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
-  signBack.position.set(sx, y0 + 5.1, sz + 0.02);
+  signBack.position.set(sx, pegTop + 0.85, sz + 0.02);
   townGroup.add(signBack); // readable coming down the road from the north too
   // the plate itself is solid: a narrow catwalk top to crown, set a hair behind the pegs
-  // so a blob standing on them never gets shoved off by the plate's box
-  townColliders.push(aabb(sx, sz + 0.14, 3.4, 0.1, 1.7, y0 + 4.25));
+  // (now that pegs sit on the centerline too) so a blob standing on them never gets
+  // shoved off by the plate's box
+  townColliders.push(aabb(sx, sz + 0.3, 3.4, 0.1, 1.7, pegTop));
 }
 
 // ---------- the Blob Lounge ----------
@@ -5847,21 +5860,36 @@ const BOSS_PURPLE = 0x8a2be2, BOSS_CRIMSON = 0xc22626, CRIMSON_HANDS = 0x6e1414;
 // how much blood to throw: base gore slider, boosted by the unlocked extra-gore slider
 function goreAmt() { return settings.gore + settings.extraGore * 1.4; }
 function extraGoreOn() { return settings.gore >= 0.999 && settings.extraGore > 0; }
-function spawnBlood(x, y, z, kx, kz, mult = 1) {
+// stretches + points a gore mesh along its launch direction — a hit thrown hard enough
+// reads as a streak, not a puff. Only worth bothering with above ~1.05x; the one caller
+// that ever hands in more is the giant's slide-hop kick, scaled off its own knockback.
+const _streakUp = new THREE.Vector3(0, 1, 0), _streakDir = new THREE.Vector3(), _streakScale = new THREE.Vector3();
+function streakMesh(m, kx, kz, stretch) {
+  if (stretch <= 1.05) return;
+  const s = clamp(stretch, 1, 3);
+  _streakDir.set(kx || 0, 0.4, kz || 0).normalize();
+  m.quaternion.setFromUnitVectors(_streakUp, _streakDir);
+  m.scale.multiply(_streakScale.set(1 / Math.sqrt(s), s, 1 / Math.sqrt(s)));
+}
+function spawnBlood(x, y, z, kx, kz, mult = 1, stretch = 1) {
   const g = goreAmt();
   if (g <= 0.02) return;
   const n = Math.round((3 + Math.random() * 4) * g * mult);
+  const s = clamp(stretch, 1, 3);
   for (let i = 0; i < n; i++) {
     if (particles.length > 240) break;
     const m = new THREE.Mesh(partGeo, mat(BLOOD));
     m.position.set(x, y, z);
+    streakMesh(m, kx, kz, s);
     scene.add(m);
     particles.push({
-      mesh: m, life: 0.5 * (0.6 + Math.random() * 0.8), blood: true,
-      vx: (kx || 0) * 2 + (Math.random() - 0.5) * 3, vy: Math.random() * 3, vz: (kz || 0) * 2 + (Math.random() - 0.5) * 3,
+      // a streak also flies faster and a beat longer, so the smear actually covers ground
+      // before it lands instead of just looking stretched in place
+      mesh: m, life: 0.5 * (0.6 + Math.random() * 0.8) * (s > 1.05 ? 1.4 : 1), blood: true,
+      vx: (kx || 0) * 2 * s + (Math.random() - 0.5) * 3, vy: Math.random() * 3 * Math.sqrt(s), vz: (kz || 0) * 2 * s + (Math.random() - 0.5) * 3,
     });
   }
-  if (extraGoreOn() && Math.random() < 0.5 + settings.extraGore * 0.5) groundSplat(x, z, 0.4 + Math.random() * 0.6 * mult);
+  if (extraGoreOn() && Math.random() < 0.5 + settings.extraGore * 0.5) groundSplat(x, z, 0.4 + Math.random() * 0.6 * mult * s);
 }
 function groundSplat(x, z, r) {
   const m = new THREE.Mesh(decalGeo, new THREE.MeshBasicMaterial({ color: BLOOD, transparent: true, opacity: 0.6, depthWrite: false }));
@@ -5887,15 +5915,16 @@ function stainBody(wob, count, angY, heightT, mult = 1) {
   wob.add(stain);
   return stain;
 }
-function spawnGib(x, y, z, color, kx, kz) {
+function spawnGib(x, y, z, color, kx, kz, stretch = 1) {
   if (gibs.length > 60) return;
-  const m = new THREE.Mesh(gibGeo, mat(color));
+  const s = clamp(stretch, 1, 3); // gibs tumble immediately (spin below), so the streak orientation
+  const m = new THREE.Mesh(gibGeo, mat(color));           // wouldn't read — the power shows in the throw instead
   m.position.set(x, y, z);
   m.scale.setScalar(0.6 + Math.random() * 0.8);
   scene.add(m);
   gibs.push({ mesh: m, life: 3 + Math.random() * 2, bled: false,
-    vx: (kx || 0) * 3 + (Math.random() - 0.5) * 4, vy: 3 + Math.random() * 4, vz: (kz || 0) * 3 + (Math.random() - 0.5) * 4,
-    spin: (Math.random() - 0.5) * 14 });
+    vx: (kx || 0) * 3 * s + (Math.random() - 0.5) * 4, vy: (3 + Math.random() * 4) * Math.sqrt(s), vz: (kz || 0) * 3 * s + (Math.random() - 0.5) * 4,
+    spin: (Math.random() - 0.5) * 14 * s });
 }
 // reveal the brain (weak spot) on a zombie's head: crack the skull cap open
 function exposeBrain(z) {
@@ -6327,7 +6356,7 @@ function popHead(z, kx, kz) {
 }
 // sniper centre mass: the chest blob bursts like a head pop, and with no core left the
 // rest of the body — head, arms, legs — just drops off as tumbling pieces
-function popChest(z, kx, kz) {
+function popChest(z, kx, kz, stretch = 1) {
   const b = z.blob;
   if (b.bodyGone) return;
   b.bodyGone = true;
@@ -6335,8 +6364,8 @@ function popChest(z, kx, kz) {
   b.body.getWorldPosition(wp);
   const skin = b.skinList.find(s => s.mesh === b.body);
   const bodyCol = skin ? skin.mat.color.getHex() : 0x8aa85a;
-  for (let i = 0; i < 4; i++) spawnGib(wp.x, wp.y, wp.z, i % 2 ? BLOOD : bodyCol, kx, kz);
-  spawnBlood(wp.x, wp.y, wp.z, kx, kz, 2.6);
+  for (let i = 0; i < 4; i++) spawnGib(wp.x, wp.y, wp.z, i % 2 ? BLOOD : bodyCol, kx, kz, stretch);
+  spawnBlood(wp.x, wp.y, wp.z, kx, kz, 2.6, stretch);
   // still-attached parts fall from where they hung, barely kicked — they drop, not fly
   for (const [kind, grps, gone] of [['arm', b.arms, b.armGone], ['leg', b.legs, b.legGone]]) {
     for (let i = 0; i < 2; i++) {
@@ -6344,16 +6373,16 @@ function popChest(z, kx, kz) {
       gone[i] = true;
       grps[i].getWorldPosition(wp);
       grps[i].visible = false;
-      spawnGib(wp.x, wp.y, wp.z, kind === 'arm' ? 0x8aa85a : 0x39432a, kx * 0.25, kz * 0.25);
-      spawnGib(wp.x, wp.y, wp.z, BLOOD, kx * 0.25, kz * 0.25);
+      spawnGib(wp.x, wp.y, wp.z, kind === 'arm' ? 0x8aa85a : 0x39432a, kx * 0.25, kz * 0.25, stretch);
+      spawnGib(wp.x, wp.y, wp.z, BLOOD, kx * 0.25, kz * 0.25, stretch);
     }
   }
   if (!b.headGone) {
     b.headGone = true;
     b.head.getWorldPosition(wp);
     b.head.visible = false;
-    spawnGib(wp.x, wp.y, wp.z, 0xdb8b9b, kx * 0.25, kz * 0.25);
-    spawnGib(wp.x, wp.y, wp.z, bodyCol, kx * 0.25, kz * 0.25);
+    spawnGib(wp.x, wp.y, wp.z, 0xdb8b9b, kx * 0.25, kz * 0.25, stretch);
+    spawnGib(wp.x, wp.y, wp.z, bodyCol, kx * 0.25, kz * 0.25, stretch);
   }
   b.wob.visible = false;                        // nothing left standing — stumps, stains and all go
   if (b.shadow) b.shadow.visible = false;       // no body, no shadow
@@ -7117,6 +7146,10 @@ function selfT(ox, oy, oz, dx, dy, dz) {
 // the ground, and nothing else fires until you land. That commitment is the whole point —
 // an armed melee jump swing can be mashed at its rpm, this one costs you a jump each time.
 const DROPKICK_DMG = 13, DROPKICK_RANGE = 2.1, DROPKICK_KNOCK = 27.5;
+// a giant's boot lands harder than its fists — both jump-kick insta-gibs clear the punch's
+// 400, and the slide-hop version clears the plain jump kick too. Bosses never see these
+// numbers (see updateDropKick): same rule as the giant punch, they only feel the boot.
+const GIANT_KICK_GIB = 500, GIANT_KICK_GIB_HARD = 750;
 function startDropKick() {
   player.dropKick = true;
   player.dropKickHard = player.hopT > 0;   // launched out of a slide hop: the hard version
@@ -7145,6 +7178,7 @@ function startDropKick() {
 function updateDropKick(dt) {
   if (!player.dropKick) return;
   const hard = player.dropKickHard;
+  const giantOn = playerGiantOn();
   for (const z of zombies) {
     if (z.state === 'dying' || player.dropKickHits.has(z)) continue;
     const dx = z.pos.x - player.pos.x, dz = z.pos.z - player.pos.z;
@@ -7152,9 +7186,19 @@ function updateDropKick(dt) {
     if (d > DROPKICK_RANGE || Math.abs(z.blob.root.position.y - player.pos.y) > 2.2) continue;
     player.dropKickHits.add(z);
     const nx = d > 0.001 ? dx / d : player.dkX, nz = d > 0.001 ? dz / d : player.dkZ;
-    // a slide-hop kick hits twice as hard, same as any slide-hop melee
-    damageZombie(z, DROPKICK_DMG * (hard ? 2 : 1), nx, nz, DROPKICK_KNOCK * (hard ? 1.6 : 1),
-      { weapon: player.weapon, dist: d, isHead: false });
+    // a slide-hop kick hits twice as hard, same as any slide-hop melee. A giant's boot
+    // insta-gibs a street walker like the giant punch does — but bigger, and a boss only
+    // ever feels the ordinary kick (same exception the punch gets)
+    const dmg = giantOn && !z.isBoss ? (hard ? GIANT_KICK_GIB_HARD : GIANT_KICK_GIB) : DROPKICK_DMG * (hard ? 2 : 1);
+    const knock = DROPKICK_KNOCK * (hard ? 1.6 : 1) * (giantOn ? 1.8 : 1);
+    const wasDying = z.state === 'dying';
+    damageZombie(z, dmg, nx, nz, knock, { weapon: player.weapon, dist: d, isHead: false });
+    // the harder the boot threw them, the more the burst reads as a streak instead of a
+    // splat — DROPKICK_KNOCK is the 1x reference, so only a giant kick clears it and the
+    // slide-hop giant kick (the biggest knockback in the game) streaks hardest of all
+    if (giantOn && !z.isBoss && !z.netGhost && z.state === 'dying' && !wasDying && !z.blob.bodyGone) {
+      popChest(z, nx, nz, knock / DROPKICK_KNOCK);
+    }
     meleeMoveGib(player.weapon, z, nx, nz, hard); // a slide-hop boot that kills bursts the body too
     play3d(z.pos.x, z.pos.z, () => SFX.dropKickHit(hard));
     // boot connecting: the sharpest thing in the game. peaks above the launch snap so it
@@ -9661,22 +9705,26 @@ function updateZombies(dt) {
         z.attackT = z.isBoss ? 1.1 : 0.9;
         // very rarely a walker with both arms still on throws a haymaker instead of a bite:
         // a telegraphed arm-thrust (punchT drives it in the animator) and a harder shove
-        // a street walker gnawing on a chili giant finds 1hp of purchase; a boss bites a
-        // giant exactly as hard as he bites the small you
+        // a street walker gnawing on a chili giant finds 1hp of purchase; a boss still
+        // gets a real bite in on a giant, just half as hard as he'd bite the small you
         const giantSoak = playerGiantOn() && !z.isBoss;
+        const giantBossHalf = z.isBoss && playerGiantOn() ? 0.5 : 1;
         if (!z.isBoss && !b.armGone[0] && !b.armGone[1] && Math.random() < 0.05) {
           z.punchT = 0.34;
           hurtPlayer(giantSoak ? 1 : (8 + Math.random() * 5) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
           player.stumbleT = 0.6; // knocked back a step harder than a bite
         } else {
-          hurtPlayer(giantSoak ? 1 : (z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6) * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+          hurtPlayer(giantSoak ? 1 : (z.isBoss ? 26 + Math.random() * 12 : 9 + Math.random() * 6) * giantBossHalf * (z.biteMult || 1), player.pos.x - z.pos.x, player.pos.z - z.pos.z);
         }
       } else if (tgtC && !tgtC.downed && (tgtC.y || 0) - b.root.position.y < vReach) {
         const cd = Math.hypot(tgtC.pos.x - z.pos.x, tgtC.pos.z - z.pos.z);
         if (cd < (z.isBoss ? 3.2 : 1.6) && !biteBlocked(z, tgtC.pos.x, (tgtC.y || 0) + 1, tgtC.pos.z)) {
-          // a client riding the chili: street teeth find the same 1hp on their giant too
-          const cGiant = (tgtC.netGs || 1) > 1.02 && !z.isBoss;
-          z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, cGiant ? 1 : (z.isBoss ? 22 : 7 + Math.random() * 5) * (z.biteMult || 1));
+          // a client riding the chili: street teeth find the same 1hp on their giant too,
+          // and a boss halves against their giant the same way it halves against ours
+          const cIsGiant = (tgtC.netGs || 1) > 1.02;
+          const cGiant = cIsGiant && !z.isBoss;
+          const cBossHalf = cIsGiant && z.isBoss ? 0.5 : 1;
+          z.attackT = z.isBoss ? 1.1 : 0.9; hurtCompanion(tgtC, cGiant ? 1 : (z.isBoss ? 22 : 7 + Math.random() * 5) * cBossHalf * (z.biteMult || 1));
         }
       }
     }
