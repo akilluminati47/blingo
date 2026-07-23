@@ -466,15 +466,16 @@ function drawSky(p, W) {
     }
     ctx.globalAlpha = 1;
   }
-  if (W.rain < 0.65) {
-    // sun (moon at night) with a soft halo, waning behind heavier weather
+  if (W.rain < 0.65 && (p.nightW || 0) > 0.5) {
+    // the MOON, night only — a soft bluish disc with a halo. The daytime sun is no longer
+    // stamped here; it's the 3D sprite that arcs the sky and ducks behind the overhead cloud.
     const sx = CW * 0.72, sy = H * p.sunV, r = p.sunR;
     const halo = ctx.createRadialGradient(sx, sy, 1, sx, sy, r * 3.2);
     halo.addColorStop(0, hexA(p.sun, 0.9)); halo.addColorStop(0.3, hexA(p.sun, 0.35)); halo.addColorStop(1, hexA(p.sun, 0));
     ctx.fillStyle = halo;
     ctx.fillRect(sx - r * 3.2, sy - r * 3.2, r * 6.4, r * 6.4);
     ctx.fillStyle = p.sun;
-    ctx.beginPath(); ctx.arc(sx, sy, r * (1 - 0.25 * W.cloudy - 0.45 * W.rain), 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(sx, sy, r * (1 - 0.25 * W.cloudy), 0, TAU); ctx.fill();
   }
   skyTex.needsUpdate = true;
 }
@@ -537,6 +538,143 @@ function drawClouds(p, W) {
     else if (cx2 > CW - 180) drawPuff(ctx, cx2 - CW, cy2, s, fill, belly, mulberry32(seed));
   }
   cloudTex.needsUpdate = true;
+}
+// ---------- 3D sun, its lens glare, the dark overhead cloud it ducks behind, and air motes ----------
+// The old sun was a flat stamp baked into the sky canvas. Now it's a sprite that ARCS across
+// the sky in real time off game.clock: it lifts off the horizon at dawn, slides up behind a
+// dark cloud parked overhead through the middle of the day (overcast — the disc vanishes, only
+// a bruised glow bleeds round the cloud's rim), then drops out the far side and flares low over
+// the dusk horizon. The warm lens glare is lifted from the .webpages frutiger-gallery sun.
+// Everything reads the live (blended) phase palette, so sunrise/sunset burn gold and noon runs
+// white, and it all recolours frame by frame with the day.
+const ss = (a, b, t) => { t = clamp((t - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+function radialTex(size, stops) {
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  for (const [o, col] of stops) g.addColorStop(o, col);
+  x.fillStyle = g; x.fillRect(0, 0, size, size);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+// warm core glare + a tight bright disc — the frutiger sun's palette (cream → gold → gone)
+const sunGlareTex = radialTex(256, [[0, 'rgba(255,247,224,1)'], [0.22, 'rgba(255,236,188,0.72)'],
+  [0.45, 'rgba(255,222,150,0.34)'], [0.66, 'rgba(255,214,150,0.12)'], [0.8, 'rgba(255,214,150,0)']]);
+const sunDiscTex = radialTex(128, [[0, 'rgba(255,255,246,1)'], [0.5, 'rgba(255,246,220,0.98)'],
+  [0.72, 'rgba(255,240,205,0.5)'], [0.9, 'rgba(255,240,205,0)']]);
+// a lumpy dark cloud on its own canvas: overlapping puff lobes inside a soft circular alpha
+// falloff, so it reads as a cloud (crisp middle, dissolving rim the sun can peek around)
+const overheadCloudTex = (() => {
+  const S = 512, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d'), R = mulberry32(913);
+  x.fillStyle = '#ffffff';
+  for (let i = 0; i < 15; i++) {
+    const a = (i / 15) * TAU + R() * 0.6, dist = (0.05 + R() * 0.24) * S, rad = (0.09 + R() * 0.2) * S;
+    x.beginPath(); x.ellipse(S / 2 + Math.cos(a) * dist, S / 2 + Math.sin(a) * dist * 0.7, rad, rad * 0.82, 0, 0, TAU); x.fill();
+  }
+  x.beginPath(); x.arc(S / 2, S / 2, 0.33 * S, 0, TAU); x.fill();
+  const img = x.getImageData(0, 0, S, S), d = img.data;
+  for (let py = 0; py < S; py++) for (let pxl = 0; pxl < S; pxl++) {
+    const idx = (py * S + pxl) * 4, r = Math.hypot((pxl - S / 2) / (S / 2), (py - S / 2) / (S / 2));
+    d[idx + 3] *= 1 - ss(0.58, 1.0, r);
+  }
+  x.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+function skySprite(tex, blend, ro, name) {
+  const m = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false, blending: blend });
+  const s = new THREE.Sprite(m); s.renderOrder = ro; s.frustumCulled = false; s.name = name; scene.add(s); return s;
+}
+const sunGlare = skySprite(sunGlareTex, THREE.AdditiveBlending, -8, 'sunGlare');
+const sunDisc = skySprite(sunDiscTex, THREE.AdditiveBlending, -7, 'sunDisc');
+const overheadCloud = skySprite(overheadCloudTex, THREE.NormalBlending, -6, 'overheadCloud');
+
+// sun-lit air motes: one THREE.Points draw call, all drift (rise+wrap, sway, twinkle) in the
+// vertex shader so the CPU never re-touches the buffer. Additive soft bokeh = out-of-focus
+// glints. The whole cloud rides the player; uTint recolours it off the sky every frame.
+const MOTE_SPAN = 26;
+const airMotes = (() => {
+  const N = 200, geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(N * 3), seed = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = (Math.random() * 2 - 1) * MOTE_SPAN;
+    pos[i * 3 + 1] = -1.5 + Math.random() * 14.5;
+    pos[i * 3 + 2] = (Math.random() * 2 - 1) * MOTE_SPAN;
+    seed[i] = Math.random();
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    uniforms: { uTime: { value: 0 }, uPR: { value: Math.min(devicePixelRatio, 2) },
+                uTint: { value: new THREE.Color(0xffe8c0) }, uAmt: { value: 1 } },
+    vertexShader: /* glsl */`
+      attribute float aSeed;
+      uniform float uTime, uPR;
+      varying float vA;
+      void main(){
+        vec3 p = position; float s = aSeed;
+        p.y = -1.5 + mod(p.y + 1.5 + uTime*(0.05 + 0.09*s), 14.5);       // slow rise, wrap to the floor
+        p.x += sin(uTime*(0.25 + s) + s*31.0) * 0.5;                     // lazy sway
+        p.z += cos(uTime*(0.20 + s*0.5) + s*57.0) * 0.5;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        float tw = 0.5 + 0.5*sin(uTime*(0.6 + s*1.6) + s*43.0);
+        vA = (0.14 + 0.86*tw*tw) * clamp(1.0 - (-mv.z)/38.0, 0.0, 1.0);  // twinkle, fade with depth
+        gl_PointSize = min((1.4 + 3.2*s) * uPR * (6.0 / max(1.0, -mv.z)), 16.0*uPR);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform vec3 uTint; uniform float uAmt;
+      varying float vA;
+      void main(){
+        float m = smoothstep(0.5, 0.08, length(gl_PointCoord - 0.5));
+        float a = m * vA * uAmt;
+        gl_FragColor = vec4(uTint * a, a);
+      }`,
+  });
+  const pts = new THREE.Points(geo, mat);
+  pts.frustumCulled = false; pts.renderOrder = 3; pts.name = 'airMotes'; scene.add(pts);
+  return pts;
+})();
+
+const _sunDir = new THREE.Vector3();
+const _ohDir = new THREE.Vector3(0.06, 1.0, -0.16).normalize();   // fixed spot the dark cloud parks at
+const _cSun = new THREE.Color(), _cCloud = new THREE.Color(), _cMote = new THREE.Color();
+const _warmSun = new THREE.Color(0xff9a4e);
+// arc the sun off the clock, dress its glare, park + backlight the overhead cloud, drift the
+// motes. Called every frame from the render loop (it needs the live camera + player).
+function updateCelestial(dt) {
+  const clk = game.clock ?? 13, p = phaseMixAt(clk), W = wxWeights();
+  const dawn = 5.5, dusk = 19.0, day = clk >= dawn && clk <= dusk;
+  const u = clamp((clk - dawn) / (dusk - dawn), 0, 1);   // 0 dawn(E) .. 1 dusk(W)
+  const el = day ? Math.sin(u * Math.PI) : -0.3;         // 0→1→0 over the day, below the horizon at night
+  const hx = Math.cos(u * Math.PI);                      // +1 east .. -1 west
+  const elAng = el * 1.28, hLen = Math.cos(elAng);       // peak ~73°, a touch shy of the zenith
+  _sunDir.set(hx * hLen, Math.sin(elAng), -0.32 * hLen).normalize();
+  const aboveH = ss(-0.04, 0.14, _sunDir.y);             // fades through twilight
+  const overcast = 1 - ss(0.34, 0.62, _sunDir.angleTo(_ohDir)); // 1 = dead behind the cloud, 0 = clear
+  const wxClear = Math.max(0, 1 - 0.55 * W.cloudy - 0.85 * W.rain);
+  const warmU = clamp(1 - el, 0, 1);                     // low sun burns warmer/oranger
+  const vis = aboveH * wxClear;
+  _cSun.set(p.sun).lerp(_warmSun, 0.35 * warmU);
+  const camP = camera.position, R = 208;
+  sunDisc.position.copy(camP).addScaledVector(_sunDir, R);
+  sunGlare.position.copy(camP).addScaledVector(_sunDir, R);
+  sunDisc.material.color.copy(_cSun);
+  sunDisc.material.opacity = vis * (1 - overcast);
+  sunDisc.scale.setScalar(24 + 8 * el);
+  sunGlare.material.color.copy(_cSun);
+  sunGlare.material.opacity = Math.min(1, vis * (1 - 0.82 * overcast) * (0.45 + 0.75 * warmU)); // glare swells low
+  sunGlare.scale.setScalar(118 + 66 * warmU);
+  overheadCloud.position.copy(camP).addScaledVector(_ohDir, 194);
+  _cCloud.set(p.cloudB).multiplyScalar(0.5).lerp(_cSun, 0.3 * overcast);  // warm rim when the sun's behind
+  overheadCloud.material.color.copy(_cCloud);
+  overheadCloud.material.opacity = clamp(0.6 + 0.28 * W.cloudy + 0.18 * (p.nightW || 0), 0, 0.95);
+  overheadCloud.scale.setScalar(150);
+  airMotes.position.set(player.pos.x, player.pos.y, player.pos.z);
+  airMotes.material.uniforms.uTime.value += dt;
+  _cMote.set(p.hor).lerp(_cSun, 0.5);
+  airMotes.material.uniforms.uTint.value.copy(_cMote).multiplyScalar(0.55 + 0.45 * (1 - (p.nightW || 0)));
+  airMotes.material.uniforms.uAmt.value = 0.45 + 0.5 * W.sunny + 0.28 * W.cloudy;
 }
 // live wind: direction & strength drift over time, gusting harder in worse weather.
 // rain streaks lean and drift with it, and the wind bed swells/pans to match.
@@ -11378,6 +11516,7 @@ function updateCamera(dt) {
   skyDome.position.copy(camera.position); // the sky rides along so it never has edges
   cloudDome.position.copy(camera.position);
   cloudDome.rotation.y = game.time * 0.005; // the puffs drift — slow enough to feel, not watch
+  updateCelestial(dt); // arc the sun, dress its glare + the overhead cloud, drift the motes
   moon.position.set(player.pos.x + moonOff.x, moonOff.y, player.pos.z + moonOff.z);
   moon.target.position.copy(player.pos);
   moon.target.updateMatrixWorld();
