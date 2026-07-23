@@ -6267,38 +6267,33 @@ function tagOccluded(x, y, z) {
   return false;
 }
 // A marker's honest position — real head height, sunk by the same fake-globe curve the
-// world itself draws with — used to just keep sinking as range grew, or slide fully off
-// the frustum with nothing left onscreen once the camera turned away. This tries that
-// honest projection first, and only once it goes bad (behind the camera, past a side, or
-// sunk past the bottom) falls back to a flattened point: true bearing, camera eye height
-// (no curve sink), a fixed reference distance — which always lands right on the horizon
-// line for however the camera's currently pitched — then clamps it just inside the frame.
-// Same function for players, bosses and the landmark, so none of them behave differently.
-const EDGE_MARGIN = 0.92;   // stay this far inside the true screen edge, never flush against it
-const EDGE_REF = 45;        // world units for the flattened bearing point — distance-agnostic on purpose
+// world itself draws with — used to just keep sinking as range grew. This tries that
+// honest projection first, and only once it's genuinely out of frame (sunk past the
+// bottom, risen past the top, or off a side) swaps to a flattened point instead: same
+// true bearing, but at the camera's own eye height with no curve sink, so it can't sink —
+// it rides the horizon line and still slides left/right exactly like the real position
+// would. No snapping to screen corners and no rotating to "point" anywhere — it's a
+// signpost standing at the right bearing, not a compass needle. Genuinely behind the
+// camera, it's just not visible, same as any real sign you haven't turned to face yet.
+// Same function for players, bosses, the landmark and everyone else, so none of them
+// behave differently from one another.
+const EDGE_REF = 45;   // world units for the flattened bearing point — distance-agnostic on purpose
 const _edgeReal = new THREE.Vector3();
 const _edgeFlat = new THREE.Vector3();
-const _edgeFwd = new THREE.Vector3();
 function edgeClampedProject(x, y, z) {
   const o = camera.position;
   _edgeReal.set(x, y - curveDrop(x, z), z).project(camera);
-  if (_edgeReal.z <= 1 && Math.abs(_edgeReal.x) <= EDGE_MARGIN
-      && _edgeReal.y >= -EDGE_MARGIN && _edgeReal.y <= EDGE_MARGIN) {
-    return { x: _edgeReal.x, y: _edgeReal.y, edge: false };
+  if (_edgeReal.z <= 1 && Math.abs(_edgeReal.x) <= 1 && _edgeReal.y >= -1 && _edgeReal.y <= 1) {
+    return { x: _edgeReal.x, y: _edgeReal.y, visible: true, edge: false };
   }
   const dx = x - o.x, dz = z - o.z;
   const fd = Math.hypot(dx, dz) || 1;
   const nx = dx / fd, nz = dz / fd;
   _edgeFlat.set(o.x + nx * EDGE_REF, o.y, o.z + nz * EDGE_REF).project(camera);
-  let ex = _edgeFlat.x, ey = _edgeFlat.y;
-  if (_edgeFlat.z > 1 || !isFinite(ex) || !isFinite(ey)) {
-    // dead behind the camera: the perspective divide flips sign on its own here, so the
-    // side has to be worked out by hand from the camera's own right vector (ground plane)
-    camera.getWorldDirection(_edgeFwd);
-    const side = (nx * _edgeFwd.z - nz * _edgeFwd.x) >= 0 ? 1 : -1;
-    ex = side * EDGE_MARGIN; ey = 0;
+  if (_edgeFlat.z > 1 || !isFinite(_edgeFlat.x) || !isFinite(_edgeFlat.y)) {
+    return { visible: false, edge: true };   // behind you — nothing to show until you turn
   }
-  return { x: clamp(ex, -EDGE_MARGIN, EDGE_MARGIN), y: clamp(ey, -EDGE_MARGIN, EDGE_MARGIN), edge: true };
+  return { x: _edgeFlat.x, y: _edgeFlat.y, visible: true, edge: true };
 }
 function tagEl(key) {
   let t = ptags.get(key);
