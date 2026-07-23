@@ -671,9 +671,10 @@ const moonHalo = skySprite(moonHaloTex, THREE.AdditiveBlending, -8, 'moonHalo');
 const moonSprite = skySprite(moonDiscTex, THREE.NormalBlending, -7, 'moonDisc');
 const overheadCloud = skySprite(overheadCloudTex, THREE.NormalBlending, -6, 'overheadCloud');
 
-// sun-lit air motes: one THREE.Points draw call, all drift (rise+wrap, sway, twinkle) in the
-// vertex shader so the CPU never re-touches the buffer. Additive soft bokeh = out-of-focus
-// glints. The whole cloud rides the player; uTint recolours it off the sky every frame.
+// sun-lit air motes: one THREE.Points draw call. Every mote owns a fixed, OPEN spot on
+// the MAP (seated by updateMotes — never in a wall, wreck or building footprint) and
+// holds it while you trek past; only the bob/sway/twinkle lives in the vertex shader.
+// Additive soft bokeh = out-of-focus glints. uTint recolours the lot off the sky.
 const MOTE_SPAN = 26;
 // the pool holds more motes than a clear day shows: uFrac gates how many are live, so
 // the air genuinely thickens with the weather — sunny keeps the old baseline count,
@@ -683,9 +684,9 @@ const airMotes = (() => {
   const N = MOTE_N, geo = new THREE.BufferGeometry();
   const pos = new Float32Array(N * 3), seed = new Float32Array(N);
   for (let i = 0; i < N; i++) {
-    pos[i * 3] = (Math.random() * 2 - 1) * MOTE_SPAN;
-    pos[i * 3 + 1] = -1.5 + Math.random() * 14.5;
-    pos[i * 3 + 2] = (Math.random() * 2 - 1) * MOTE_SPAN;
+    // parked far out of the box: the first updateMotes sweep seats every mote at a
+    // real open spot on the map once the world actually exists
+    pos[i * 3] = 1e6; pos[i * 3 + 1] = 0; pos[i * 3 + 2] = 1e6;
     seed[i] = Math.random();
   }
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -700,11 +701,11 @@ const airMotes = (() => {
       uniform float uTime, uPR, uFrac;
       varying float vA;
       void main(){
-        vec3 p = position; float s = aSeed;
+        vec3 p = position; float s = aSeed;   // p is an ABSOLUTE map spot (see updateMotes)
         // weather gate: motes past the live fraction collapse (decorrelated from the
         // seed's motion role so waking more doesn't favour the slow risers)
         float gate = step(fract(s * 97.13), uFrac);
-        p.y = -1.5 + mod(p.y + 1.5 + uTime*(0.05 + 0.09*s), 14.5);       // slow rise, wrap to the floor
+        p.y += sin(uTime*(0.18 + 0.22*s) + s*61.0) * 0.9;                // a gentle bob ON its spot
         p.x += sin(uTime*(0.25 + s) + s*31.0) * 0.5;                     // lazy sway
         p.z += cos(uTime*(0.20 + s*0.5) + s*57.0) * 0.5;
         vec4 wp = modelMatrix * vec4(p, 1.0);          // globe-bend like everything else
@@ -729,6 +730,41 @@ const airMotes = (() => {
   pts.frustumCulled = false; pts.renderOrder = 3; pts.name = 'airMotes'; scene.add(pts);
   return pts;
 })();
+// world-anchored mote keeping: a mote holds its map spot while you trek past — no more
+// cloud gliding along with the camera — and only ever seats in the OPEN: never inside
+// a building footprint, a wall, a wreck or any other collider. Ones that fall out of
+// the box around the hero re-seat at a fresh open spot on the way in.
+function moteSpot(pos, i, px, pz) {
+  for (let k = 0; k < 8; k++) {
+    const x = px + (Math.random() * 2 - 1) * MOTE_SPAN;
+    const z = pz + (Math.random() * 2 - 1) * MOTE_SPAN;
+    let blocked = !!buildingAt(x, z);       // indoors is not "the open"
+    if (!blocked) for (const c of nearbyColliders(x, z)) {
+      let lx = x - c.x, lz = z - c.z;
+      if (c.rot) { const cs = Math.cos(c.rot), sn = Math.sin(c.rot), tx = lx * cs - lz * sn; lz = lx * sn + lz * cs; lx = tx; }
+      if (Math.abs(lx) < c.hw + 0.8 && Math.abs(lz) < c.hd + 0.8) { blocked = true; break; }
+    }
+    if (blocked) continue;
+    pos.setXYZ(i, x, groundHeight(x, z) + 0.4 + Math.random() * 8.5, z);
+    return;
+  }
+  // a packed block with no daylight this frame: tuck it under the dirt inside the box —
+  // invisible, and it re-rolls naturally the next time the box moves off it
+  pos.setXYZ(i, px, groundHeight(px, pz) - 20, pz);
+}
+function updateMotes() {
+  const pos = airMotes.geometry.attributes.position;
+  const px = player.pos.x, py = player.pos.y, pz = player.pos.z;
+  let dirty = false;
+  for (let i = 0; i < MOTE_N; i++) {
+    if (Math.abs(pos.getX(i) - px) > MOTE_SPAN || Math.abs(pos.getZ(i) - pz) > MOTE_SPAN
+      || Math.abs(pos.getY(i) - py) > 26) {
+      moteSpot(pos, i, px, pz);
+      dirty = true;
+    }
+  }
+  if (dirty) pos.needsUpdate = true;
+}
 
 const _sunDir = new THREE.Vector3(), _moonDir = new THREE.Vector3();
 const _ohDir = new THREE.Vector3(0.06, 1.0, -0.16).normalize();   // fixed spot the dark cloud parks at
@@ -801,7 +837,7 @@ function updateCelestial(dt) {
   cloudUni.uSunCol.value.copy(_cSun).multiplyScalar(vis);
   cloudUni.uMoonDir.value.copy(_moonDir);
   cloudUni.uMoonCol.value.copy(_cMoon).multiplyScalar(mVis * (p.nightW || 0));
-  airMotes.position.set(player.pos.x, player.pos.y, player.pos.z);
+  updateMotes(); // re-seat any motes the trek left behind — the cloud itself never moves
   airMotes.material.uniforms.uTime.value += dt;
   _cMote.set(p.hor).lerp(_cSun, 0.5);
   airMotes.material.uniforms.uTint.value.copy(_cMote).multiplyScalar(0.55 + 0.45 * (1 - (p.nightW || 0)));
