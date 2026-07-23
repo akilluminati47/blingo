@@ -6337,7 +6337,10 @@ const tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: tr
 function spawnTracer(from, to) {
   const len = from.distanceTo(to);
   if (len < 0.2) return;
-  const g = new THREE.BoxGeometry(0.025, 0.025, len);
+  // segmented along its length so the globe bend can sag the WHOLE line: with only end
+  // vertices a long round drew a straight chord that floated over the curved world
+  // mid-flight — now every ~8u of tracer gets its own vertices to sink with the terrain
+  const g = new THREE.BoxGeometry(0.025, 0.025, len, 1, 1, Math.max(1, Math.ceil(len / 8)));
   const m = new THREE.Mesh(g, tracerMat.clone());
   m.position.copy(from).lerp(to, 0.5);
   m.lookAt(to);
@@ -7283,6 +7286,9 @@ function fireWeapon() {
   // the last round out of the mag starts the reload on its own
   if (player.clip === 0) tryReload();
   game.shots = (game.shots | 0) + 1; // the death screen counts every round you spent
+  // AR discipline perk: the first pull after a beat off the trigger flies dead straight —
+  // pace your taps and every one is a marksman round; hold it down and the spray returns
+  const steady = w.id === 'rifle' && game.time - player.lastShotT > 0.25;
   player.lastShotT = game.time;
   // gunshots are loud: blind zombies home in on this spot
   game.lastShot.set(player.pos.x, 0, player.pos.z); game.lastShotT = game.time;
@@ -7301,9 +7307,12 @@ function fireWeapon() {
 
   const pellets = w.pellets || 1;
   _from.copy(camera.position);
+  // the long guns reach the whole VISIBLE world: out to wherever the fog actually ends
+  // today (weather + draw-distance notch), never less than the old 80
+  const REACH = (w.id === 'sniper' || w.id === 'rifle') ? Math.max(80, scene.fog.far) : 80;
   let anyHit = false;
   for (let p = 0; p < pellets; p++) {
-    const sp = w.spread;
+    const sp = steady ? 0.002 : w.spread;
     const dx = _aimDir.x + (Math.random() - 0.5) * sp * 2;
     const dy = _aimDir.y + (Math.random() - 0.5) * sp * 2;
     const dzz = _aimDir.z + (Math.random() - 0.5) * sp * 2;
@@ -7317,7 +7326,7 @@ function fireWeapon() {
     // fire the hero was plainly clear of died "inside" a building at his back. The round
     // now truly leaves from the gun: geometry behind it is as dead as bodies behind it.
     const tSelf = selfT(_from.x, _from.y, _from.z, rdx, rdy, rdz);
-    let tWall = rayGround(_from.x, _from.y, _from.z, rdx, rdy, rdz, 80);
+    let tWall = rayGround(_from.x, _from.y, _from.z, rdx, rdy, rdz, REACH);
     for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
       // roofs stop a round on their real pitch, not the box that errs large, so a bird on the
       // ridge (poking above the roofline) is hittable instead of the box eating the shot
@@ -7325,23 +7334,27 @@ function fireWeapon() {
                        : rayAABB(_from.x, _from.y, _from.z, rdx, rdy, rdz, c);
       if (t > tSelf && t < tWall) tWall = t;
     }
-    const tMax = Math.min(tWall, 80);
+    const tMax = Math.min(tWall, REACH);
     // gather EVERY body along the line, nearest first — not just the closest — so a
     // killing hit can hand the round on to whoever stood behind (stopping power, below)
     const line = [];
     for (const z of zombies) {
       if (z.state === 'dying' || z.vanished) continue; // Bluga in his smoke takes no rounds
       const gy = z.blob.root.position.y, s = z.scale;
+      // aim in DRAWN space: the globe bend sinks this body on screen, so lift the ray
+      // by the same amount for its hit test — what the crosshair covers is what dies
+      // (matters most for the sniper glassing marks right at the fog line)
+      const fy = _from.y + curveDrop(z.pos.x, z.pos.z);
       let zt = tMax, zh = null;
       // sleepers and carcasses lie flat — hit them where they actually are, not standing up
       if (z.state === 'sleep' || z.state === 'corpse') {
         const o = {};
-        const lt = lyingHitT(_from.x, _from.y, _from.z, rdx, rdy, rdz, z, o);
+        const lt = lyingHitT(_from.x, fy, _from.z, rdx, rdy, rdz, z, o);
         if (lt < zt) { zt = lt; zh = { isHead: o.isHead, limb: null }; }
       } else {
-        const ht = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 1.3 * s, z.pos.z, 0.42 * s);
+        const ht = raySphere(_from.x, fy, _from.z, rdx, rdy, rdz, z.pos.x, gy + 1.3 * s, z.pos.z, 0.42 * s);
         if (ht < zt) { zt = ht; zh = { isHead: true, limb: null }; }
-        const bt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, z.pos.x, gy + 0.7 * s, z.pos.z, 0.55 * s);
+        const bt = raySphere(_from.x, fy, _from.z, rdx, rdy, rdz, z.pos.x, gy + 0.7 * s, z.pos.z, 0.55 * s);
         if (bt < zt) { zt = bt; zh = { isHead: false, limb: null }; }
         // the Rotten One's open chest: a sphere over the beating heart proud of his left upper
         // chest (it turns with him). It covers the exposed heart + the mouth of the wound, so a
@@ -7351,7 +7364,7 @@ function fireWeapon() {
           const cy4 = Math.cos(z.yaw || 0), sy4 = Math.sin(z.yaw || 0);
           const hx = z.pos.x + (0.17 * cy4 + 0.48 * sy4) * s;
           const hz = z.pos.z + (-0.17 * sy4 + 0.48 * cy4) * s;
-          const wt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, hx, gy + 0.82 * s, hz, 0.28 * s);
+          const wt = raySphere(_from.x, fy, _from.z, rdx, rdy, rdz, hx, gy + 0.82 * s, hz, 0.28 * s);
           if (wt < tMax) zh = { isHead: true, limb: null, weakspot: true };
         }
         // arms + legs live in the zombie's facing frame; a hit here marks that exact limb
@@ -7361,7 +7374,7 @@ function fireWeapon() {
             if (L[0] === 'arm' ? z.blob.armGone[L[1]] : z.blob.legGone[L[1]]) continue;
             const wx = z.pos.x + (L[2] * cy + L[4] * sy) * s;
             const wz = z.pos.z + (-L[2] * sy + L[4] * cy) * s;
-            const lt = raySphere(_from.x, _from.y, _from.z, rdx, rdy, rdz, wx, gy + L[3] * s, wz, L[5] * s);
+            const lt = raySphere(_from.x, fy, _from.z, rdx, rdy, rdz, wx, gy + L[3] * s, wz, L[5] * s);
             if (lt < zt) { zt = lt; zh = { isHead: false, limb: { kind: L[0], idx: L[1] } }; }
           }
         }
@@ -7373,7 +7386,8 @@ function fireWeapon() {
     // aim always gibs from first contact: no invincibility frames while perched, landed,
     // mid-hop or taking off, and no "dropped feathers and flew off alive" whiffs.
     for (const cw of crows) {
-      const ct = crowRayT(_from.x, _from.y, _from.z, rdx, rdy, rdz, cw);
+      // birds sink with the curve too — same drawn-space lift as the zombie spheres
+      const ct = crowRayT(_from.x, _from.y + curveDrop(cw.g.position.x, cw.g.position.z), _from.z, rdx, rdy, rdz, cw);
       if (ct > tSelf && ct < tMax) line.push({ t: ct, crow: cw });
     }
     line.sort((q, r) => q.t - r.t);
@@ -7417,7 +7431,7 @@ function fireWeapon() {
       (gunMesh.userData.muzzle || gunMesh).getWorldPosition(_gp);
       spawnTracer(_gp.clone(), _to.clone());
     }
-    if (!stopped && stopT < 80) {
+    if (!stopped && stopT < REACH) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
     }
   }
@@ -7557,9 +7571,12 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
 
   if (z.hp > 0) {
     // weak, far or skullcrack (marksman rifle) headshot that doesn't kill cracks the
-    // skull open, revealing the weak spot: one tap opens it, the next tap pops it.
+    // skull open, revealing the weak spot: one tap opens it, the next tap pops it —
+    // except the pistol, whose light rounds need TWO taps to crack (three to drop one).
     // A black-ops mask never cracks — there's no brain window through a shiesty.
-    if (isHead && !z.brainExposed && !z.isBoss && !z.fbi && w && (w.weak || w.skullcrack || dist > 26)) exposeBrain(z);
+    if (isHead && !z.brainExposed && !z.isBoss && !z.fbi && w && (w.weak || w.skullcrack || dist > 26)) {
+      if (w.id !== 'pistol' || ((z.skullHits = (z.skullHits | 0) + 1) >= 2)) exposeBrain(z);
+    }
     return;
   }
   killZombie(z, kx, kz, isHead && !fbiArmored(z, w) && (!w || w.gib || z.brainExposed));
@@ -7652,7 +7669,7 @@ function tradeWeapons(c) {
   const oi = player.owned.indexOf(myId);
   if (oi >= 0) player.owned.splice(oi, 1);
   delete reserves[myId];
-  setCompanionWeapon(c, myId);
+  setCompanionWeapon(c, myId, false); // no banking: the player just took that gun with them
   equipWeapon(theirId);
   // a player-run cousin is a real person elsewhere: tell their client to settle its side
   if (c.netP && c.netConn) { try { c.netConn.send({ t: 'tradeW', w: myId, took: theirId }); } catch (e) {} }
@@ -7861,7 +7878,7 @@ function netHandleNpcTrade(conn, cid) {
   if (!npc || !npc.weapon || npc.weapon.id === 'fists' || npc.weapon.id === reqW) return;
   if (Math.hypot(npc.pos.x - req.pos.x, npc.pos.z - req.pos.z) > 3.4) return;
   const npcW = npc.weapon.id;
-  setCompanionWeapon(npc, reqW);               // the NPC takes the player's weapon
+  setCompanionWeapon(npc, reqW, false);        // the NPC takes the player's weapon (no banking — the client walked off with theirs)
   try { conn.send({ t: 'tradeW', w: npcW, took: reqW }); } catch (e) {} // the client equips the NPC's
   toast(`P${req.netP} TRADED WITH ${npc.data.name.toUpperCase()}`);
   bloopyTradeNice();
@@ -8105,15 +8122,33 @@ function rollLootWeapon(rng) {
   for (let i = 0; i < 8; i++) { const id = rollLoot(rng); if (id !== 'ammo' && id !== 'medkit') return id; }
   return 'pistol';
 }
-// swap a companion's held weapon + its visible gun model
-function setCompanionWeapon(c, id) {
+// swap a companion's held weapon + its visible gun model. AI cousins keep a BAG now:
+// swapping away a gun that still has rounds banks it (with its count) for later, and
+// they run the whole armoury down favourite-first to pistol-last before ever falling
+// back to steel (see cousinNextGun). bank=false for straight trades, where the iron
+// changes hands instead of going to the bag. Player-run cousins own their own count.
+function setCompanionWeapon(c, id, bank = true) {
+  const bag = (!c.netP && bank) ? (c.bag || (c.bag = {})) : null;
+  if (bag && c.weapon && !c.weapon.melee && c.weapon.id !== id && (c.gunAmmo | 0) > 0)
+    bag[c.weapon.id] = (bag[c.weapon.id] | 0) + c.gunAmmo;
   c.weapon = WEAPONS[id];
   if (c.gunMesh) c.gunMesh.removeFromParent();
   c.gunMesh = id === 'fists' ? null : buildGunMesh(id); // melee models show in their fist too
   if (c.gunMesh) c.blob.gunSocket.add(c.gunMesh);
-  // ammo, tracked like the player's inventory: a gun ships with a full load (mag + reserve);
-  // melee and bare fists never run dry. When this hits zero the cousin drops the gun.
-  c.gunAmmo = WEAPONS[id].melee ? Infinity : (WEAPONS[id].mag + WEAPONS[id].ammo);
+  // ammo, tracked like the player's inventory: a banked gun comes back up with the rounds
+  // it went to sleep with, a fresh one ships with a full load (mag + reserve); melee and
+  // bare fists never run dry. When this hits zero the cousin draws the next gun in the bag.
+  const banked = c.netP ? 0 : ((c.bag || {})[id] | 0);
+  c.gunAmmo = WEAPONS[id].melee ? Infinity : (banked > 0 ? banked : WEAPONS[id].mag + WEAPONS[id].ammo);
+  if (banked > 0) delete c.bag[id];
+}
+// the draw order when a gun runs dry: the cousin's dream iron first, then the heavy
+// glass downward, the humble pistol dead last — melee only once the whole bag is dry
+function cousinNextGun(c) {
+  if (!c.bag) return null;
+  const order = [PREF_GUN[c.data.id], 'sniper', 'magnum', 'shotgun', 'rifle', 'smg', 'pistol'];
+  for (const id of order) if ((c.bag[id] | 0) > 0) return id;
+  return null;
 }
 // a cousin's gun runs dry mid-fight: they drop the empty iron and draw their own signature
 // melee (bare hands only if they somehow have none), and the squad's own loot + trade rules
@@ -8122,6 +8157,14 @@ function setCompanionWeapon(c, id) {
 function cousinDropEmptyGun(c) {
   if (Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 26) play3d(c.pos.x, c.pos.z, () => SFX.dry());
   const was = c.weapon.name;
+  // the bag first: every banked gun gets used up, favourites down to the pistol,
+  // before the melee draw ever happens
+  const next = cousinNextGun(c);
+  if (next) {
+    setCompanionWeapon(c, next);
+    toast(`${c.data.name.toUpperCase()} EMPTIED THE ${was.toUpperCase()} .ᐟ ${WEAPONS[next].name.toUpperCase()} OUT .ᐟ`);
+    return;
+  }
   const mid = c.data.melee && WEAPONS[c.data.melee] ? c.data.melee : 'fists';
   setCompanionWeapon(c, mid);
   toast(mid === 'fists'
@@ -8143,6 +8186,13 @@ function distributeGun(looter, id) {
       || null;
   }
   if (take) setCompanionWeapon(take, id);
+  else if (!looter.netP) {
+    // every hand full and nobody dreams of it: the looter banks it — nothing found
+    // ever goes to waste, it just waits its turn in the draw order
+    const bag = looter.bag || (looter.bag = {});
+    bag[id] = (bag[id] | 0) + WEAPONS[id].mag + WEAPONS[id].ammo;
+    take = looter;
+  }
   return take;
 }
 // armed cousins pass guns between themselves until everyone holds their preferred iron
@@ -8153,7 +8203,7 @@ function settleGunTrades() {
       if (b === a || !b.recruited || b.netP || !armedWithGun(b)) continue;
       if (a.weapon.id === PREF_GUN[b.data.id] && b.weapon.id !== PREF_GUN[b.data.id]) {
         const aw = a.weapon.id, bw = b.weapon.id;
-        setCompanionWeapon(a, bw); setCompanionWeapon(b, aw);
+        setCompanionWeapon(a, bw, false); setCompanionWeapon(b, aw, false); // hands swap, bags don't
         toast(`${a.data.name.toUpperCase()} AND ${b.data.name.toUpperCase()} TRADED GUNS`);
         return; // one trade per pass keeps the toasts calm
       }
