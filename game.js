@@ -564,11 +564,15 @@ const cloudDome = new THREE.Mesh(
       }
       void main(){
         vec3 dir = normalize(vP);
-        if (dir.y < 0.03) discard;                    // no noise work below the horizon smear
-        float above = smoothstep(0.06, 0.34, dir.y);
+        // the flat projection stretches into vertical smears at low elevation — the
+        // "cylinder wall" around the player. Cut earlier and fade higher: by the time
+        // the stretch zone starts the clouds are already gone, and the sky gradient
+        // owns the horizon band alone.
+        if (dir.y < 0.10) discard;
+        float above = smoothstep(0.16, 0.44, dir.y);
         // flat high projection so the horizon never streaks; fbm fed through fbm so
         // the puffs billow and curl instead of sliding as a rigid sheet
-        vec2 uv = dir.xz / max(dir.y, 0.24) * 0.5;
+        vec2 uv = dir.xz / max(dir.y, 0.32) * 0.5;
         vec2 q = vec2(fbm(uv + uTime * 0.006), fbm(uv + vec2(5.2, 1.3) - uTime * 0.005));
         vec2 cuv = uv + q * 0.6 + vec2(uTime * 0.010, uTime * 0.004);
         float dens = fbm(cuv) * 0.68 + fbm(cuv * 2.3 + 7.0) * 0.32;
@@ -580,8 +584,8 @@ const cloudDome = new THREE.Mesh(
         col += uMoonCol * (pow(md, 60.0) * 0.6 + pow(md, 6.0) * 0.2);
         float aP = cov * 0.92;
         // thin high cirrus streaks in the gaps the puffs leave
-        float ciBand = smoothstep(0.20, 0.55, dir.y);
-        float ci = fbm(dir.xz / max(dir.y, 0.30) * vec2(0.55, 2.8) + vec2(uTime * 0.006, 0.0));
+        float ciBand = smoothstep(0.24, 0.58, dir.y);
+        float ci = fbm(dir.xz / max(dir.y, 0.34) * vec2(0.55, 2.8) + vec2(uTime * 0.006, 0.0));
         ci = smoothstep(0.82 - 0.22 * uCirrus, 0.88, ci) * ciBand * (1.0 - cov);
         float aC = ci * 0.34 * (1.0 - aP);
         float a = aP + aC;
@@ -947,13 +951,6 @@ function applyEnvironment(redraw = true) {
   scene.fog.near = F * (0.267 * W.sunny + 0.229 * W.cloudy + 0.152 * W.rain);
   scene.fog.far = F * (W.sunny + 0.876 * W.cloudy + 0.667 * W.rain);
   scene.background.copy(fogC);
-  // the town skyline wears a shade under the sky, and only fades in once the real
-  // (fogged) town has melted away — a fog-free silhouette landmark at any distance
-  skylineMat.color.copy(fogC).multiplyScalar(0.78);
-  const camd = rectDist(camera.position.x, camera.position.z, TOWN_SKY_RECT);
-  const skyT = clamp((camd - scene.fog.far * 0.55) / (scene.fog.far * 0.45), 0, 1);
-  skylineMat.opacity = skyT * 0.85;
-  skylineGroup.visible = skyT > 0.01;
   rainOn(W.rain > 0.45);
   if (rainMesh) rainMesh.material.opacity = 0.4 * Math.min(1, W.rain * 1.6);
   setLampGlow(lampLitFor(game.clock ?? 13, W)); // the street lamps take over as the sky goes down
@@ -3056,12 +3053,14 @@ function segBox(ax, ay, az, bx, by, bz, c, pad = 0) {
          slab(az, dz, c.z - c.hd - pad, c.z + c.hd + pad) &&
          slab(ay, dy, c.y0 - pad, c.y1 + pad);
 }
-// coarse ray-vs-terrain
+// coarse ray-vs-terrain — tested against the DRAWN ground: every sample lifts the ray
+// by that spot's globe sink, so a shot skimming the horizon flies exactly as far as it
+// looks like it should instead of biting into flat dirt the curve already lowered
 function rayGround(ox, oy, oz, dx, dy, dz, maxT) {
-  let prev = oy - groundHeight(ox, oz);
+  let prev = oy + curveDrop(ox, oz) - groundHeight(ox, oz);
   for (let t = 2; t <= maxT; t += 2) {
     const x = ox + dx * t, y = oy + dy * t, z = oz + dz * t;
-    const dh = y - groundHeight(x, z);
+    const dh = y + curveDrop(x, z) - groundHeight(x, z);
     if (dh <= 0) {
       // refine between t-2 and t
       return t - 2 + 2 * (prev / (prev - dh));
@@ -3097,72 +3096,17 @@ function rebuildTownWorld() {
   jellyBar.jars.length = 0; jellyBar.glow = null;             // the consumable stations rebuild with their halls
   chiliBar.bowls.length = 0; chiliBar.glow = null; chiliBar.surf = null;
   fountainFx = null;
-  skylineSpecs.length = 0;        // the silhouette re-registers as the town rebuilds
-  clearSkyline();                 // disposes the minted prism/spike geometry too
   buildTown();
-  buildSkyline();
   for (const [key, ch] of [...chunks]) unloadChunk(key, ch);
   updateChunks(0, 0);             // runs start at the origin: iron the ground under the spawn now
 }
 const townBuildings = []; // permanent enterable buildings (the Blob Lounge) — buildingAt checks these too
 let fountainFx = null; // animated water on the plaza fountain — filled in buildTown, run by updateFountain
 
-// ---------- town skyline silhouettes ----------
-// The civic skyline is the landmark you navigate home by, so it never fogs out: each
-// tall town-centre structure registers a silhouette box here as it's built, drawn
-// FOG-FREE in a shade just under the sky, and faded in only once the real (fogged)
-// town has melted away. Boxes sit slightly proud of the real walls so they win the
-// depth test against fully-fogged faces instead of hiding behind them — up close
-// they're at zero opacity and the real town owns the view.
-const TOWN_SKY_RECT = [-16, -60, 110, 94]; // spans bank .. town hall .. church
-const skylineSpecs = []; // {x, z, hw, hd, y0, y1}
-const skylineGroup = new THREE.Group();
-const skylineMat = new THREE.MeshBasicMaterial({ color: 0x1a1e2a, fog: false, transparent: true, opacity: 0 });
-// the silhouettes ride the SAME globe bend as the town they stand for — pinned flat
-// (the old NO_CURVE opt-out) they hung in the air over the curved horizon; sinking
-// with the curve they sit exactly where the real walls fade in, and far enough out
-// they slip below the curve like everything else
-// kind: 'box' (default) | 'prism' (gabled roof, ridge along z, aux = eave height) |
-//       'spike' (4-sided pyramid, hw = base radius, y0 = where it sits — no burial)
-function skylineAdd(x, z, hw, hd, y0, y1, kind, aux) { skylineSpecs.push({ x, z, hw, hd, y0, y1, kind, aux }); }
-function clearSkyline() {
-  // prism roofs + spikes mint their own geometry — give it back before the rebuild
-  for (const m of skylineGroup.children) if (m.geometry !== BOX) m.geometry.dispose();
-  skylineGroup.clear();
-}
-function buildSkyline() {
-  for (const s of skylineSpecs) {
-    // +0.25 out and +0.1 up beyond the real faces (tighter than the old +0.4: closer to
-    // the true geometry, still proud enough to win the depth test against fogged walls);
-    // grounded shapes stay buried 2u so no undulation slips daylight beneath them
-    const w = (s.hw + 0.25) * 2, d = (s.hd + 0.25) * 2;
-    if (s.kind === 'spike') {
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.02, s.hw + 0.25, s.y1 - s.y0, 4), skylineMat);
-      m.rotation.y = Math.PI / 4; // corners to the compass, same twist as the real spire
-      m.position.set(s.x, (s.y0 + s.y1) / 2, s.z);
-      skylineGroup.add(m);
-    } else if (s.kind === 'prism') {
-      // gabled: walls up to the eave, then the roof triangle to the ridge
-      const wallH = s.aux - (s.y0 - 2);
-      const wall = new THREE.Mesh(BOX, skylineMat);
-      wall.scale.set(w, wallH, d);
-      wall.position.set(s.x, s.y0 - 2 + wallH / 2, s.z);
-      skylineGroup.add(wall);
-      const shp = new THREE.Shape();
-      shp.moveTo(-w / 2, 0); shp.lineTo(w / 2, 0); shp.lineTo(0, (s.y1 + 0.1) - s.aux); shp.closePath();
-      const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(shp, { depth: d, bevelEnabled: false }), skylineMat);
-      roof.position.set(s.x, s.aux - 0.05, s.z - d / 2);
-      skylineGroup.add(roof);
-    } else {
-      const h = (s.y1 + 0.1) - (s.y0 - 2);
-      const m = new THREE.Mesh(BOX, skylineMat);
-      m.scale.set(w, h, d);
-      m.position.set(s.x, s.y0 - 2 + h / 2, s.z);
-      skylineGroup.add(m);
-    }
-  }
-  scene.add(skylineGroup);
-}
+// (the old fog-free "town skyline" silhouette LODs — church, bank, town hall,
+// courthouse — are gone: the globe curve keeps real geometry honest at distance
+// now, sliding it below the horizon instead of popping it, so the stand-ins had
+// nothing left to stand in for)
 scene.add(townGroup);
 
 // civic building: colonnaded facade on the faceDir side (+1 = faces +z, -1 = faces -z)
@@ -3173,8 +3117,6 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   body.position.set(x, y0 + h / 2, z);
   townGroup.add(body); peekKit.push(body);
   townColliders.push(aabb(x, z, w / 2, d / 2, h, y0));
-  // the civic mass (body + portico slab) joins the far skyline
-  skylineAdd(x, z, (w + 1) / 2, (d + 2.6) / 2, y0, y0 + h + 0.45);
   const fz = z + faceDir * d / 2; // facade plane, turned toward the road
   // full-height columns whose capitals meet the portico slab above
   for (let i = 0; i < 4; i++) {
@@ -3386,13 +3328,6 @@ function buildChurchyard(rng) {
   spire.position.set(cx, ridgeY + 4, steepleZ);
   spire.rotation.y = Math.PI / 4; // 4-sided cone's corners default to the box's face centers; twist to cap the tower's faces instead
   townGroup.add(spire);
-  // nave, tower and spire all register on the far skyline — the graveyard block's
-  // landmark, and the tallest silhouette the town throws. The nave reads as a real
-  // gabled roofline (walls to the eave, triangle to the ridge) and the spire as a
-  // true 4-sided spike off the tower top — no more flat-topped column stack
-  skylineAdd(cx, cz, w / 2, d / 2, y0, ridgeY, 'prism', y0 + h - 0.05);
-  skylineAdd(cx, steepleZ, 1.3, 1.3, y0, ridgeY + 2.6);
-  skylineAdd(cx, steepleZ, 1.85, 1.85, ridgeY + 2.35, ridgeY + 5.6, 'spike');
   const crossV = box(0.08, 0.95, 0.08, 0x14121a);
   crossV.position.set(cx, ridgeY + 5.75, steepleZ); crossV.rotation.z = 0.09; // slightly askew
   townGroup.add(crossV);
@@ -7360,9 +7295,11 @@ function fireWeapon() {
     let tWall = rayGround(_from.x, _from.y, _from.z, rdx, rdy, rdz, REACH);
     for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
       // roofs stop a round on their real pitch, not the box that errs large, so a bird on the
-      // ridge (poking above the roofline) is hittable instead of the box eating the shot
-      const t = c.roof ? rayRoof(_from.x, _from.y, _from.z, rdx, rdy, rdz, c)
-                       : rayAABB(_from.x, _from.y, _from.z, rdx, rdy, rdz, c);
+      // ridge (poking above the roofline) is hittable instead of the box eating the shot.
+      // Lifted per-collider like the bodies: the round stops where the wall is DRAWN
+      const fyC = _from.y + curveDrop(c.x, c.z);
+      const t = c.roof ? rayRoof(_from.x, fyC, _from.z, rdx, rdy, rdz, c)
+                       : rayAABB(_from.x, fyC, _from.z, rdx, rdy, rdz, c);
       if (t > tSelf && t < tWall) tWall = t;
     }
     const tMax = Math.min(tWall, REACH);
@@ -7458,6 +7395,10 @@ function fireWeapon() {
       if (!pierce) { stopT = dHit; stopped = true; break; }
     }
     _to.set(_from.x + rdx * stopT, _from.y + rdy * stopT, _from.z + rdz * stopT);
+    // the endpoint is stored flat but DRAWN sunk — raise it by its own globe sink so the
+    // tracer's drawn tip (and the impact dust) lands exactly on the drawn target, not one
+    // curve-drop beneath it
+    _to.y += curveDrop(_to.x, _to.z);
     if (gunMesh) {
       (gunMesh.userData.muzzle || gunMesh).getWorldPosition(_gp);
       spawnTracer(_gp.clone(), _to.clone());
@@ -11866,30 +11807,37 @@ function updateFx(dt) {
     // it crosses before it reaches the gun is at the hero's back, not under the sights.
     // Nothing behind that line may flare (or, on touch, open fire): see selfT in fireWeapon.
     const tSelf = selfT(ox, oy, oz, dx, dy, dz);
-    let tWall = rayGround(ox, oy, oz, dx, dy, dz, 80);
+    // the flare mirrors fireWeapon EXACTLY — same reach (the long guns read out to the
+    // fog line) and the same globe-bend lifts on every test — or the scope would lie
+    // about what the round will actually do
+    const wFl = player.weapon;
+    const reach = (wFl.id === 'sniper' || wFl.id === 'rifle') ? Math.max(80, scene.fog.far) : 80;
+    let tWall = rayGround(ox, oy, oz, dx, dy, dz, reach);
     for (const c of nearbyColliders(player.pos.x, player.pos.z)) {
-      const t = c.roof ? rayRoof(ox, oy, oz, dx, dy, dz, c) : rayAABB(ox, oy, oz, dx, dy, dz, c);
       // walls at the hero's back are dead air, exactly as fireWeapon treats them — the
       // flare must read the same line the round will fly, or touch auto-fire goes blind
       // the moment the camera backs into a building
+      const fyC = oy + curveDrop(c.x, c.z);
+      const t = c.roof ? rayRoof(ox, fyC, oz, dx, dy, dz, c) : rayAABB(ox, fyC, oz, dx, dy, dz, c);
       if (t > tSelf && t < tWall) tWall = t;
     }
     for (const z of zombies) {
       if (z.state === 'dying' || z.vanished) continue;
       const gy2 = z.blob.root.position.y;
+      const fy = oy + curveDrop(z.pos.x, z.pos.z); // aim in drawn space, same as the round
       let t;
       if (z.state === 'sleep' || z.state === 'corpse') {
-        t = lyingHitT(ox, oy, oz, dx, dy, dz, z, null);
+        t = lyingHitT(ox, fy, oz, dx, dy, dz, z, null);
       } else {
         t = Math.min(
-          raySphere(ox, oy, oz, dx, dy, dz, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale),
-          raySphere(ox, oy, oz, dx, dy, dz, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale));
+          raySphere(ox, fy, oz, dx, dy, dz, z.pos.x, gy2 + 1.3 * z.scale, z.pos.z, 0.45 * z.scale),
+          raySphere(ox, fy, oz, dx, dy, dz, z.pos.x, gy2 + 0.7 * z.scale, z.pos.z, 0.58 * z.scale));
       }
       if (t > tSelf && t < tWall) { hot = true; break; }   // in front of the gun, and of whatever stops the round
     }
     // crows light the crosshair up like any other spawn — same sphere, same occlusion test
     if (!hot) for (const cw of crows) {
-      const t = crowRayT(ox, oy, oz, dx, dy, dz, cw);
+      const t = crowRayT(ox, oy + curveDrop(cw.g.position.x, cw.g.position.z), oz, dx, dy, dz, cw);
       if (t > tSelf && t < tWall) { hot = true; break; }
     }
   }
@@ -13385,7 +13333,6 @@ renderPrestige();
 equipWeapon('fists');
 applyLayout(defaultLayout()); // the classic deal: currentLayout + the collider net start coherent
 buildTown();
-buildSkyline(); // every tall structure has registered by now — raise the far-off silhouette
 game.clock = 9; wxReset(); applyEnvironment(); // a gentle mid-morning behind the menus
 applyEnvironment(); // morning sky behind the menus too
 updateChunks(0, 0);
