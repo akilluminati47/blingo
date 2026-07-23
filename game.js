@@ -13475,6 +13475,9 @@ else addEventListener('load', splashReady);
 function splashDismiss() {
   if (!splash.ready || splash.done) return;
   splash.done = true;
+  // the same click/keypress that opens the game is a real user gesture, so ride it
+  // straight into fullscreen — Esc (or Alt+Enter / Ctrl+F) hands it back
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen?.()?.catch(() => {});
   initAudio();          // the user gesture audio was waiting on — ambience rises with it
   SFX.tradePing();      // the confirm ping for the input itself
   playOpeningTheme();   // six motifs in one march, at the volume the settings remember
