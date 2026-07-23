@@ -532,6 +532,12 @@ const cloudUni = {
   uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
   uMoonCol: { value: new THREE.Color(0x000000) },
 };
+// the cloud SHELL: rays hit a layer wrapped over the same globe the world bends on
+// (planet radius straight from CURVE_DROP), so the field foreshortens into the horizon
+// like a real sky instead of capping a flat plane overhead
+const CLOUD_RP = 1 / (2 * CURVE_DROP);   // ≈ the planet the curve implies
+const CLOUD_CH = 90;                     // shell height overhead
+const CLOUD_THOR = Math.sqrt(2 * CLOUD_RP * CLOUD_CH + CLOUD_CH * CLOUD_CH); // ray length at the horizon
 const cloudDome = new THREE.Mesh(
   new THREE.SphereGeometry(232, 24, 16),
   new THREE.ShaderMaterial({
@@ -564,15 +570,18 @@ const cloudDome = new THREE.Mesh(
       }
       void main(){
         vec3 dir = normalize(vP);
-        // the flat projection stretches into vertical smears at low elevation — the
-        // "cylinder wall" around the player. Cut earlier and fade higher: by the time
-        // the stretch zone starts the clouds are already gone, and the sky gradient
-        // owns the horizon band alone.
-        if (dir.y < 0.10) discard;
-        float above = smoothstep(0.16, 0.44, dir.y);
-        // flat high projection so the horizon never streaks; fbm fed through fbm so
-        // the puffs billow and curl instead of sliding as a rigid sheet
-        vec2 uv = dir.xz / max(dir.y, 0.32) * 0.5;
+        if (dir.y < -0.04) discard;               // the shell dips just past the horizon line
+        // spherical shell projection — the ray meets a cloud layer wrapped over the
+        // globe (t = distance to the shell), so the texture foreshortens smoothly INTO
+        // the horizon: no flat-plane singularity, no smears down the tube sides
+        float t = -${CLOUD_RP.toFixed(1)} * dir.y
+                + sqrt(${(CLOUD_RP * CLOUD_RP).toFixed(1)} * dir.y * dir.y + ${(2 * CLOUD_RP * CLOUD_CH + CLOUD_CH * CLOUD_CH).toFixed(1)});
+        vec2 uv = dir.xz * t * ${(0.5 / CLOUD_CH).toFixed(6)};
+        // melt the far shell into the horizon haze over its last stretch, and cut
+        // hard just below the line so the fog owns everything under it
+        float far = smoothstep(0.42, 1.0, t * ${(1 / CLOUD_THOR).toFixed(6)});
+        float above = (1.0 - 0.85 * far) * smoothstep(-0.03, 0.05, dir.y);
+        // fbm fed through fbm so the puffs billow and curl instead of sliding as a rigid sheet
         vec2 q = vec2(fbm(uv + uTime * 0.006), fbm(uv + vec2(5.2, 1.3) - uTime * 0.005));
         vec2 cuv = uv + q * 0.6 + vec2(uTime * 0.010, uTime * 0.004);
         float dens = fbm(cuv) * 0.68 + fbm(cuv * 2.3 + 7.0) * 0.32;
@@ -584,8 +593,8 @@ const cloudDome = new THREE.Mesh(
         col += uMoonCol * (pow(md, 60.0) * 0.6 + pow(md, 6.0) * 0.2);
         float aP = cov * 0.92;
         // thin high cirrus streaks in the gaps the puffs leave
-        float ciBand = smoothstep(0.24, 0.58, dir.y);
-        float ci = fbm(dir.xz / max(dir.y, 0.34) * vec2(0.55, 2.8) + vec2(uTime * 0.006, 0.0));
+        float ciBand = smoothstep(0.05, 0.32, dir.y) * (1.0 - far); // streaks ride the shell too, thinning into the distance
+        float ci = fbm(dir.xz * t * ${(1 / CLOUD_CH).toFixed(6)} * vec2(0.55, 2.8) + vec2(uTime * 0.006, 0.0));
         ci = smoothstep(0.82 - 0.22 * uCirrus, 0.88, ci) * ciBand * (1.0 - cov);
         float aC = ci * 0.34 * (1.0 - aP);
         float a = aP + aC;
