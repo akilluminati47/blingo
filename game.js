@@ -45,6 +45,26 @@ THREE.ShaderChunk.project_vertex = THREE.ShaderChunk.project_vertex.replace(
   mvPosition = viewMatrix * curveW;
 #endif`
 );
+// sprites skip project_vertex entirely (they bill-board off their own anchor math), so
+// world-anchored sprites — the loot glow orbs — hung at flat height while the ground
+// sank away under them. Sink the anchor the same way; the camera-riding sky sprites
+// (sun, moon, overhead cloud) opt out with the same NO_CURVE define.
+THREE.ShaderLib.sprite.vertexShader = THREE.ShaderLib.sprite.vertexShader.replace(
+  'vec4 mvPosition = modelViewMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );',
+  `vec4 curveW = modelMatrix * vec4( 0.0, 0.0, 0.0, 1.0 );
+#ifndef NO_CURVE
+  vec2 curveD = curveW.xz - cameraPosition.xz;
+  curveW.y -= dot(curveD, curveD) * ${CURVE_DROP};
+#endif
+  vec4 mvPosition = viewMatrix * curveW;`
+);
+// the same sink for anything CPU-side that pins UI to a world point (damage numbers,
+// talk bubbles, player tags): drop a world y by this before projecting, so the label
+// lands on the drawn, curved actor instead of floating over its flat position
+function curveDrop(x, z) {
+  const dx = x - camera.position.x, dz = z - camera.position.z;
+  return (dx * dx + dz * dz) * CURVE_DROP;
+}
 
 const hemi = new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 0.9);
 scene.add(hemi);
@@ -638,6 +658,7 @@ const overheadCloudTex = (() => {
 })();
 function skySprite(tex, blend, ro, name) {
   const m = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, fog: false, blending: blend });
+  m.defines = { NO_CURVE: 1 }; // celestial sprites ride the camera at sky radius — never globe-bent
   const s = new THREE.Sprite(m); s.renderOrder = ro; s.frustumCulled = false; s.name = name; scene.add(s); return s;
 }
 const sunGlare = skySprite(sunGlareTex, THREE.AdditiveBlending, -8, 'sunGlare');
@@ -682,7 +703,10 @@ const airMotes = (() => {
         p.y = -1.5 + mod(p.y + 1.5 + uTime*(0.05 + 0.09*s), 14.5);       // slow rise, wrap to the floor
         p.x += sin(uTime*(0.25 + s) + s*31.0) * 0.5;                     // lazy sway
         p.z += cos(uTime*(0.20 + s*0.5) + s*57.0) * 0.5;
-        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        vec4 wp = modelMatrix * vec4(p, 1.0);          // globe-bend like everything else
+        vec2 cd = wp.xz - cameraPosition.xz;
+        wp.y -= dot(cd, cd) * ${CURVE_DROP};
+        vec4 mv = viewMatrix * wp;
         float tw = 0.5 + 0.5*sin(uTime*(0.6 + s*1.6) + s*43.0);
         vA = (0.14 + 0.86*tw*tw) * clamp(1.0 - (-mv.z)/38.0, 0.0, 1.0) * gate;  // twinkle, fade with depth
         gl_PointSize = min((1.4 + 3.2*s) * uPR * (6.0 / max(1.0, -mv.z)), 16.0*uPR) * gate;
@@ -4432,7 +4456,9 @@ function nearestJarToCrosshair() {
   let best = -1, bd = Infinity;
   jellyBar.jars.forEach((j, i) => {
     if (jellyBar.mask & (1 << i)) return;
-    _jarV.setFromMatrixPosition(j.matrixWorld).project(camera);
+    _jarV.setFromMatrixPosition(j.matrixWorld);
+    _jarV.y -= curveDrop(_jarV.x, _jarV.z); // compare against where the jar is DRAWN
+    _jarV.project(camera);
     const d = Math.hypot(_jarV.x, _jarV.y);
     if (_jarV.z < 1 && d < bd) { bd = d; best = i; }
   });
@@ -5873,7 +5899,7 @@ function updateDamageNumbers(dt) {
     const n = dmgNums[i];
     n.t += dt;
     if (n.t >= n.life) { n.el.remove(); dmgNums.splice(i, 1); continue; }
-    _dnv.set(n.x, n.y + n.t * 1.9, n.z);       // rises straight up in world space
+    _dnv.set(n.x, n.y + n.t * 1.9 - curveDrop(n.x, n.z), n.z); // rises straight up in world space, sunk to the curve
     _dnv.project(camera);
     if (_dnv.z > 1) { n.el.style.display = 'none'; continue; }
     n.el.style.display = '';
@@ -6093,7 +6119,7 @@ function updateEmoteFx(dt) {
     bu.t += dt;
     if (bu.t >= bu.life) { bu.el.remove(); bubbles.splice(i, 1); continue; }
     const p = bu.getPos();
-    _bv.set(p.x, p.y, p.z).project(camera);
+    _bv.set(p.x, p.y - curveDrop(p.x, p.z), p.z).project(camera);
     if (_bv.z > 1) { bu.el.style.display = 'none'; continue; }
     bu.el.style.display = '';
     bu.el.style.left = ((_bv.x * 0.5 + 0.5) * innerWidth) + 'px';
@@ -6190,7 +6216,7 @@ function updatePlayerTags(dt) {
     const hy = a.y + 2.35 * (a.scale || 1);   // floats just over the blob's head (taller for bosses)
     const o = camera.position;
     const dist = Math.hypot(a.x - o.x, hy - o.y, a.z - o.z);
-    _tagv.set(a.x, hy, a.z).project(camera);
+    _tagv.set(a.x, hy - curveDrop(a.x, a.z), a.z).project(camera);
     if (_tagv.z > 1) { t.el.style.display = 'none'; continue; }   // behind the camera
     t.el.style.display = '';
     if (t.label !== a.label) { t.label = a.label; t.b.textContent = a.label; }
