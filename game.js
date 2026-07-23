@@ -3098,7 +3098,7 @@ function rebuildTownWorld() {
   chiliBar.bowls.length = 0; chiliBar.glow = null; chiliBar.surf = null;
   fountainFx = null;
   skylineSpecs.length = 0;        // the silhouette re-registers as the town rebuilds
-  skylineGroup.clear();
+  clearSkyline();                 // disposes the minted prism/spike geometry too
   buildTown();
   buildSkyline();
   for (const [key, ch] of [...chunks]) unloadChunk(key, ch);
@@ -3118,19 +3118,48 @@ const TOWN_SKY_RECT = [-16, -60, 110, 94]; // spans bank .. town hall .. church
 const skylineSpecs = []; // {x, z, hw, hd, y0, y1}
 const skylineGroup = new THREE.Group();
 const skylineMat = new THREE.MeshBasicMaterial({ color: 0x1a1e2a, fog: false, transparent: true, opacity: 0 });
-// the skyline is a beyond-the-fog backdrop, not real geometry — the globe curve would
-// sink it out of sight, so it stays pinned flat on the horizon
-skylineMat.defines = { NO_CURVE: 1 };
-function skylineAdd(x, z, hw, hd, y0, y1) { skylineSpecs.push({ x, z, hw, hd, y0, y1 }); }
+// the silhouettes ride the SAME globe bend as the town they stand for — pinned flat
+// (the old NO_CURVE opt-out) they hung in the air over the curved horizon; sinking
+// with the curve they sit exactly where the real walls fade in, and far enough out
+// they slip below the curve like everything else
+// kind: 'box' (default) | 'prism' (gabled roof, ridge along z, aux = eave height) |
+//       'spike' (4-sided pyramid, hw = base radius, y0 = where it sits — no burial)
+function skylineAdd(x, z, hw, hd, y0, y1, kind, aux) { skylineSpecs.push({ x, z, hw, hd, y0, y1, kind, aux }); }
+function clearSkyline() {
+  // prism roofs + spikes mint their own geometry — give it back before the rebuild
+  for (const m of skylineGroup.children) if (m.geometry !== BOX) m.geometry.dispose();
+  skylineGroup.clear();
+}
 function buildSkyline() {
   for (const s of skylineSpecs) {
-    // +0.4 out and +0.15 up beyond the real faces; the base is buried well under the
-    // terrain so no undulation ever slips daylight beneath a silhouette
-    const w = (s.hw + 0.4) * 2, d = (s.hd + 0.4) * 2, h = (s.y1 + 0.15) - (s.y0 - 2);
-    const m = new THREE.Mesh(BOX, skylineMat);
-    m.scale.set(w, h, d);
-    m.position.set(s.x, s.y0 - 2 + h / 2, s.z);
-    skylineGroup.add(m);
+    // +0.25 out and +0.1 up beyond the real faces (tighter than the old +0.4: closer to
+    // the true geometry, still proud enough to win the depth test against fogged walls);
+    // grounded shapes stay buried 2u so no undulation slips daylight beneath them
+    const w = (s.hw + 0.25) * 2, d = (s.hd + 0.25) * 2;
+    if (s.kind === 'spike') {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.02, s.hw + 0.25, s.y1 - s.y0, 4), skylineMat);
+      m.rotation.y = Math.PI / 4; // corners to the compass, same twist as the real spire
+      m.position.set(s.x, (s.y0 + s.y1) / 2, s.z);
+      skylineGroup.add(m);
+    } else if (s.kind === 'prism') {
+      // gabled: walls up to the eave, then the roof triangle to the ridge
+      const wallH = s.aux - (s.y0 - 2);
+      const wall = new THREE.Mesh(BOX, skylineMat);
+      wall.scale.set(w, wallH, d);
+      wall.position.set(s.x, s.y0 - 2 + wallH / 2, s.z);
+      skylineGroup.add(wall);
+      const shp = new THREE.Shape();
+      shp.moveTo(-w / 2, 0); shp.lineTo(w / 2, 0); shp.lineTo(0, (s.y1 + 0.1) - s.aux); shp.closePath();
+      const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(shp, { depth: d, bevelEnabled: false }), skylineMat);
+      roof.position.set(s.x, s.aux - 0.05, s.z - d / 2);
+      skylineGroup.add(roof);
+    } else {
+      const h = (s.y1 + 0.1) - (s.y0 - 2);
+      const m = new THREE.Mesh(BOX, skylineMat);
+      m.scale.set(w, h, d);
+      m.position.set(s.x, s.y0 - 2 + h / 2, s.z);
+      skylineGroup.add(m);
+    }
   }
   scene.add(skylineGroup);
 }
@@ -3358,10 +3387,12 @@ function buildChurchyard(rng) {
   spire.rotation.y = Math.PI / 4; // 4-sided cone's corners default to the box's face centers; twist to cap the tower's faces instead
   townGroup.add(spire);
   // nave, tower and spire all register on the far skyline — the graveyard block's
-  // landmark, and the tallest silhouette the town throws
-  skylineAdd(cx, cz, w / 2, d / 2, y0, ridgeY);
+  // landmark, and the tallest silhouette the town throws. The nave reads as a real
+  // gabled roofline (walls to the eave, triangle to the ridge) and the spire as a
+  // true 4-sided spike off the tower top — no more flat-topped column stack
+  skylineAdd(cx, cz, w / 2, d / 2, y0, ridgeY, 'prism', y0 + h - 0.05);
   skylineAdd(cx, steepleZ, 1.3, 1.3, y0, ridgeY + 2.6);
-  skylineAdd(cx, steepleZ, 0.42, 0.42, y0, ridgeY + 5.95);
+  skylineAdd(cx, steepleZ, 1.85, 1.85, ridgeY + 2.35, ridgeY + 5.6, 'spike');
   const crossV = box(0.08, 0.95, 0.08, 0x14121a);
   crossV.position.set(cx, ridgeY + 5.75, steepleZ); crossV.rotation.z = 0.09; // slightly askew
   townGroup.add(crossV);
