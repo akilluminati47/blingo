@@ -428,7 +428,10 @@ const skyCanvas = document.createElement('canvas');
 skyCanvas.width = 1024; skyCanvas.height = 512;
 const skyTex = new THREE.CanvasTexture(skyCanvas);
 skyTex.colorSpace = THREE.SRGBColorSpace;
-skyTex.flipY = false; // canvas top = zenith, middle row = horizon
+// canvas top = zenith, middle row = horizon. On this sphere the zenith vertex is uv.v=1, and
+// only flipY=true lands v=1 on the canvas TOP row — flipY=false put the canvas BOTTOM (the dark
+// below-horizon floor tone) at the zenith, stamping a grey lid over the whole overhead sky.
+skyTex.flipY = true;
 const skyDome = new THREE.Mesh(
   new THREE.SphereGeometry(240, 24, 16),
   new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false })
@@ -488,7 +491,7 @@ const cloudCanvas = document.createElement('canvas');
 cloudCanvas.width = 1024; cloudCanvas.height = 512;
 const cloudTex = new THREE.CanvasTexture(cloudCanvas);
 cloudTex.colorSpace = THREE.SRGBColorSpace;
-cloudTex.flipY = false;
+cloudTex.flipY = true; // same sphere as the sky dome — the puff band belongs UP top, not inverted below the horizon
 const cloudDome = new THREE.Mesh(
   new THREE.SphereGeometry(232, 24, 16),
   new THREE.MeshBasicMaterial({ map: cloudTex, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true })
