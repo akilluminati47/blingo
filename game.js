@@ -6249,7 +6249,7 @@ function trackedActors() {
   // real beacon up. Same orange as her actual pillar, so the chevron and the thing it's
   // promising are visibly the same light.
   if (jelly.beacon) {
-    out.push({ key: 'jellyhouse', label: 'JELLY HOUSE', color: 0xffa040,
+    out.push({ key: 'jellyhouse', label: 'HOME', color: 0xffa040,
       x: JELLY.x, y: jelly.gy + 60, z: JELLY.z, downed: false, boss: false, landmark: true });
   }
   return out;
