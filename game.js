@@ -4130,6 +4130,9 @@ function buildChiliStand(rng) {
   // This one is RED'S CHILI, the lootable: its level ladles DOWN a notch per serving
   // taken, and the bowl stack beside it goes with it, one bowl a cousin, six deep.
   const mainPot = makeChiliPot(sx + 1.3, sz - 1.7, 0.55, 0.75, { fill: 0.85, lift: 0.95 });
+  // the pot gets a collider: it's the first step of the climb to the sign (counter ->
+  // pot lid -> straw -> ridge -> pegs), and rounds stop on real cookware now too
+  townColliders.push(aabb(sx + 1.3, sz - 1.7, 0.5, 0.5, 0.78, y0 + 0.95));
   chiliBar.x = sx + 1.3; chiliBar.z = sz - 1.7; chiliBar.y = y0;
   chiliBar.surf = mainPot.userData.chiliSurf; chiliBar.potH = mainPot.userData.chiliH;
   chiliBar.taken = 0; chiliBar.lootedBy.clear(); chiliBar.bowls.length = 0;
@@ -4199,12 +4202,17 @@ function buildChiliStand(rng) {
   makeChiliPot(sx - 3.4, sz - 4.0, 0.55, 0.8, { tipped: true, yaw: 0.9 }); // kicked over, empty
   const dribble = terrainDisc(0.5, 9, sx - 4.15, sz - 4.35, chiliMat, 0.055); // what rolled out of it
   townGroup.add(dribble);
-  // the signage: civic-plate sized RED'S CHILI over the ridge. The support masts stop
-  // dead at the plate's bottom edge — they hold it up without crossing the lettering
+  // the signage: civic-plate sized RED'S CHILI over the ridge — and a little platforming
+  // prize with it: counter -> pot lid -> straw slope -> ridge -> up onto the pegs. The
+  // support pegs are SHORT now, perched on the straw's surface out front instead of
+  // running down through the tent, and pegs, straw and plate are all real standable
+  // colliders (the plate top is the crown for slide-hoppers).
+  roofSlope(townColliders, sx, y0 + 2.68, sz, 'x', 3.8, 2.9, 1.14); // the straw is walkable
   for (const s of [-1, 1]) {
-    const mast = cyl(0.09, 0.11, 0.95, woodDk, 7);
-    mast.position.set(sx + s * 2.6, y0 + 3.78, sz);
-    townGroup.add(mast);
+    const peg = cyl(0.09, 0.11, 0.6, woodDk, 7);
+    peg.position.set(sx + s * 2.6, y0 + 3.98, sz - 0.42);
+    townGroup.add(peg);
+    townColliders.push(aabb(sx + s * 2.6, sz - 0.42, 0.15, 0.15, 0.6, y0 + 3.66)); // jump-on pegs
   }
   const sign = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
   sign.position.set(sx, y0 + 5.1, sz);
@@ -4213,6 +4221,9 @@ function buildChiliStand(rng) {
   const signBack = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
   signBack.position.set(sx, y0 + 5.1, sz + 0.02);
   townGroup.add(signBack); // readable coming down the road from the north too
+  // the plate itself is solid: a narrow catwalk top to crown, set a hair behind the pegs
+  // so a blob standing on them never gets shoved off by the plate's box
+  townColliders.push(aabb(sx, sz + 0.14, 3.4, 0.1, 1.7, y0 + 4.25));
 }
 
 // ---------- the Blob Lounge ----------
