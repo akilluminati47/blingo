@@ -6197,7 +6197,13 @@ function clearBubbles() {
 // without a busy label.
 const ptagsEl = document.getElementById('ptags');
 const ptags = new Map();
-const _tagv = new THREE.Vector3();
+
+// ---------- horizon-clamped landmark ----------
+// One fixed reference chevron, always tracked the same way as a player or boss tag, so
+// getting turned around out past every beacon still leaves a "this way home" pointer.
+// Anchored on the bank (per the latest word on it) — swap x/z to [85, -2] to anchor it
+// on the town hall instead; same grand-building footprint either way.
+const LANDMARK = { x: 0, z: -50.2, label: 'BANK', color: 0xffffff };
 
 // Who deserves a marker. The host owns other players as netP companions; a client only
 // knows them as actor ghosts. Bosses come out of the zombie list either way, so they
@@ -6232,6 +6238,12 @@ function trackedActors() {
         x: z.pos.x, y: z.blob.root.position.y, z: z.pos.z, downed: false, boss: false, mini: true, scale: z.scale });
     }
   }
+  // the standing "way home" marker — always tracked like everyone else, so a run out
+  // toward a distant cousin's beacon (Blizzy alone can land 150+ units out) still leaves
+  // a fixed, findable bearing back to town once the road grid stops being any help.
+  out.push({ key: 'landmark', label: LANDMARK.label, color: LANDMARK.color,
+    x: LANDMARK.x, y: groundHeight(LANDMARK.x, LANDMARK.z) + 11, z: LANDMARK.z,
+    downed: false, boss: false, landmark: true });
   return out;
 }
 // is the line from the eye to this point blocked by terrain or a solid? Rebuilding the
@@ -6245,6 +6257,40 @@ function tagOccluded(x, y, z) {
   if (rayGround(o.x, o.y, o.z, nx, ny, nz, dist) < dist) return true;
   for (const c of nearbyColliders(x, z)) if (rayAABB(o.x, o.y, o.z, nx, ny, nz, c) < dist) return true;
   return false;
+}
+// A marker's honest position — real head height, sunk by the same fake-globe curve the
+// world itself draws with — used to just keep sinking as range grew, or slide fully off
+// the frustum with nothing left onscreen once the camera turned away. This tries that
+// honest projection first, and only once it goes bad (behind the camera, past a side, or
+// sunk past the bottom) falls back to a flattened point: true bearing, camera eye height
+// (no curve sink), a fixed reference distance — which always lands right on the horizon
+// line for however the camera's currently pitched — then clamps it just inside the frame.
+// Same function for players, bosses and the landmark, so none of them behave differently.
+const EDGE_MARGIN = 0.92;   // stay this far inside the true screen edge, never flush against it
+const EDGE_REF = 45;        // world units for the flattened bearing point — distance-agnostic on purpose
+const _edgeReal = new THREE.Vector3();
+const _edgeFlat = new THREE.Vector3();
+const _edgeFwd = new THREE.Vector3();
+function edgeClampedProject(x, y, z) {
+  const o = camera.position;
+  _edgeReal.set(x, y - curveDrop(x, z), z).project(camera);
+  if (_edgeReal.z <= 1 && Math.abs(_edgeReal.x) <= EDGE_MARGIN
+      && _edgeReal.y >= -EDGE_MARGIN && _edgeReal.y <= EDGE_MARGIN) {
+    return { x: _edgeReal.x, y: _edgeReal.y, edge: false };
+  }
+  const dx = x - o.x, dz = z - o.z;
+  const fd = Math.hypot(dx, dz) || 1;
+  const nx = dx / fd, nz = dz / fd;
+  _edgeFlat.set(o.x + nx * EDGE_REF, o.y, o.z + nz * EDGE_REF).project(camera);
+  let ex = _edgeFlat.x, ey = _edgeFlat.y;
+  if (_edgeFlat.z > 1 || !isFinite(ex) || !isFinite(ey)) {
+    // dead behind the camera: the perspective divide flips sign on its own here, so the
+    // side has to be worked out by hand from the camera's own right vector (ground plane)
+    camera.getWorldDirection(_edgeFwd);
+    const side = (nx * _edgeFwd.z - nz * _edgeFwd.x) >= 0 ? 1 : -1;
+    ex = side * EDGE_MARGIN; ey = 0;
+  }
+  return { x: clamp(ex, -EDGE_MARGIN, EDGE_MARGIN), y: clamp(ey, -EDGE_MARGIN, EDGE_MARGIN), edge: true };
 }
 function tagEl(key) {
   let t = ptags.get(key);
@@ -6273,29 +6319,35 @@ function updatePlayerTags(dt) {
     const hy = a.y + 2.35 * (a.scale || 1);   // floats just over the blob's head (taller for bosses)
     const o = camera.position;
     const dist = Math.hypot(a.x - o.x, hy - o.y, a.z - o.z);
-    _tagv.set(a.x, hy - curveDrop(a.x, a.z), a.z).project(camera);
-    if (_tagv.z > 1) { t.el.style.display = 'none'; continue; }   // behind the camera
-    t.el.style.display = '';
+    const pr = edgeClampedProject(a.x, hy, a.z);
+    t.el.style.display = '';   // never fully hidden any more — edgeClampedProject always lands SOMEWHERE onscreen
     if (t.label !== a.label) { t.label = a.label; t.b.textContent = a.label; }
     const hex = '#' + a.color.toString(16).padStart(6, '0');
     if (t.hex !== hex) {
       t.hex = hex;
       t.i.style.color = hex;                       // arrow always tinted
-      t.b.style.color = a.boss ? '' : hex;          // bosses keep a plain name, just a colored arrow
+      t.b.style.color = (a.boss || a.landmark) ? '' : hex;   // bosses & the landmark keep a plain name, just a colored arrow
     }
     t.el.classList.toggle('boss', !!a.boss);
     t.el.classList.toggle('mini', !!a.mini);
     t.el.classList.toggle('down', a.downed);
-    t.el.style.left = ((_tagv.x * 0.5 + 0.5) * innerWidth) + 'px';
-    t.el.style.top = ((-_tagv.y * 0.5 + 0.5) * innerHeight) + 'px';
+    t.el.classList.toggle('landmark', !!a.landmark);
+    t.el.classList.toggle('edge', pr.edge);
+    t.el.style.left = ((pr.x * 0.5 + 0.5) * innerWidth) + 'px';
+    t.el.style.top = ((-pr.y * 0.5 + 0.5) * innerHeight) + 'px';
+    // pinned to the horizon and clamped inside the frame, the chevron itself turns to keep
+    // pointing the true bearing — the same read a compass needle gives, not a guess
+    t.i.style.transform = pr.edge ? `rotate(${(Math.atan2(-pr.x, -pr.y) * 180 / Math.PI).toFixed(1)}deg)` : '';
     // the tag is the wayfinding layer now: never lost to distance (a kiting player or
     // a boss arena has to read from right across the map) and never blocked by world
     // geometry — it punches through everything. Up close it only steps halfway back,
-    // so it stops shouting over the blob it names without ever letting go of it.
-    const near = clamp((dist - 3) / 4, 0, 1);
+    // so it stops shouting over the blob it names without ever letting go of it. Once it's
+    // fallen back to the horizon-clamped edge, distance stops being a meaningful read (the
+    // number could be 60 or 600) so it just holds a steady, legible full strength instead.
+    const near = pr.edge ? 1 : clamp((dist - 3) / 4, 0, 1);
     t.op = lerp(t.op, 0.35 + 0.65 * near, k);
     t.el.style.opacity = t.op.toFixed(3);
-    const scale = clamp(26 / Math.max(dist, 1), 0.55, 1.5);   // perspective, roughly
+    const scale = pr.edge ? 0.8 : clamp(26 / Math.max(dist, 1), 0.55, 1.5);   // perspective, roughly
     t.el.style.transform = `translate(-50%,-100%) scale(${scale.toFixed(3)})`;
   }
   for (const [key, t] of ptags) if (!seen.has(key)) { t.el.remove(); ptags.delete(key); }
