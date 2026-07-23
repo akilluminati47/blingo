@@ -7571,11 +7571,21 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
 
   if (z.hp > 0) {
     // weak, far or skullcrack (marksman rifle) headshot that doesn't kill cracks the
-    // skull open, revealing the weak spot: one tap opens it, the next tap pops it —
-    // except the pistol, whose light rounds need TWO taps to crack (three to drop one).
+    // skull open, revealing the weak spot: one tap opens it, the next tap pops it.
     // A black-ops mask never cracks — there's no brain window through a shiesty.
     if (isHead && !z.brainExposed && !z.isBoss && !z.fbi && w && (w.weak || w.skullcrack || dist > 26)) {
-      if (w.id !== 'pistol' || ((z.skullHits = (z.skullHits | 0) + 1) >= 2)) exposeBrain(z);
+      if (w.id === 'pistol') {
+        // pistol skull discipline: an eye already dangling — street rot, or a round that
+        // knocked one loose — is a window straight in, one tap opens the brain. A sealed
+        // face takes two taps, and the FIRST has a 25% shot at popping an eye out onto
+        // its stalk (the rot dressing, either side), buying the next tap that window.
+        if (b.hangEye) exposeBrain(z);
+        else if ((z.skullHits = (z.skullHits | 0) + 1) >= 2) exposeBrain(z);
+        else if (Math.random() < 0.25) {
+          addRotGore(b, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 });
+          z.rotE = 1; // rides the wire (zs.he) so client ghosts hang the same eye
+        }
+      } else exposeBrain(z);
     }
     return;
   }
@@ -12900,6 +12910,9 @@ function netApplySnapshot(m) {
       zombies.push(g);              // lives in the same list so shots + crosshair see it
     }
     g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st; g.sh = !!zs.sh;
+    // late rot: a pistol round can hang an eye mid-fight on the host — dress the ghost
+    // the moment the flag arrives, not just at creation
+    if (zs.he && !zs.b4 && g.blob && !g.blob.hangEye) addRotGore(g.blob, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 });
     if (g.fbi) { g.gv = !!zs.gv; g.tar = zs.ar; }  // Bluga's smoke-vanish + FBI gun-arm pitch
     if (zs.st === 1 && g.state !== 'dying') {
       g.state = 'dying'; g.deadT = 0;
