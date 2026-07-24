@@ -1690,6 +1690,15 @@ function meleeSwing(p, ready, through) {
   if (p < 0.45) return lerp(cock, through, smooth((p - 0.2) / 0.25));             // whip through
   return lerp(through, ready, smooth((p - 0.45) / 0.55));                         // recover to rest
 }
+// same arc, but it leaves from `home` and settles BACK to `home` instead of the style's
+// ready pose — so a swing flows out of the weapon's idle hold and melts back into it
+// with no snap on the last frame
+function meleeSwingHome(p, home, ready, through) {
+  const cock = ready + Math.sign(ready - through) * 0.6;
+  if (p < 0.2) return lerp(home, cock, smooth(p / 0.2));
+  if (p < 0.45) return lerp(cock, through, smooth((p - 0.2) / 0.25));
+  return lerp(through, home, smooth((p - 0.45) / 0.55));
+}
 // the raised follow-through pose: a swing parks the weapon up here for a 1s hold, then
 // the arm relaxes slowly back down to the low tip-skimming carry
 const MELEE_REST = -2.45;
@@ -1702,6 +1711,16 @@ const SWING_STYLE = {
   bat: 'side', katana: 'side',
   machete: 'diag',
   sledge: 'over', axe: 'over',
+};
+// each arm's own idle carry, not the shared tip-in-the-dirt drag: x = arm pitch,
+// z = out-to-side tilt (mirrored for the lefty). rest = where it parks after a swing.
+// The sledge stays off the list — too heavy for anything but the ground-drag carry.
+const MELEE_HOLD = {
+  bat:     { x: -2.65, z: 0.5,  rest: -2.85 },  // slung over the shoulder, slugger style
+  katana:  { x: -0.95, z: 0.28, rest: -2.25 },  // low at the hip, blade trailing back
+  machete: { x: -0.85, z: 0.15, rest: -2.1 },   // down at the side, tip forward
+  pipe:    { x: -1.45, z: 0.2,  rest: -2.15 },  // half-raised mid carry
+  axe:     { x: -1.85, z: 0.35, rest: -2.6 },   // head up at the shoulder
 };
 // how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
 // held-down punching always chains, but a real pause drops you back to a 6 opener.
@@ -1911,7 +1930,7 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
 // so the hex is repeated here); ribs are BONE white; every opened interior (socket, chest,
 // belly) shows brain-pink flesh, never the body's green
 const ROT_PINK = 0xe89aa8, ROT_HEART = 0x7a0f0f, ROT_RIB = 0xd8cfc0, ROT_SOCKET = 0x1c0e10, ROT_CAV = 0xc76b80, ROT_FLESH = 0xd77a8e;
-function addRotGore(blob, { hangEye = false, ribs = false, belly = false, chestHole = false, eyeSide = 1 } = {}) {
+function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly = false, chestHole = false, eyeSide = 1 } = {}) {
   // pieces added AFTER buildBlob missed the skinList sweep, so gather them here and fold them
   // in — that's what makes the eye + open chest flash red under fire like the rest of the body.
   // Every wound piece renders at order -2 so the depth punches (below) can carve the green
@@ -1980,6 +1999,24 @@ function addRotGore(blob, { hangEye = false, ribs = false, belly = false, chestH
       const rib = box(deep ? 0.32 : 0.21, 0.035, 0.06, ROT_RIB);
       rib.position.set(cx, cy + (deep ? 0.14 : 0.1) - i * (deep ? 0.13 : 0.095), surf + (deep ? 0.07 : 0.05));
       rib.rotation.z = -0.22;
+      blob.wob.add(track(rib));
+    }
+  }
+  if (ribsR) {
+    // the OTHER chest side, mirrored off the heart's: same opened cut and bone-white rib
+    // bars arcing over it, but no heart in the mouth of the hole — nothing beats on this
+    // side. Mutually exclusive with the heart-side roll at spawn; only a kill shot (the
+    // shotgun's blast) opens this one onto a body already carrying the other
+    const cx = -0.16, cy = 0.74, surf = 0.46;
+    const cav = new THREE.Mesh(SPHERE, mat(ROT_CAV, { side: THREE.BackSide }));
+    cav.scale.set(0.18, 0.21, 0.17);
+    cav.position.set(cx, cy, surf - 0.09);
+    blob.wob.add(track(cav));
+    punch(blob.wob, cav);
+    for (let i = 0; i < 3; i++) {
+      const rib = box(0.21, 0.035, 0.06, ROT_RIB);
+      rib.position.set(cx, cy + 0.1 - i * 0.095, surf + 0.05);
+      rib.rotation.z = 0.22;                       // arc the mirrored way
       blob.wob.add(track(rib));
     }
   }
@@ -5806,10 +5843,14 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   // the fight AND the whole trek/late-game after (rotOnBlock), not just while he's standing
   const rotty = !!opts.rot || rotOnBlock() || corpse;
   const rotE = rotty && Math.random() < (corpse ? 0.5 : 0.28);
-  const rotR = rotty && Math.random() < (corpse ? 0.5 : 0.26);
+  // the chest opens on ONE side only at spawn: heart side or the mirrored no-heart side,
+  // never both — a second side only ever comes from a kill shot after the fact
+  const rotChest = rotty && Math.random() < (corpse ? 0.5 : 0.26);
+  const rotRR = rotChest && Math.random() < 0.5;   // the side without the heart
+  const rotR = rotChest && !rotRR;                  // the heart side
   const rotB = rotty && Math.random() < (corpse ? 0.55 : 0.3);
   const rotEyeSide = Math.random() < 0.5 ? 1 : -1;   // street rot + minions hang either side
-  if (rotE || rotR || rotB) addRotGore(blob, { hangEye: rotE, ribs: rotR, belly: rotB, eyeSide: rotEyeSide });
+  if (rotE || rotR || rotRR || rotB) addRotGore(blob, { hangEye: rotE, ribs: rotR, ribsR: rotRR, belly: rotB, eyeSide: rotEyeSide });
   blob.root.position.set(x, groundHeight(x, z), z);
   if (horns) {
     for (const s of [-1, 1]) {
@@ -5853,7 +5894,7 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     // fired off headT, jumped by a blind repath (repathed). See runHeadAnim.
     headT: Math.random() * 2.5, headAnim: null, repathed: false,
     bleeding: wounded, dripT: 0, purple, red, green, goreHorn, biteMult: (red || green) ? 1.35 : 1,
-    rotE, rotR, rotB, // streamed so a joiner's ghosts rot the same way
+    rotE, rotR, rotRR, rotB, // streamed so a joiner's ghosts rot the same way
     // hornWave = a boss's shield guard while alive. opts.horns wears the horns and shields;
     // opts.shield shields WITHOUT horns (the Rotten One's hornless minions are his shield).
     // goreHorn deliberately sets neither — a free walker that never shields a boss.
@@ -6636,7 +6677,7 @@ function resetGame() {
   player.reloading = 0;
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
-  player.comboN = 0; player.lastPunchT = -9; player.swingT = 0; player.meleeChopT = 0;
+  player.comboN = 0; player.lastPunchT = -9; player.swingT = 0; player.meleeChopT = 0; player.meleeCombo = 0; player.lastMeleeT = -9;
   player.dropKick = false; player.dropKickHard = false; player.dropKickHits = null;
   player.downed = false; player.downT = 0; player.dripT = 0;
   if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
@@ -7497,6 +7538,10 @@ function fireWeapon() {
       player.meleeArm = player.comboN % 2 === 0 ? playerBlob.gunArm : playerBlob.offArm;
     } else {
       player.meleeArm = playerBlob.gunArm;  // an armed melee always swings the weapon hand
+      // the armed combo: every press inside the window swings BACK the other way —
+      // forehand leads, backhand answers, a lapsed chain re-opens on the forehand
+      player.meleeCombo = (game.time - (player.lastMeleeT || -9) < COMBO_WINDOW) ? ((player.meleeCombo || 0) + 1) % 2 : 0;
+      player.lastMeleeT = game.time;
     }
     const hop = player.hopT > 0;            // swung out of a slide hop: twice the damage
     const hits = meleeTargets(w);           // the arc sweeps EVERYONE inside reach + cone
@@ -7747,8 +7792,21 @@ function executeZombie(z, kx, kz, limb, isHead) {
   for (let i = 0; i < 4; i++) spawnGib(z.pos.x, b.root.position.y + (0.4 + Math.random()) * z.scale, z.pos.z, i % 2 ? BLOOD : 0x8aa85a, kx, kz);
   killZombie(z, kx, kz, true);           // pops the head too
 }
-function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
-  if (z.vanished) return; // Bluga in his smoke is untouchable — cull the guards to unmask him
+// the shotgun's kill blast opens the body up on its way through: a 50/50 the stomach
+// splits, a 50/50 a chest side blows — whichever side isn't already open. Spawn rot
+// only ever opens ONE side, so a rotted walker the shotgun drops can still come away
+// wearing the other side, or the stomach, or both. Wounds never re-open.
+function shotgunWoundRoll(z, w) {
+  if (!w || w.id !== 'shotgun' || z.isBoss) return;
+  const b = z.blob;
+  if (!z.rotB && Math.random() < 0.5) { addRotGore(b, { belly: true }); z.rotB = 1; }
+  if (Math.random() < 0.5 && !(z.rotR && z.rotRR)) {
+    const right = z.rotR ? true : z.rotRR ? false : Math.random() < 0.5;
+    if (right) { addRotGore(b, { ribsR: true }); z.rotRR = 1; }
+    else { addRotGore(b, { ribs: true }); z.rotR = 1; }
+  }
+}
+function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return; // Bluga in his smoke is untouchable — cull the guards to unmask him
   // in a joined game the host owns every zombie: show feedback, send the hit upstream
   if (net.role === 'client') { if (z.state !== 'dying') netClientShot(z, dmg, kx, kz, opts); return; }
   if (z.state === 'dying') return;
@@ -7783,6 +7841,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
   // vanishes. Black-ops armour shrugs the ordinary gib class — only a magnum round earns it here.
   if (isHead && !b.headGone && !z.isBoss && ((w && w.gib) || z.brainExposed) && !fbiArmored(z, w)) {
     spawnDamageNumber(z.pos.x, b.root.position.y + 1.45 * z.scale, z.pos.z, dmg);
+    shotgunWoundRoll(z, w);
     killZombie(z, kx, kz, true);
     return;
   }
@@ -7847,6 +7906,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {
     }
     return;
   }
+  shotgunWoundRoll(z, w);
   killZombie(z, kx, kz, isHead && !fbiArmored(z, w) && (!w || w.gib || z.brainExposed));
 }
 // FBI armour: black-ops blobs don't come apart under ordinary fire. The heavy dismember
@@ -8957,26 +9017,37 @@ function updatePlayer(dt) {
       player.meleeRaise = lerp(player.meleeRaise || 0, raiseTo, 1 - Math.exp(-rk * dt));
       const bob = Math.sin(player.walkPhase) * (moving ? 0.14 : 0.04);
       const reach = gunMesh ? gunMesh.userData.reach : 0.8;
-      const carry = meleeCarryLift(-0.55 - aimAmt * 1.0 + bob,
-        player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
-      const ready = lerp(carry, MELEE_REST + bob * 0.5, player.meleeRaise);
-      const strike = meleeCarryLift(-0.35,
-        player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
+      const shoulderY = player.pos.y + (player.slideT > 0 ? 0.6 : 0.95);
+      // each arm carries its own way: the hold IS the idle walk pose, and every swing
+      // leaves from it and melts back into it — no shared tip-in-the-dirt carry, no
+      // snap home on the last frame
+      const hold = MELEE_HOLD[w.id];
+      const hand = b.gunArm === 0 ? 1 : -1;
+      let hx, hz;
+      if (hold) { hx = hold.x + bob * 0.4 - aimAmt * 0.3; hz = hold.z * hand; }
+      else {
+        hx = meleeCarryLift(-0.55 - aimAmt * 1.0 + bob, shoulderY, groundHeight(player.pos.x, player.pos.z), reach);
+        hz = 0;
+      }
+      const ready = lerp(hx, (hold ? hold.rest : MELEE_REST) + bob * 0.5, player.meleeRaise);
+      const strike = meleeCarryLift(-0.35, shoulderY, groundHeight(player.pos.x, player.pos.z), reach);
       if (sw >= 0) {
         // the swing's own voice: jabs thrust straight, roundhouses sweep the arm across
         // on rotation.z, diagonals slash high-to-low, overhead chops cock right up over
-        // the shoulder first — all timed by the same meleeSwing wind-up/whip/recover
+        // the shoulder first. Inside the combo window the sweep mirrors every press —
+        // forehand leads, backhand answers
         const style = SWING_STYLE[w.id] || 'over';
-        let sR = ready, sS = strike, sZ = 0;
-        if (style === 'jab') { sR = lerp(ready, -1.1, 0.65); sS = -1.9; }
-        else if (style === 'side') { sR = lerp(ready, -1.75, 0.55); sS = -1.2; sZ = meleeSwing(sw, -1.15, 0.9) * (b.gunArm === 0 ? -1 : 1); }
-        else if (style === 'diag') { sZ = meleeSwing(sw, -0.7, 0.5) * (b.gunArm === 0 ? -1 : 1); }
+        const cdir = hand * ((player.meleeCombo || 0) % 2 === 0 ? 1 : -1);
+        let sR = ready, sS = strike, sZ = hz;
+        if (style === 'jab') { sR = -1.1; sS = -1.9; }
+        else if (style === 'side') { sR = lerp(ready, -1.75, 0.55); sS = -1.2; sZ = meleeSwingHome(sw, hz, 1.05 * cdir, -0.85 * cdir); }
+        else if (style === 'diag') { sZ = meleeSwingHome(sw, hz, 0.65 * cdir, -0.5 * cdir); }
         else sR = lerp(ready, -2.95, 0.55);
-        b.arms[b.gunArm].rotation.x = meleeSwing(sw, sR, sS);
+        b.arms[b.gunArm].rotation.x = meleeSwingHome(sw, ready, sR, sS);
         b.arms[b.gunArm].rotation.z = sZ;
       } else {
         b.arms[b.gunArm].rotation.x = ready;
-        b.arms[b.gunArm].rotation.z = 0;
+        b.arms[b.gunArm].rotation.z = hz;
       }
       b.arms[b.offArm].rotation.x = -swing * 0.6 - aimAmt * 0.35;
       if (stumbling) { b.arms[b.gunArm].rotation.x -= stumbleLean * 0.6; b.arms[b.offArm].rotation.x -= stumbleLean * 1.0; }
@@ -12648,7 +12719,7 @@ function netHostTick(dt) {
       sc: R(z.scale), pu: z.purple ? 1 : 0, re: z.red ? 1 : 0, gr: z.green ? 1 : 0, gh: z.goreHorn ? 1 : 0,
       ho: (z.hornVis || z.goreHorn) ? 1 : 0, bo: z.isBoss ? 1 : 0, b2: z.isBoss2 ? 1 : 0, b3: z.isBoss3 ? 1 : 0,
       b4: z.isBoss4 ? 1 : 0,              // the Rotten One → clients dress him rotten too
-      he: z.rotE ? 1 : 0, rb: z.rotR ? 1 : 0, pb: z.rotB ? 1 : 0, // the rot variants ride the wire
+      he: z.rotE ? 1 : 0, rb: z.rotR ? 1 : 0, rr: z.rotRR ? 1 : 0, pb: z.rotB ? 1 : 0, // the rot variants ride the wire
       sh: (z.isBoss && shielded) ? 1 : 0, // boss invuln flag → clients blink it the same
       gd: (z.hornWave && !z.goreHorn) ? 1 : 0, // shield guard → clients dress the tell-tale glow
       fb: z.fbi ? 1 : 0, bg: z.bluga ? 1 : 0, gv: z.vanished ? 1 : 0, // black-ops: FBI look, Bluga, his smoke-vanish
@@ -13204,7 +13275,7 @@ function netApplySnapshot(m) {
           blob.head.add(foldSkin(blob, horn));  // ghost horns flash with the body too
         }
         if (zs.b4) addRotGore(blob, { hangEye: true, chestHole: true }); // boss always hangs left
-        else if (zs.he || zs.rb || zs.pb) addRotGore(blob, { hangEye: !!zs.he, ribs: !!zs.rb, belly: !!zs.pb, eyeSide: Math.random() < 0.5 ? 1 : -1 });
+        else if (zs.he || zs.rb || zs.rr || zs.pb) addRotGore(blob, { hangEye: !!zs.he, ribs: !!zs.rb, ribsR: !!zs.rr, belly: !!zs.pb, eyeSide: Math.random() < 0.5 ? 1 : -1 });
         // the tell-tale glows travel: a boss ghost carries his shield glow, a guard ghost
         // its own body-colour glow — the same reads the host sees, on every client screen
         if (zs.bo) attachBossGlow(blob, color);
@@ -13213,14 +13284,21 @@ function netApplySnapshot(m) {
       scene.add(blob.root);
       g = { blob, pos: new THREE.Vector3(zs.x, 0, zs.z), yaw: zs.yw, scale: zs.sc, isBoss: !!zs.bo, isBoss2: !!zs.b2, isBoss3: !!zs.b3, isBoss4: !!zs.b4,
         state: 'chase', nid: zs.i, netGhost: true, hp: 1, deadT: 0, walkPhase: Math.random() * 9, blind: false,
-        purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh, fbi: !!zs.fb, bluga: !!zs.bg };
+        purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh, fbi: !!zs.fb, bluga: !!zs.bg,
+        rotHe: !!zs.he, rotRb: !!zs.rb, rotRr: !!zs.rr, rotPb: !!zs.pb };
       net.ghosts.set(zs.i, g);
       zombies.push(g);              // lives in the same list so shots + crosshair see it
     }
     g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st; g.sh = !!zs.sh;
-    // late rot: a pistol round can hang an eye mid-fight on the host — dress the ghost
-    // the moment the flag arrives, not just at creation
-    if (zs.he && !zs.b4 && g.blob && !g.blob.hangEye) addRotGore(g.blob, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 });
+    // late rot: a pistol round can hang an eye mid-fight on the host, and a shotgun kill
+    // can split a stomach or blow a chest side open on the way down — dress the ghost the
+    // moment each flag arrives, not just at creation
+    if (!zs.b4 && g.blob) {
+      if (zs.he && !g.rotHe) { addRotGore(g.blob, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 }); g.rotHe = 1; }
+      if (zs.rb && !g.rotRb) { addRotGore(g.blob, { ribs: true }); g.rotRb = 1; }
+      if (zs.rr && !g.rotRr) { addRotGore(g.blob, { ribsR: true }); g.rotRr = 1; }
+      if (zs.pb && !g.rotPb) { addRotGore(g.blob, { belly: true }); g.rotPb = 1; }
+    }
     if (g.fbi) { g.gv = !!zs.gv; g.tar = zs.ar; }  // Bluga's smoke-vanish + FBI gun-arm pitch
     if (zs.st === 1 && g.state !== 'dying') {
       g.state = 'dying'; g.deadT = 0;
