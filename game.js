@@ -1717,12 +1717,14 @@ const SWING_STYLE = {
 // each arm's own idle carry, not the shared tip-in-the-dirt drag: x = arm pitch,
 // z = out-to-side tilt (mirrored for the lefty). rest = where it parks after a swing.
 // The sledge stays off the list — too heavy for anything but the ground-drag carry.
-// each arm's own idle carry: the bat and katana ride STRAIGHT OUT in front — everything
-// else (pipe, machete, axe, sledge, the consumables) drags low off the ground carry,
-// the same way the NPCs haul theirs. z = out-to-side tilt, mirrored for the lefty.
+// each arm's own idle carry: the bat, katana and axe ride STRAIGHT OUT in front —
+// everything else (pipe, machete, sledge, the consumables) drags low off the ground
+// carry. The NPCs read this same table, so they haul every weapon the way the hero
+// does. z = out-to-side tilt, mirrored for the lefty.
 const MELEE_HOLD = {
   bat:    { x: -1.55, z: 0, rest: -1.95 },  // straight out in front, slugger on deck
   katana: { x: -1.55, z: 0, rest: -1.95 },  // straight out in front, blade level
+  axe:    { x: -1.55, z: 0, rest: -1.95 },  // straight out in front, head held high
 };
 // how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
 // held-down punching always chains, but a real pause drops you back to a 6 opener.
@@ -9721,12 +9723,13 @@ function updateCompanions(dt) {
       if (c.meleeT > 0) c.meleeHoldT = 1;
       else c.meleeHoldT = Math.max(0, (c.meleeHoldT || 0) - dt);
       const reach = c.gunMesh ? c.gunMesh.userData.reach : 0.8;
-      // the bat and katana ride straight out like the hero's; the rest drag low
-      const npcHold = cw.id === 'bat' || cw.id === 'katana';
+      // the straight-out carries (MELEE_HOLD) ride exactly like the hero's — same idle
+      // pitch, same raised park after a swing; the rest drag low
+      const npcHold = MELEE_HOLD[cw.id];
       const target = c.meleeT > 0
         ? meleeCarryLift(-0.35, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), reach)
-        : c.meleeHoldT > 0 ? MELEE_REST
-        : npcHold ? -1.55 + Math.sin(c.walkPhase) * (moving ? 0.1 : 0.03)
+        : c.meleeHoldT > 0 ? (npcHold ? npcHold.rest : MELEE_REST)
+        : npcHold ? npcHold.x + Math.sin(c.walkPhase) * (moving ? 0.1 : 0.03)
         : meleeCarryLift(-0.55 + Math.sin(c.walkPhase) * (moving ? 0.14 : 0.04), (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), reach);
       const k = 1 - Math.exp(-(c.meleeT > 0 ? 14 : c.meleeHoldT > 0 ? 8 : 1.6) * dt);
       b.arms[b.gunArm].rotation.x = lerp(b.arms[b.gunArm].rotation.x, target, k);
@@ -13491,7 +13494,8 @@ function netClientWorldTick(dt) {
     g.arS = lerp(g.arS ?? -Math.PI / 2, g.tar ?? -Math.PI / 2, 1 - Math.exp(-14 * dt));
     b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8
       : (WEAPONS[g.wp] && WEAPONS[g.wp].melee
-        ? meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8)
+        ? (MELEE_HOLD[g.wp] ? MELEE_HOLD[g.wp].x   // the straight-out carries match the hero's on every screen
+          : meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8))
         : g.arS);
     if (g.dn) {
       // downed players crawl on their belly, same read as the host's own view of them
@@ -13834,8 +13838,8 @@ function netPoseCompanion(c, dt) {
   // their streamed gun-arm angle, eased over the 15Hz stream: real x/y aim, not a levelled prop
   c.arS = lerp(c.arS ?? -Math.PI / 2, p && p.ar != null ? p.ar : -Math.PI / 2, 1 - Math.exp(-14 * dt));
   b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
-    ? (c.weapon.id === 'bat' || c.weapon.id === 'katana'
-      ? -1.55   // bat + katana ride straight out on every screen
+    ? (MELEE_HOLD[c.weapon.id]
+      ? MELEE_HOLD[c.weapon.id].x   // the straight-out carries ride the same on every screen
       : meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8))
     : c.arS;
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
