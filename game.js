@@ -9754,7 +9754,12 @@ function updateZombies(dt) {
       // piling uselessly on a body
       let tDist = (player.dead || player.downed) ? Infinity : pDist;
       for (const c of companions) {
-        if (!c.recruited || c.downed) continue;
+        if (c.downed) continue;
+        // with the hero off the menu the unrecruited cousins go ON it: the horde drifts to
+        // whichever blob is still standing and menaces them instead of freezing where they
+        // lost you. Teeth never find purchase on an immune cousin anyway — hurtCompanion
+        // refuses to land on anyone not yet recruited, so the gathering is all theatre
+        if (!c.recruited && !(player.dead || player.downed)) continue;
         const d = Math.hypot(c.pos.x - z.pos.x, c.pos.z - z.pos.z);
         if (d < tDist) { tDist = d; tx = c.pos.x; tz = c.pos.z; ty = c.y || 0; tgtC = c; }
       }
