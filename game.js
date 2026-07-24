@@ -7817,6 +7817,38 @@ function shotgunWoundRoll(z, w) {
     else { addRotGore(b, { ribs: true }); z.rotR = 1; }
   }
 }
+// gore a body shot opens on the way through — kill or no kill. The magnum blows a chest
+// side open first and the stomach after, in that order: a hand cannon, not a scattergun.
+// The shotgun's blast rolls the whole nine on ANY body hit — an eye knocked loose, a
+// chest side, the stomach — each only into a slot still closed, likelier up close but
+// rolling from a bit farther out too.
+function bodyShotGore(z, w, dist) {
+  if (!w || z.isBoss) return;
+  const b = z.blob;
+  if (w.id === 'magnum') {
+    if (!z.rotR && !z.rotRR) {
+      const right = Math.random() < 0.5;
+      if (right) { addRotGore(b, { ribsR: true }); z.rotRR = 1; } else { addRotGore(b, { ribs: true }); z.rotR = 1; }
+    } else if (!z.rotB) { addRotGore(b, { belly: true }); z.rotB = 1; }
+  } else if (w.id === 'shotgun') {
+    const near = dist <= (w.fRange || 7);
+    if (!z.rotE && Math.random() < (near ? 0.3 : 0.12)) {
+      addRotGore(b, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 }); z.rotE = 1;
+    }
+    if (!(z.rotR && z.rotRR) && Math.random() < (near ? 0.4 : 0.18)) {
+      const right = z.rotR ? true : z.rotRR ? false : Math.random() < 0.5;
+      if (right) { addRotGore(b, { ribsR: true }); z.rotRR = 1; } else { addRotGore(b, { ribs: true }); z.rotR = 1; }
+    }
+    if (!z.rotB && Math.random() < (near ? 0.4 : 0.18)) { addRotGore(b, { belly: true }); z.rotB = 1; }
+  }
+}
+// the shotgun's body blast bursts the whole torso when it's delivered close enough to
+// feel the muzzle — guaranteed inside its comfort range — or onto a walker already
+// wearing BOTH chests open: at that point nothing's holding the middle together
+function shotgunBodyGib(z, w, kx, kz, dist, isHead) {
+  if (!w || w.id !== 'shotgun' || isHead || z.isBoss || z.netGhost || !z.blob || z.blob.bodyGone) return;
+  if (dist <= (w.fRange || 7) || (z.rotR && z.rotRR)) popChest(z, kx, kz);
+}
 function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return; // Bluga in his smoke is untouchable — cull the guards to unmask him
   // in a joined game the host owns every zombie: show feedback, send the hit upstream
   if (net.role === 'client') { if (z.state !== 'dying') netClientShot(z, dmg, kx, kz, opts); return; }
@@ -7896,6 +7928,8 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
     const base = limb ? 0.9 : 0.55;
     if (Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : base)) blowLimb(z, kx, kz, limb);
   }
+  // the magnum and the shotgun open the body up on body hits, not just kills
+  if (!isHead && !fbiArmored(z, w)) bodyShotGore(z, w, dist);
 
   if (z.hp > 0) {
     // weak, far or skullcrack (marksman rifle) headshot that doesn't kill cracks the
@@ -7919,6 +7953,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
   }
   shotgunWoundRoll(z, w);
   killZombie(z, kx, kz, isHead && !fbiArmored(z, w) && (!w || w.gib || z.brainExposed));
+  shotgunBodyGib(z, w, kx, kz, dist, isHead);
 }
 // FBI armour: black-ops blobs don't come apart under ordinary fire. The heavy dismember
 // class still gets through — magnum and sniper rounds here; a chili giant's blows, Blazo's
