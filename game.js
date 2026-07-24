@@ -1783,17 +1783,31 @@ function buildMeleeMesh(g, id, c) {
     const collar = cyl(0.06, 0.06, 0.08, 0x3a3d43); collar.rotation.x = Math.PI / 2; collar.position.set(0, 0, -0.56); g.add(collar);
     g.add(shaftZ(0.2, 0.047, 0.047, 0x2a2a2a, 0.08));
   } else if (id === 'axe') {
-    // Blazo's fire axe, rebuilt: hickory haft red-dipped under the head the way a real
-    // one wears it, a forged head, the beard sweeping DOWN in two angled plates into a
-    // curved silver edge, and a dark hammer poll off the back
-    g.add(shaftZ(0.86, 0.038, 0.046, 0x8a6134));
-    g.add(shaftZ(0.3, 0.046, 0.048, c, -0.44));          // the red dip
-    g.add(shaftZ(0.22, 0.044, 0.044, 0x2a2a2a, 0.08));  // rubber grip
-    const head = box(0.09, 0.13, 0.2, c); head.position.set(0, 0.02, -0.74); g.add(head);
-    const sweep1 = box(0.05, 0.2, 0.05, 0xd8dde5); sweep1.position.set(0, -0.09, -0.85); sweep1.rotation.x = 0.3; g.add(sweep1);
-    const sweep2 = box(0.05, 0.15, 0.045, 0xd8dde5); sweep2.position.set(0, -0.24, -0.81); sweep2.rotation.x = 0.7; g.add(sweep2);
-    const cheek = box(0.07, 0.2, 0.07, c); cheek.position.set(0, -0.12, -0.78); cheek.rotation.x = 0.3; g.add(cheek);
-    const poll = box(0.08, 0.09, 0.08, 0x4a4e55); poll.position.set(0, 0.02, -0.58); g.add(poll);
+    // Blazo's fire axe, fully dressed: a tapered hickory haft with a ribbed rubber grip
+    // and end knob, the red dip under the head, a steel overstrike collar, then the head
+    // itself — thick at the poll, thinning through a red wedge to the toe — with the
+    // beard swept down in three plates to a bright sharpened lip, and a tapered pick
+    // spike angling off the back
+    g.add(shaftZ(0.88, 0.034, 0.046, 0x9a6b38));                       // hickory, tapering to the head
+    g.add(shaftZ(0.3, 0.046, 0.048, c, -0.46));                        // the red dip
+    g.add(shaftZ(0.24, 0.05, 0.052, 0x23252a, 0.06));                  // rubber grip
+    for (const zz of [0.1, 0.18, 0.26]) {                              // grip ribs
+      const grib = cyl(0.055, 0.055, 0.02, 0x14161a); grib.rotation.x = Math.PI / 2; grib.position.set(0, 0, zz); g.add(grib);
+    }
+    const knob = cyl(0.058, 0.05, 0.05, 0x23252a); knob.rotation.x = Math.PI / 2; knob.position.set(0, 0, 0.31); g.add(knob);
+    const collar = cyl(0.053, 0.053, 0.05, 0x6a6f78); collar.rotation.x = Math.PI / 2; collar.position.set(0, 0, -0.46); g.add(collar);
+    // poll block, red wedge, toe — thick at the back, thinning to the edge
+    const poll = box(0.11, 0.15, 0.1, 0x3f434a); poll.position.set(0, 0.03, -0.56); g.add(poll);
+    const wedge = box(0.095, 0.14, 0.15, c); wedge.position.set(0, 0.02, -0.68); g.add(wedge);
+    const toe = box(0.075, 0.12, 0.09, c); toe.position.set(0, 0.0, -0.8); g.add(toe);
+    // the pick: a tapered spike angling back-down off the poll
+    const pick = box(0.045, 0.045, 0.17, 0x3f434a); pick.position.set(0, 0.05, -0.5); pick.rotation.x = 0.35; g.add(pick);
+    const pickTip = box(0.03, 0.03, 0.07, 0x3f434a); pickTip.position.set(0, 0.02, -0.4); pickTip.rotation.x = 0.35; g.add(pickTip);
+    // the beard: red upper plate, two silver sweeps curling down, bright edge lip
+    const b1 = box(0.06, 0.17, 0.05, c); b1.position.set(0, -0.09, -0.83); b1.rotation.x = 0.25; g.add(b1);
+    const b2 = box(0.055, 0.15, 0.042, 0xd8dde5); b2.position.set(0, -0.21, -0.83); b2.rotation.x = 0.55; g.add(b2);
+    const b3 = box(0.045, 0.12, 0.036, 0xd8dde5); b3.position.set(0, -0.31, -0.79); b3.rotation.x = 0.85; g.add(b3);
+    const edge = box(0.04, 0.03, 0.05, 0xf2f5f8); edge.position.set(0, -0.36, -0.75); edge.rotation.x = 1.0; g.add(edge);
   }
 }
 
@@ -3940,18 +3954,14 @@ function buildTown() {
   // into its tarmac either) out to the x=-20 road with the same kerb-lap on that end
   townGroup.add(terrainPlane(23.2, 6.4, 12, 4, -2.6, 22, roadJoinMat, 0.04));
   // a painted stripe across each flush seam — same white and same stroke width as the
-  // parking-stall lines, sat at the midpoint between the lot's lift (0.05) and the road's
-  // (0.04) so it straddles the seam rather than floating above both, and hides whatever
-  // hairline gap is left where two separately-tessellated planes meet. Tilted to match the
-  // ground's own slope across its span (sampled at both ends, same as the road rides it)
-  // instead of sitting dead flat, which used to let its sides sink into the sloped tarmac.
+  // parking-stall lines. Tessellated along its span now instead of one rigid box: the
+  // old straight box couldn't bend with the curve, so with the camera off the seam's
+  // axis one end sank under the tarmac while the other floated off it. A polygon offset
+  // past the strips' own keeps it winning the depth along the join it hides.
+  const seamStripeMat = new THREE.MeshLambertMaterial({ color: 0xd8d8d0,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   for (const [mx, mz] of [[71, LOT.z], [9, 22]]) {
-    const half = 3.2;
-    const yA = groundHeight(mx, mz - half), yB = groundHeight(mx, mz + half);
-    const stripe = box(0.14, 0.02, 6.4, 0xd8d8d0);
-    stripe.position.set(mx, (yA + yB) / 2 + 0.045, mz);
-    stripe.rotation.x = -Math.atan2(yB - yA, half * 2);
-    townGroup.add(stripe);
+    townGroup.add(terrainPlane(0.14, 6.4, 1, 8, mx, mz, seamStripeMat, 0.05));
   }
 
   // the old church and its spiked graveyard brood just north of the plaza
