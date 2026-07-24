@@ -4071,7 +4071,10 @@ function makePicnicTable(x, z, rotY) {
   for (const s of [-1, 1]) {
     const bench = box(2.2, 0.07, 0.34, woodDk); bench.position.set(0, 0.45, s * 0.82); g.add(bench);
     for (const e of [-0.85, 0.85]) {
-      const leg = box(0.09, 0.76, 0.09, woodDk); leg.position.set(e, 0.38, s * 0.5); leg.rotation.x = s * 0.5; g.add(leg);
+      // A-frame leg: the tilt tucks the top UNDER the tabletop (it meets the underside
+      // at y~0.71, z~0.32) and splays the foot out by the bench — the old +s tilt sent
+      // the tops past the tabletop's edge, braced against thin air
+      const leg = box(0.09, 0.76, 0.09, woodDk); leg.position.set(e, 0.38, s * 0.5); leg.rotation.x = -s * 0.5; g.add(leg);
       const bleg = box(0.08, 0.45, 0.08, woodDk); bleg.position.set(e, 0.22, s * 0.82); g.add(bleg);
     }
   }
