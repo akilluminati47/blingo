@@ -1519,11 +1519,11 @@ const WEAPONS = {
   katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 27, range: 3.7, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
   sledge:  { id: 'sledge',  name: 'Sledgehammer', melee: true, slot: 'melee', dmg: 39, range: 3.1, rpm: 72, mag: Infinity, kick: 0.09, rmb: [150, 0.95, 0.5], cqc: 0, dismember: 0.6, gib: true, color: 0x5c6068 },
   axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 31, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
-  pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 5, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14, fRange: 14 },
-  smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 2, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1, fRange: 9 },
+  pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 5, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14, fRange: 14, oneHand: true },
+  smg:     { id: 'smg',     name: 'SMG',          slot: 'gun', dmg: 2, mag: 50, rpm: 800, auto: true,  spread: 0.038, ammo: 200, color: 0x3a3f4a, kick: 0.015, rmb: [40, 0.2, 0.4],  cqc: 0.5,  weak: true,  dismember: 0.1, fRange: 9, oneHand: true },
   rifle:   { id: 'rifle',   name: 'Assault Rifle',slot: 'gun', dmg: 5, mag: 40, rpm: 560, auto: true,  spread: 0.022, ammo: 160, color: 0x51442e, kick: 0.02, rmb: [50, 0.35, 0.5],  cqc: 0.5,  dismember: 0.32, armSever: true, skullcrack: true, fRange: 30 },
   shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 2, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true, fRange: 7 },
-  magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [140, 1, 0.75],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18 },
+  magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [140, 1, 0.75],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18, oneHand: true },
   sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 22,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [260, 1, 1],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
 };
 // inventory slot order: fists, then the consumables (grandma's jelly, Red's chili), then
@@ -1693,6 +1693,16 @@ function meleeSwing(p, ready, through) {
 // the raised follow-through pose: a swing parks the weapon up here for a 1s hold, then
 // the arm relaxes slowly back down to the low tip-skimming carry
 const MELEE_REST = -2.45;
+// every arm swings its own way. The x-drive (raise/plunge) is meleeSwing's; the style
+// just re-voices the poses: jab = short thrust straight out (pipe, the consumables),
+// side = horizontal roundhouse carried on rotation.z (bat, katana), diag = a high-out
+// cross-body slash (machete), over = the big overhead chop (sledge, axe — heaviest arc).
+const SWING_STYLE = {
+  pipe: 'jab', jelly: 'jab', chili: 'jab',
+  bat: 'side', katana: 'side',
+  machete: 'diag',
+  sledge: 'over', axe: 'over',
+};
 // how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
 // held-down punching always chains, but a real pause drops you back to a 6 opener.
 const COMBO_WINDOW = 0.75;
@@ -5775,10 +5785,13 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const horns = !!opts.horns || goreHorn;
   const mode = opts.mode || 'pop';
   const scale = (0.85 + Math.random() * 0.5) * (green ? 1.1 : 1);
-  // random rot-variants; brain-showing spawns are the rare weak-spot walkers
-  const droopy = !purple && !red && !green && Math.random() < 0.3;
-  const brain = Math.random() < 0.12;
-  const blind = !purple && !red && !green && Math.random() < 0.16;
+  // random rot-variants; brain-showing spawns are the rare weak-spot walkers. A laying
+  // corpse is far gone — skull cracked open, eye gone, chest and stomach split: it rolls
+  // every rot at nearly even odds and they STACK, so no two carcasses rot alike
+  const corpse = mode === 'corpse';
+  const droopy = !corpse && !purple && !red && !green && Math.random() < 0.3;
+  const brain = corpse ? Math.random() < 0.4 : Math.random() < 0.12;
+  const blind = !corpse && !purple && !red && !green && Math.random() < 0.16;
   // extra-gore mode makes fresh zombies spawn already mangled and bloody; a corpse always
   // spawns wounded — it's already dead, a carcass for the crows to pick over
   const wounded = mode === 'corpse' || (extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5);
@@ -5791,10 +5804,10 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   // has risen EVERY street spawn can come up rotting too — the hanging eye, the slight left
   // ribs with a small beating heart tucked under, the stomach showing pink. It rides through
   // the fight AND the whole trek/late-game after (rotOnBlock), not just while he's standing
-  const rotty = !!opts.rot || rotOnBlock();
-  const rotE = rotty && Math.random() < 0.28;
-  const rotR = rotty && Math.random() < 0.26;
-  const rotB = rotty && Math.random() < 0.3;
+  const rotty = !!opts.rot || rotOnBlock() || corpse;
+  const rotE = rotty && Math.random() < (corpse ? 0.5 : 0.28);
+  const rotR = rotty && Math.random() < (corpse ? 0.5 : 0.26);
+  const rotB = rotty && Math.random() < (corpse ? 0.55 : 0.3);
   const rotEyeSide = Math.random() < 0.5 ? 1 : -1;   // street rot + minions hang either side
   if (rotE || rotR || rotB) addRotGore(blob, { hangEye: rotE, ribs: rotR, belly: rotB, eyeSide: rotEyeSide });
   blob.root.position.set(x, groundHeight(x, z), z);
@@ -5814,8 +5827,9 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
     blob.root.add(gl);
     blob.guardGlow = gl;
   }
-  // 1-in-10 shuffles in already missing an arm, a dried blood glob capping the shoulder
-  if (Math.random() < 0.1) {
+  // 1-in-10 shuffles in already missing an arm, a dried blood glob capping the shoulder.
+  // A laying corpse is far more likely to have lost one somewhere along the way
+  if (Math.random() < (corpse ? 0.35 : 0.1)) {
     const idx = Math.random() < 0.5 ? 0 : 1;
     blob.arms[idx].visible = false;
     blob.armGone[idx] = true;
@@ -7383,6 +7397,18 @@ function meleeTargets(w) {
   return out;
 }
 function meleeTarget(w) { return meleeTargets(w)[0] || null; }
+// a swing that connects with the WORLD instead of a body: wall, car, crate, house —
+// anything solid inside the arc's reach. Drives the controller thunk so a bat bounced
+// off a truck reads as contact, not air.
+function meleeWorldHit(w) {
+  getAimDir(_mDir);
+  const ox = player.pos.x, oy = player.pos.y + 1.2, oz = player.pos.z;
+  const reach = w.range * (playerGiantOn() ? 2.3 : 1);
+  for (const c of nearbyColliders(ox, oz)) {
+    if (rayAABB(ox, oy, oz, _mDir.x, _mDir.y, _mDir.z, c) < reach) return true;
+  }
+  return false;
+}
 // the gore payoff on a move-kill: a melee kill earned mid-move bursts the body — the
 // execute's centre-mass treatment. Heavy hitters (the gib-class katana/sledge/axe) take
 // it from any airborne swing kill; the lighter arms (fists, pipe, bat, machete) have to
@@ -7429,7 +7455,10 @@ function meleeChopHit() {
   const w = player.weapon;
   if (!w.melee || w.id === 'fists') return;
   const hits = meleeTargets(w);
-  if (!hits.length) return;
+  if (!hits.length) {
+    if (meleeWorldHit(w)) rumble(45, 0.45, 0.32);   // the down swing met a wall instead of a crowd
+    return;
+  }
   const hop = player.meleeChopHop;
   const knock = 3.5 * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
   for (const hit of hits) {   // the down swing sweeps the whole crowd too
@@ -7493,6 +7522,7 @@ function fireWeapon() {
       blombaVamp(w, hit, dx / d, dz / d, wasDying);
     }
     if (hits.length) rumble(...w.rmb);
+    else if (meleeWorldHit(w)) rumble(55, 0.55, 0.4);   // wood/steel on wall or steel — the swing met something solid
     // armed weapons chop through: schedule the down swing to land mid-arc (fists keep their
     // own alternating 6,7 chain, one hit per press)
     if (w.id !== 'fists') { player.meleeChopT = player.swingDur * 0.4; player.meleeChopHop = hop; }
@@ -8932,14 +8962,32 @@ function updatePlayer(dt) {
       const ready = lerp(carry, MELEE_REST + bob * 0.5, player.meleeRaise);
       const strike = meleeCarryLift(-0.35,
         player.pos.y + (player.slideT > 0 ? 0.6 : 0.95), groundHeight(player.pos.x, player.pos.z), reach);
-      b.arms[b.gunArm].rotation.x = sw >= 0 ? meleeSwing(sw, ready, strike) : ready;
+      if (sw >= 0) {
+        // the swing's own voice: jabs thrust straight, roundhouses sweep the arm across
+        // on rotation.z, diagonals slash high-to-low, overhead chops cock right up over
+        // the shoulder first — all timed by the same meleeSwing wind-up/whip/recover
+        const style = SWING_STYLE[w.id] || 'over';
+        let sR = ready, sS = strike, sZ = 0;
+        if (style === 'jab') { sR = lerp(ready, -1.1, 0.65); sS = -1.9; }
+        else if (style === 'side') { sR = lerp(ready, -1.75, 0.55); sS = -1.2; sZ = meleeSwing(sw, -1.15, 0.9) * (b.gunArm === 0 ? -1 : 1); }
+        else if (style === 'diag') { sZ = meleeSwing(sw, -0.7, 0.5) * (b.gunArm === 0 ? -1 : 1); }
+        else sR = lerp(ready, -2.95, 0.55);
+        b.arms[b.gunArm].rotation.x = meleeSwing(sw, sR, sS);
+        b.arms[b.gunArm].rotation.z = sZ;
+      } else {
+        b.arms[b.gunArm].rotation.x = ready;
+        b.arms[b.gunArm].rotation.z = 0;
+      }
       b.arms[b.offArm].rotation.x = -swing * 0.6 - aimAmt * 0.35;
       if (stumbling) { b.arms[b.gunArm].rotation.x -= stumbleLean * 0.6; b.arms[b.offArm].rotation.x -= stumbleLean * 1.0; }
     }
   } else {
     const aimPitch = Math.asin(clamp((recentShot || player.aiming) ? getAimDir(_aimDir).y : 0, -0.9, 0.9));
     b.arms[b.gunArm].rotation.x = -Math.PI / 2 - aimPitch * 0.8;
-    b.arms[b.offArm].rotation.x = (wantShoot || recentShot || aimAmt > 0.2) ? b.arms[b.gunArm].rotation.x : -swing * 0.8;
+    // one-handers (pistol, magnum, smg) keep the off arm DOWN at the walk swing even
+    // mid-aim — the casual sidearm carry. The long guns pull the second hand up into
+    // the classic two-arm brace whenever the gun comes to bear
+    b.arms[b.offArm].rotation.x = (!w.oneHand && (wantShoot || recentShot || aimAmt > 0.2)) ? b.arms[b.gunArm].rotation.x : -swing * 0.8;
     const kick = game.time - player.lastShotT < 0.09 ? 0.35 : 0;
     b.arms[b.gunArm].rotation.x += kick;
   }
@@ -9710,12 +9758,19 @@ function updateZombies(dt) {
     }
     // an already-dead carcass: lies where it fell and never gets up. Crows feed on it and
     // shots dismember it (and still count as kills). Being static, a pecker can finish its
-    // full turn on one — which is the whole point of them.
+    // full turn on one — which is the whole point of them. Until the Rotten One rises:
+    // his sickness stirs every laying body on the block, and a carcass you stroll past
+    // peels itself up off the pavement and joins the horde (crows flush the moment it stirs)
     if (z.state === 'corpse') {
       const gy = groundHeight(z.pos.x, z.pos.z);
       b.root.position.set(z.pos.x, gy + 0.05, z.pos.z);
       b.root.rotation.x = -1.45;
       placeShadow(b, z.pos.x, z.pos.z);
+      if (rotOnBlock() && nearestPlayerDist(z.pos.x, z.pos.z) < 24) {
+        z.state = 'wake'; z.emergeT = 0;
+        // rotten and half-eaten, it rises on what's left — less than a fresh walker
+        z.hp = Math.max(z.hp, (7 + Math.random() * 5) * z.scale);
+      }
       continue;
     }
     if (z.state === 'wake') {
