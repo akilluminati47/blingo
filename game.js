@@ -7823,24 +7823,36 @@ function shotgunWoundRoll(z, w) {
 // chest side, the stomach — each only into a slot still closed, likelier up close but
 // rolling from a bit farther out too.
 function bodyShotGore(z, w, dist) {
-  if (!w || z.isBoss) return;
+  if (!w || z.isBoss) return false;
   const b = z.blob;
   if (w.id === 'magnum') {
+    // every body blow rolls for the eye too — the hand cannon's concussion can knock
+    // one loose clean through the body
+    let hit = false;
+    if (!z.rotE && Math.random() < 0.5) {
+      addRotGore(b, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 }); z.rotE = 1; hit = true;
+    }
     if (!z.rotR && !z.rotRR) {
       const right = Math.random() < 0.5;
       if (right) { addRotGore(b, { ribsR: true }); z.rotRR = 1; } else { addRotGore(b, { ribs: true }); z.rotR = 1; }
-    } else if (!z.rotB) { addRotGore(b, { belly: true }); z.rotB = 1; }
+      hit = true;
+    } else if (!z.rotB) { addRotGore(b, { belly: true }); z.rotB = 1; hit = true; }
+    return hit;
   } else if (w.id === 'shotgun') {
     const near = dist <= (w.fRange || 7);
+    let hit = false;
     if (!z.rotE && Math.random() < (near ? 0.3 : 0.12)) {
-      addRotGore(b, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 }); z.rotE = 1;
+      addRotGore(b, { hangEye: true, eyeSide: Math.random() < 0.5 ? 1 : -1 }); z.rotE = 1; hit = true;
     }
     if (!(z.rotR && z.rotRR) && Math.random() < (near ? 0.4 : 0.18)) {
       const right = z.rotR ? true : z.rotRR ? false : Math.random() < 0.5;
       if (right) { addRotGore(b, { ribsR: true }); z.rotRR = 1; } else { addRotGore(b, { ribs: true }); z.rotR = 1; }
+      hit = true;
     }
-    if (!z.rotB && Math.random() < (near ? 0.4 : 0.18)) { addRotGore(b, { belly: true }); z.rotB = 1; }
+    if (!z.rotB && Math.random() < (near ? 0.4 : 0.18)) { addRotGore(b, { belly: true }); z.rotB = 1; hit = true; }
+    return hit;
   }
+  return false;
 }
 // the shotgun's body blast bursts the whole torso when it's delivered close enough to
 // feel the muzzle — guaranteed inside its comfort range — or onto a walker already
@@ -7921,15 +7933,20 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
   // the assault rifle takes an arm clean off in a single hit: a round that catches an arm
   // severs it outright, no roll (armSever). Legs and body shots still go through the chance.
   // FBI armour holds both off — only magnum/sniper rounds delimb a black-ops blob.
+  let severed = false;
   if (w && w.armSever && !isHead && !z.isBoss && limb && limb.kind === 'arm' && !b.armGone[limb.idx] && !fbiArmored(z, w)) {
-    blowLimb(z, kx, kz, limb);
+    blowLimb(z, kx, kz, limb); severed = true;
   } else if (!isHead && !z.isBoss && w && w.dismember && !fbiArmored(z, w)) {
     // limb dismemberment — a direct hit on an arm/leg severs that exact limb; else a body-shot chance
     const base = limb ? 0.9 : 0.55;
-    if (Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : base)) blowLimb(z, kx, kz, limb);
+    if (Math.random() < w.dismember * closeBonus(w, dist) * (z.hp <= 0 ? 1 : base)) { blowLimb(z, kx, kz, limb); severed = true; }
   }
   // the magnum and the shotgun open the body up on body hits, not just kills
-  if (!isHead && !fbiArmored(z, w)) bodyShotGore(z, w, dist);
+  let gored = false;
+  if (!isHead && !fbiArmored(z, w)) gored = bodyShotGore(z, w, dist);
+  // black-ops armour shrugs the small stuff — but a gore wound that DOES land (a chest
+  // blown open, the stomach split, an arm off) drops the blob where it stands
+  if (z.fbi && (severed || gored)) { killZombie(z, kx, kz, false); return; }
 
   if (z.hp > 0) {
     // weak, far or skullcrack (marksman rifle) headshot that doesn't kill cracks the
@@ -9089,7 +9106,12 @@ function updatePlayer(dt) {
         const cdir = hand * (beat === 0 ? 1 : -1);
         let sR = ready, sS = strike, sZ = hz;
         if (style === 'jab') { sR = -1.1; sS = -1.9; }
-        else if (style === 'chop') { sR = lerp(ready, -2.2, 0.5); }   // the pipe's light vertical
+        else if (style === 'chop') {
+          // the pipe strikes twice: the vertical chop leads, the second press comes
+          // across on the diagonal — a vert-and-diag striker combo
+          if (beat === 1) sZ = meleeSwingHome(sw, hz, -0.65 * cdir, 0.5 * cdir);
+          else sR = lerp(ready, -2.2, 0.5);
+        }
         else if (style === 'side') {
           if (beat === 2) { sR = lerp(ready, -2.95, 0.55); }           // the bat's finisher
           else {
