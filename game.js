@@ -7541,8 +7541,10 @@ function fireWeapon() {
     } else {
       player.meleeArm = playerBlob.gunArm;  // an armed melee always swings the weapon hand
       // the armed combo: every press inside the window swings BACK the other way —
-      // forehand leads, backhand answers, a lapsed chain re-opens on the forehand
-      player.meleeCombo = (game.time - (player.lastMeleeT || -9) < COMBO_WINDOW) ? ((player.meleeCombo || 0) + 1) % 2 : 0;
+      // forehand leads, backhand answers, a lapsed chain re-opens on the forehand.
+      // The bat's chain runs a beat longer: forehand, backhand, then the overhead finisher
+      const comboLen = w.id === 'bat' ? 3 : 2;
+      player.meleeCombo = (game.time - (player.lastMeleeT || -9) < COMBO_WINDOW) ? ((player.meleeCombo || 0) + 1) % comboLen : 0;
       player.lastMeleeT = game.time;
     }
     const hop = player.hopT > 0;            // swung out of a slide hop: twice the damage
@@ -9034,16 +9036,26 @@ function updatePlayer(dt) {
       const ready = lerp(hx, (hold ? hold.rest : MELEE_REST) + bob * 0.5, player.meleeRaise);
       const strike = meleeCarryLift(-0.35, shoulderY, groundHeight(player.pos.x, player.pos.z), reach);
       if (sw >= 0) {
-        // the swing's own voice: jabs thrust straight, roundhouses sweep the arm across
-        // on rotation.z, diagonals slash high-to-low, overhead chops cock right up over
-        // the shoulder first. Inside the combo window the sweep mirrors every press —
-        // forehand leads, backhand answers
+        // the swing's own voice: jabs thrust straight, the pipe chops down light,
+        // roundhouses sweep the arm across on rotation.z STARTING FROM THE OUTSIDE
+        // (the backswing answers from the inside), diagonals slash high-to-low the
+        // same way, overhead chops cock right up over the shoulder first. The bat's
+        // chain runs three deep: forehand, backhand, then a full overhead finisher.
         const style = SWING_STYLE[w.id] || 'over';
-        const cdir = hand * ((player.meleeCombo || 0) % 2 === 0 ? 1 : -1);
+        const combo = player.meleeCombo || 0;
+        const beat = w.id === 'bat' ? combo % 3 : combo % 2;
+        const cdir = hand * (beat === 0 ? 1 : -1);
         let sR = ready, sS = strike, sZ = hz;
         if (style === 'jab') { sR = -1.1; sS = -1.9; }
-        else if (style === 'side') { sR = lerp(ready, -1.75, 0.55); sS = -1.2; sZ = meleeSwingHome(sw, hz, 1.05 * cdir, -0.85 * cdir); }
-        else if (style === 'diag') { sZ = meleeSwingHome(sw, hz, 0.65 * cdir, -0.5 * cdir); }
+        else if (style === 'chop') { sR = lerp(ready, -2.2, 0.5); }   // the pipe's light vertical
+        else if (style === 'side') {
+          if (beat === 2) { sR = lerp(ready, -2.95, 0.55); }           // the bat's finisher
+          else {
+            sR = lerp(ready, -1.75, 0.55); sS = -1.2;
+            sZ = meleeSwingHome(sw, hz, -1.05 * cdir, 0.85 * cdir);
+          }
+        }
+        else if (style === 'diag') { sZ = meleeSwingHome(sw, hz, -0.65 * cdir, 0.5 * cdir); }
         else sR = lerp(ready, -2.95, 0.55);
         b.arms[b.gunArm].rotation.x = meleeSwingHome(sw, ready, sR, sS);
         b.arms[b.gunArm].rotation.z = sZ;
