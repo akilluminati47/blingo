@@ -1717,12 +1717,12 @@ const SWING_STYLE = {
 // each arm's own idle carry, not the shared tip-in-the-dirt drag: x = arm pitch,
 // z = out-to-side tilt (mirrored for the lefty). rest = where it parks after a swing.
 // The sledge stays off the list — too heavy for anything but the ground-drag carry.
+// each arm's own idle carry: the bat and katana ride STRAIGHT OUT in front — everything
+// else (pipe, machete, axe, sledge, the consumables) drags low off the ground carry,
+// the same way the NPCs haul theirs. z = out-to-side tilt, mirrored for the lefty.
 const MELEE_HOLD = {
-  bat:     { x: -2.35, z: 0, rest: -2.6 },   // upright beside the head, clear of it
-  katana:  { x: -0.95, z: 0, rest: -2.25 },  // low at the hip, blade straight down
-  machete: { x: -0.85, z: 0, rest: -2.1 },   // down at the side, straight
-  pipe:    { x: -1.45, z: 0, rest: -2.15 },  // half-raised mid carry
-  axe:     { x: -1.85, z: 0, rest: -2.6 },   // head up at the shoulder
+  bat:    { x: -1.55, z: 0, rest: -1.95 },  // straight out in front, slugger on deck
+  katana: { x: -1.55, z: 0, rest: -1.95 },  // straight out in front, blade level
 };
 // how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
 // held-down punching always chains, but a real pause drops you back to a 6 opener.
@@ -1783,13 +1783,17 @@ function buildMeleeMesh(g, id, c) {
     const collar = cyl(0.06, 0.06, 0.08, 0x3a3d43); collar.rotation.x = Math.PI / 2; collar.position.set(0, 0, -0.56); g.add(collar);
     g.add(shaftZ(0.2, 0.047, 0.047, 0x2a2a2a, 0.08));
   } else if (id === 'axe') {
-    g.add(shaftZ(0.82, 0.042, 0.048, 0x6b5330));
-    const collar = box(0.07, 0.1, 0.1, 0x3a3d43); collar.position.set(0, 0.02, -0.72); g.add(collar);
-    const head = box(0.07, 0.3, 0.24, c); head.position.set(0, 0.05, -0.76); g.add(head);
-    const blade = box(0.034, 0.36, 0.1, 0xd8dde5); blade.position.set(0, 0.05, -0.88); g.add(blade);
-    const spike = box(0.05, 0.09, 0.14, 0x5c6068); spike.position.set(0, 0.05, -0.62); g.add(spike);
-    const stripe = box(0.072, 0.05, 0.24, 0xf2e28a); stripe.position.set(0, -0.06, -0.76); g.add(stripe);
-    g.add(shaftZ(0.2, 0.047, 0.047, 0x2a2a2a, 0.08));
+    // Blazo's fire axe, rebuilt: hickory haft red-dipped under the head the way a real
+    // one wears it, a forged head, the beard sweeping DOWN in two angled plates into a
+    // curved silver edge, and a dark hammer poll off the back
+    g.add(shaftZ(0.86, 0.038, 0.046, 0x8a6134));
+    g.add(shaftZ(0.3, 0.046, 0.048, c, -0.44));          // the red dip
+    g.add(shaftZ(0.22, 0.044, 0.044, 0x2a2a2a, 0.08));  // rubber grip
+    const head = box(0.09, 0.13, 0.2, c); head.position.set(0, 0.02, -0.74); g.add(head);
+    const sweep1 = box(0.05, 0.2, 0.05, 0xd8dde5); sweep1.position.set(0, -0.09, -0.85); sweep1.rotation.x = 0.3; g.add(sweep1);
+    const sweep2 = box(0.05, 0.15, 0.045, 0xd8dde5); sweep2.position.set(0, -0.24, -0.81); sweep2.rotation.x = 0.7; g.add(sweep2);
+    const cheek = box(0.07, 0.2, 0.07, c); cheek.position.set(0, -0.12, -0.78); cheek.rotation.x = 0.3; g.add(cheek);
+    const poll = box(0.08, 0.09, 0.08, 0x4a4e55); poll.position.set(0, 0.02, -0.58); g.add(poll);
   }
 }
 
@@ -7546,6 +7550,9 @@ function fireWeapon() {
       const comboLen = w.id === 'bat' ? 3 : 2;
       player.meleeCombo = (game.time - (player.lastMeleeT || -9) < COMBO_WINDOW) ? ((player.meleeCombo || 0) + 1) % comboLen : 0;
       player.lastMeleeT = game.time;
+      // the bat's finisher takes its time: the full overhead smash reads as the big
+      // hit it is instead of rushing through the same beat as the sweeps
+      if (w.id === 'bat' && player.meleeCombo % 3 === 2) player.swingDur = player.swingT = player.swingDur * 1.35;
     }
     const hop = player.hopT > 0;            // swung out of a slide hop: twice the damage
     const hits = meleeTargets(w);           // the arc sweeps EVERYONE inside reach + cone
@@ -9607,9 +9614,12 @@ function updateCompanions(dt) {
       if (c.meleeT > 0) c.meleeHoldT = 1;
       else c.meleeHoldT = Math.max(0, (c.meleeHoldT || 0) - dt);
       const reach = c.gunMesh ? c.gunMesh.userData.reach : 0.8;
+      // the bat and katana ride straight out like the hero's; the rest drag low
+      const npcHold = cw.id === 'bat' || cw.id === 'katana';
       const target = c.meleeT > 0
         ? meleeCarryLift(-0.35, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), reach)
         : c.meleeHoldT > 0 ? MELEE_REST
+        : npcHold ? -1.55 + Math.sin(c.walkPhase) * (moving ? 0.1 : 0.03)
         : meleeCarryLift(-0.55 + Math.sin(c.walkPhase) * (moving ? 0.14 : 0.04), (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), reach);
       const k = 1 - Math.exp(-(c.meleeT > 0 ? 14 : c.meleeHoldT > 0 ? 8 : 1.6) * dt);
       b.arms[b.gunArm].rotation.x = lerp(b.arms[b.gunArm].rotation.x, target, k);
@@ -13717,7 +13727,9 @@ function netPoseCompanion(c, dt) {
   // their streamed gun-arm angle, eased over the 15Hz stream: real x/y aim, not a levelled prop
   c.arS = lerp(c.arS ?? -Math.PI / 2, p && p.ar != null ? p.ar : -Math.PI / 2, 1 - Math.exp(-14 * dt));
   b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
-    ? meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8)
+    ? (c.weapon.id === 'bat' || c.weapon.id === 'katana'
+      ? -1.55   // bat + katana ride straight out on every screen
+      : meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8))
     : c.arS;
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
   if (c.downed) {
