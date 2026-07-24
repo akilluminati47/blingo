@@ -1,3 +1,5 @@
+/* BLINGO — Copyright (c) 2026 akilluminati47 (AK & Co.). All rights reserved.
+ * Original work; see LICENSE. https://blingo.pages.dev */
 import * as THREE from './libs/three.module.js';
 
 /* =========================================================

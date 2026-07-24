@@ -1,3 +1,5 @@
+// themes.js — Copyright (c) 2026 akilluminati47 (AK & Co.). All rights reserved.
+// Original compositions; see LICENSE. https://blingo.pages.dev
 // themes.js -- the six cousin theme songs, baked from their original MIDI arrangements into
 // compact packed data (no external .mid files any more), plus the shared chip-voice synth.
 //

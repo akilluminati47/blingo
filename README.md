@@ -10,6 +10,21 @@ An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. 
 - Solo or squad up with friends
 - No downloads, no sign-ups — just pick a cousin and drop in
 
+The website is the home of BLINGO — the fastest way to play and always the freshest build.
+
+---
+
+## Desktop App (Windows)
+
+Prefer a standalone? Grab the latest Windows build from [**GitHub Releases**](https://github.com/akilluminati47/blingo/releases/latest):
+
+- **Setup .exe** — installer with desktop shortcut (recommended)
+- **Portable .exe** — single file, no install
+
+The desktop app is the same game, wrapped in Electron with the Chromium/ANGLE GPU stack tuned for desktop play: GPU blocklist ignored, GPU rasterization + zero-copy forced on, vsync/frame-rate cap lifted, and no browser tab throttling — your frame never freezes mid-run. Steam integration (overlay/achievements via steamworks.js) is wired in and activates when a Steam App ID ships with the build.
+
+Every push to `main` bumps the version by 0.0.1, rebuilds the app in GitHub Actions, and replaces the latest release — so the download is always current with the website.
+
 ---
 
 ## The World
@@ -208,3 +223,11 @@ Each boss spawns with a colored beam pillar marking their location. Beating them
 | View | V | Select | On-screen button |
 
 *PlayStation and Nintendo controllers also supported.*
+
+---
+
+## Ownership
+
+**BLINGO** — name, characters, story, artwork, music, and all code — is an original work created and owned by **[akilluminati47](https://github.com/akilluminati47) (AK & Co.)**.
+
+Copyright (c) 2026 akilluminati47 (AK & Co.). **All rights reserved.** The source is publicly visible for transparency, but it is not open source — see [LICENSE](LICENSE). Play free at [blingo.pages.dev](https://blingo.pages.dev) or via the official [GitHub Releases](https://github.com/akilluminati47/blingo/releases/latest).
