@@ -9158,7 +9158,9 @@ function updatePlayer(dt) {
         // (the backswing answers from the inside), diagonals slash high-to-low the
         // same way, overhead chops cock right up over the shoulder first. The bat's
         // chain runs three deep: forehand, backhand, then a full overhead finisher.
-        const style = SWING_STYLE[w.id] || 'over';
+        // The katana leaves its roundhouse on the ground: a jump attack comes straight
+        // DOWN — the overhead chop, not a sideways fan at the air
+        const style = w.id === 'katana' && !player.grounded ? 'over' : (SWING_STYLE[w.id] || 'over');
         const combo = player.meleeCombo || 0;
         const beat = w.id === 'bat' ? combo % 3 : combo % 2;
         const cdir = hand * (beat === 0 ? 1 : -1);
