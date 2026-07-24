@@ -1757,18 +1757,21 @@ function axeBladeGeo() {
   g.translate(0.0375, 0, 0);
   return g;
 }
-// the dark cutting edge: the blade's bottom sweep as its own proud piece
+// the cutting edge: a true slicing taper in bright steel — thick where it leaves the
+// red head, thinning to the bright lip along the blade's bottom sweep, and long
+// enough to ride the whole face instead of stubbing at the corner
 function axeEdgeGeo() {
   const s = new THREE.Shape();
-  s.moveTo(-0.83, -0.2);
-  s.lineTo(-0.84, -0.26);
-  s.lineTo(-0.82, -0.3);    // the very edge point
-  s.lineTo(-0.68, -0.24);   // along the beard's bottom
-  s.lineTo(-0.68, -0.22);
+  s.moveTo(-0.79, -0.02);   // thick at the head, high on the blade face
+  s.lineTo(-0.67, -0.14);   // the band's back edge, still thick
+  s.lineTo(-0.65, -0.26);   // thinning as it turns the beard
+  s.lineTo(-0.7, -0.3);     // the lip rounding the beard's bottom
+  s.lineTo(-0.865, -0.31);  // the keen edge point — proud of the head, longer reach
+  s.lineTo(-0.85, -0.12);   // the lip sweeping back up the blade face
   s.closePath();
-  const g = new THREE.ExtrudeGeometry(s, { depth: 0.077, bevelEnabled: false });
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.076, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 1 });
   g.rotateY(-Math.PI / 2);
-  g.translate(0.0385, 0, 0);
+  g.translate(0.038, 0, 0);
   return g;
 }
 function buildMeleeMesh(g, id, c) {
@@ -1822,11 +1825,11 @@ function buildMeleeMesh(g, id, c) {
   } else if (id === 'axe') {
     // Blazo's fire axe: plain brown haft with the end knob, then the head as ONE forged
     // piece — the extruded silhouette with its pick spike and sweeping beard — plus the
-    // dark cutting edge along the sweep and the eye slot inset on both faces
+    // bright slicing taper along the sweep and the eye slot inset on both faces
     g.add(shaftZ(0.88, 0.034, 0.046, 0x8a6b42));
     const knob = cyl(0.05, 0.056, 0.06, 0x7a5a36); knob.rotation.x = Math.PI / 2; knob.position.set(0, 0, 0.3); g.add(knob);
     g.add(new THREE.Mesh(axeBladeGeo(), mat(c)));
-    g.add(new THREE.Mesh(axeEdgeGeo(), mat(0x23262b)));
+    g.add(new THREE.Mesh(axeEdgeGeo(), mat(0xe8edf2)));
     for (const sx of [-1, 1]) {
       const eye = box(0.012, 0.05, 0.15, 0x1c1e22);
       eye.position.set(sx * 0.039, 0.03, -0.64);
