@@ -1734,6 +1734,41 @@ function shaftZ(len, r1, r2, color, near = 0.06) {
   m.position.set(0, 0, near - len / 2);       // extend forward from just past the fist
   return m;
 }
+// the fire-axe head as one forged piece, traced off the reference's side silhouette:
+// the pick spike rising off the top leaning into the blade, the long top, the blade
+// face sweeping down, and the beard's belly curling back up to the eye — extruded thin
+function axeBladeGeo() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.58, -0.02);   // poll bottom, where the haft meets the head
+  s.lineTo(-0.58, 0.09);    // poll top
+  s.lineTo(-0.62, 0.11);
+  s.lineTo(-0.66, 0.3);     // the pick's tip, up and leaning into the blade
+  s.lineTo(-0.7, 0.1);
+  s.lineTo(-0.78, 0.09);    // the long top out to the blade face
+  s.lineTo(-0.83, -0.1);    // the blade face sweeping down
+  s.lineTo(-0.84, -0.26);   // to the edge
+  s.lineTo(-0.68, -0.22);   // the beard's belly curling back up
+  s.lineTo(-0.6, -0.1);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.075, bevelEnabled: true, bevelThickness: 0.008, bevelSize: 0.006, bevelSegments: 1 });
+  g.rotateY(-Math.PI / 2);    // shape plane onto the weapon's z axis, thickness onto x
+  g.translate(0.0375, 0, 0);
+  return g;
+}
+// the dark cutting edge: the blade's bottom sweep as its own proud piece
+function axeEdgeGeo() {
+  const s = new THREE.Shape();
+  s.moveTo(-0.83, -0.2);
+  s.lineTo(-0.84, -0.26);
+  s.lineTo(-0.82, -0.3);    // the very edge point
+  s.lineTo(-0.68, -0.24);   // along the beard's bottom
+  s.lineTo(-0.68, -0.22);
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, { depth: 0.077, bevelEnabled: false });
+  g.rotateY(-Math.PI / 2);
+  g.translate(0.0385, 0, 0);
+  return g;
+}
 function buildMeleeMesh(g, id, c) {
   if (id === 'pipe') {
     g.add(shaftZ(0.86, 0.05, 0.055, c));
@@ -1783,25 +1818,18 @@ function buildMeleeMesh(g, id, c) {
     const collar = cyl(0.06, 0.06, 0.08, 0x3a3d43); collar.rotation.x = Math.PI / 2; collar.position.set(0, 0, -0.56); g.add(collar);
     g.add(shaftZ(0.2, 0.047, 0.047, 0x2a2a2a, 0.08));
   } else if (id === 'axe') {
-    // Blazo's fire axe, off the 3D reference: a plain brown wood haft with a slight end
-    // knob, then the complex head — a red wedge body with a flat crown, the blade
-    // flaring down-forward in two plates, the silver cutting edge curling under the
-    // sweep in two more, and the tapered pick spike off the back
-    g.add(shaftZ(0.88, 0.034, 0.046, 0x8a6b42));                       // plain wood haft
+    // Blazo's fire axe: plain brown haft with the end knob, then the head as ONE forged
+    // piece — the extruded silhouette with its pick spike and sweeping beard — plus the
+    // dark cutting edge along the sweep and the eye slot inset on both faces
+    g.add(shaftZ(0.88, 0.034, 0.046, 0x8a6b42));
     const knob = cyl(0.05, 0.056, 0.06, 0x7a5a36); knob.rotation.x = Math.PI / 2; knob.position.set(0, 0, 0.3); g.add(knob);
-    // the wedge body riding the haft's end, flat crown cap on top
-    const body = box(0.085, 0.15, 0.2, c); body.position.set(0, 0.05, -0.7); g.add(body);
-    const crown = box(0.08, 0.05, 0.22, c); crown.position.set(0, 0.13, -0.71); g.add(crown);
-    // the blade: two red plates flaring down-forward off the body
-    const flare1 = box(0.075, 0.16, 0.07, c); flare1.position.set(0, -0.04, -0.82); flare1.rotation.x = 0.18; g.add(flare1);
-    const flare2 = box(0.065, 0.14, 0.055, c); flare2.position.set(0, -0.17, -0.85); flare2.rotation.x = 0.42; g.add(flare2);
-    // the silver cutting edge curling under the sweep
-    const edge1 = box(0.06, 0.045, 0.05, 0xd8dde5); edge1.position.set(0, -0.27, -0.85); edge1.rotation.x = 0.6; g.add(edge1);
-    const edge2 = box(0.055, 0.05, 0.045, 0xd8dde5); edge2.position.set(0, -0.33, -0.8); edge2.rotation.x = 1.0; g.add(edge2);
-    // the pick: red base off the body, then the tapered dark spike
-    const pickBase = box(0.06, 0.07, 0.08, c); pickBase.position.set(0, 0.08, -0.57); g.add(pickBase);
-    const pick = box(0.04, 0.045, 0.14, 0x3f434a); pick.position.set(0, 0.09, -0.47); pick.rotation.x = -0.12; g.add(pick);
-    const pickTip = box(0.025, 0.03, 0.06, 0x3f434a); pickTip.position.set(0, 0.1, -0.39); pickTip.rotation.x = -0.12; g.add(pickTip);
+    g.add(new THREE.Mesh(axeBladeGeo(), mat(c)));
+    g.add(new THREE.Mesh(axeEdgeGeo(), mat(0x23262b)));
+    for (const sx of [-1, 1]) {
+      const eye = box(0.012, 0.05, 0.15, 0x1c1e22);
+      eye.position.set(sx * 0.039, 0.03, -0.64);
+      g.add(eye);
+    }
   }
 }
 
