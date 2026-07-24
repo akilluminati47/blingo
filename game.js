@@ -861,18 +861,21 @@ let windYaw = Math.random() * TAU, windTgtYaw = windYaw, windStr = 0.4, windTgtS
 function updateWind(dt) {
   windShiftT -= dt;
   if (windShiftT <= 0) {
-    windShiftT = 5 + Math.random() * 7;
+    const storming = stormActive();
+    windShiftT = storming ? 2 + Math.random() * 3 : 5 + Math.random() * 7; // storms gust faster
     windTgtYaw = Math.random() * TAU;
-    windTgtStr = game.weather === 'rain' ? 0.45 + Math.random() * 0.55
+    windTgtStr = storming ? 0.65 + Math.random() * 0.35
+      : game.weather === 'rain' ? 0.45 + Math.random() * 0.55
       : game.weather === 'cloudy' ? 0.3 + Math.random() * 0.45
       : 0.15 + Math.random() * 0.3;
   }
   windYaw = angLerp(windYaw, windTgtYaw, 1 - Math.exp(-0.5 * dt));
   windStr = lerp(windStr, windTgtStr, 1 - Math.exp(-0.7 * dt));
   if (windGainNode) {
-    const base = game.weather === 'rain' ? 0.75 : game.weather === 'cloudy' ? 0.55 : 0.3;
+    const storming = stormActive();
+    const base = storming ? 0.95 : game.weather === 'rain' ? 0.75 : game.weather === 'cloudy' ? 0.55 : 0.3;
     windGainNode.gain.value = base * (0.5 + windStr * 0.9);
-    if (windPanNode) windPanNode.pan.value = clamp(Math.sin(windYaw - player.camYaw), -1, 1) * 0.7;
+    if (windPanNode) windPanNode.pan.value = clamp(Math.sin(windYaw - player.camYaw), -1, 1) * (storming ? 1.0 : 0.7);
   }
 }
 
@@ -944,6 +947,10 @@ function coarsePhase(t) { return t < 5 ? 3 : t < 10 ? 0 : t < 16 ? 1 : t < 20 ? 
 // reaches its halfway mark, rain has a 50% chance to muscle in for the back half.
 // States crossfade over ~20s instead of snapping.
 const wx = { from: 'sunny', to: 'sunny', u: 1, T: 300, half: false };
+// storm system: lightning flashes + thunder claps/rolls ride on top of rainy weather
+// and drag the wind and rain with them
+let stormT = 0, lightningT = 0, stormNextT = 3 + Math.random() * 6;
+function stormActive() { return stormT > 0; }
 function wxWeights() {
   const w = { sunny: 0, cloudy: 0, rain: 0 };
   w[wx.from] += 1 - wx.u; w[wx.to] += wx.u;
@@ -971,6 +978,47 @@ function updateDayNight(dt) {
   game.weather = wx.u < 0.5 ? wx.from : wx.to;
   skyRedrawT -= dt;
   applyEnvironment(skyRedrawT <= 0);
+  updateStorm(dt);
+}
+// the storm: lightning flashes ride the rainy weather — a bright bolt in the cloud
+// shell, then thunder claps and rolls chasing it. The wind gusts and rain thickens
+// with the storm's own rhythm. Runs every frame alongside updateDayNight.
+function updateStorm(dt) {
+  const inRain = game.weather === 'rain' || (wx.to === 'rain' && wx.u > 0.5);
+  if (!inRain) { stormT = 0; return; }
+  stormNextT -= dt;
+  if (stormNextT <= 0) {
+    // roll a lightning strike: 60% chance on each tick, more likely the longer it's been
+    if (Math.random() < 0.6) {
+      stormT = 0.4 + Math.random() * 0.5; // flash lasts 0.4-0.9s
+      lightningT = stormT;
+      // the flash: brighten the cloud fill/belly to a pale electric blue-white
+      cloudUni.uFill.value.set(0xd8e4f0).lerp(new THREE.Color(0xffffff), 0.7);
+      cloudUni.uBelly.value.set(0xc8d8e8).lerp(new THREE.Color(0xffffff), 0.6);
+      // schedule the thunder — closer storms clap sooner, distant rolls drag
+      const dist = 0.3 + Math.random() * 1.2; // 0.3-1.5s delay (roughly 100-500m)
+      const loud = clamp(1.2 - dist * 0.7, 0.3, 1); // louder = closer
+      setTimeout(() => {
+        if (!actx) return;
+        const baseF = 35 + Math.random() * 20;
+        // sharp clap: a high burst that crackles and falls
+        tone(baseF * 3.5 + Math.random() * 40, 0.08 + Math.random() * 0.06, 0.28 * loud, 'square', 80, ambGain);
+        // the crack decays into a rolling rumble
+        tone(baseF, 1.8 + Math.random() * 1.2, 0.2 * loud, 'sawtooth', 28, ambGain);
+        setTimeout(() => tone(baseF * 0.65, 1.5 + Math.random() * 0.8, 0.12 * loud, 'sawtooth', 24, ambGain),
+          200 + Math.random() * 300);
+      }, dist * 1000);
+    }
+    stormNextT = 2 + Math.random() * 7; // next strike in 2-9s
+  }
+  // flash decay: stormT counts down, the cloud colors ease back to their rain palette
+  if (stormT > 0) {
+    stormT -= dt;
+    if (stormT <= 0) {
+      stormT = 0; lightningT = 0;
+      applyEnvironment(true); // redraw the sky with normal rain colors
+    }
+  }
 }
 // lights and fog blend every frame (cheap); the sky/cloud canvases repaint at 1Hz,
 // which is plenty for a day that moves a minute per second
@@ -997,7 +1045,16 @@ function applyEnvironment(redraw = true) {
   scene.fog.far = F * (W.sunny + 0.876 * W.cloudy + 0.667 * W.rain);
   scene.background.copy(fogC);
   rainOn(W.rain > 0.45);
-  if (rainMesh) rainMesh.material.opacity = 0.4 * Math.min(1, W.rain * 1.6);
+  if (rainMesh) {
+    const stormBoost = stormActive() ? 0.25 : 0; // rain thickens with the storm
+    rainMesh.material.opacity = (0.4 + stormBoost) * Math.min(1, W.rain * 1.6);
+  }
+  // the storm's flash also lifts the scene's ambient and directional light briefly
+  if (stormActive()) {
+    const f = stormT / 0.9; // 1 → 0 as the flash decays
+    hemi.intensity *= 1 + f * 0.6;
+    moon.intensity *= 1 + f * 0.4;
+  }
   setLampGlow(lampLitFor(game.clock ?? 13, W)); // the street lamps take over as the sky goes down
 }
 
@@ -1248,10 +1305,11 @@ function startAmbience() {
             tone(230 + Math.random() * 90, 2.3, 0.045, 'sine', 115, ambGain); // hollow gust moan
           }
         } else if (Math.random() < 0.45) {
-          // rolling thunder somewhere past the fog line
+          // storm groans: the bosses answering the rain, rolling past the fog line
           const f = 52 + Math.random() * 24;
-          tone(f, 2.6, 0.16, 'sawtooth', 30, ambGain);
-          setTimeout(() => tone(f * 0.7, 1.9, 0.1, 'sawtooth', 26, ambGain), 350 + Math.random() * 450);
+          tone(f * 0.9, 2.8, 0.18, 'sawtooth', 28, ambGain);
+          setTimeout(() => tone(f * 0.65, 2.1, 0.12, 'sawtooth', 24, ambGain), 320 + Math.random() * 400);
+          setTimeout(() => { if (Math.random() < 0.6) tone(f * 1.15, 0.4, 0.22, 'sawtooth', 40, ambGain); }, 180 + Math.random() * 200);
         }
       }
       weatherLife();
