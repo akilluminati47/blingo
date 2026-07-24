@@ -2131,9 +2131,12 @@ function terrainPlane(w, d, segW, segD, cx, cz, material, lift = 0) {
 }
 // same ground-following approach as terrainPlane, but a fan disc instead of a grid — for round
 // ground decals (floodlight pools) that need to ride the terrain's own tilt instead of sinking
-// into it as a rigid flat circle would
-function terrainDisc(r, segs, cx, cz, material, lift = 0) {
-  const geo = new THREE.CircleGeometry(r, segs);
+// into it as a rigid flat circle would. The curve sink runs per-vertex in the shader, so a disc
+// with only one rim ring can't bend with distance: `rings` subdivides the fan into concentric
+// bands (roughly one per 2.5m of radius) and the pool flexes with the globe like the ground does
+function terrainDisc(r, segs, cx, cz, material, lift = 0, rings = 0) {
+  if (!rings) rings = Math.max(2, Math.round(r / 2.5));
+  const geo = new THREE.RingGeometry(0.001, r, segs, rings);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
   for (let i = 0; i < pos.count; i++) {
@@ -3420,7 +3423,7 @@ function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
 // comes in — lines painted straight across it read as stalls blocking the entrance, so
 // that corner stays bare tarmac a driver could actually pull through.
 function parkingLot(x, z, w, d, rows, rng, gateN = 0) {
-  townGroup.add(terrainPlane(w, d, 8, 8, x, z, lotMat, 0.05));
+  townGroup.add(terrainPlane(w, d, 16, 10, x, z, lotMat, 0.05)); // dense enough to bend with the curve, no faceted seams
   const lineMat = mat(0xd8d8d0);
   for (let r = 0; r < rows; r++) {
     const rz = z - d / 2 + (r + 0.5) * (d / rows);
@@ -3668,7 +3671,6 @@ const lampBulbMat = mat(0xffe9a8, { emissive: 0xffdd77, emissiveIntensity: 1 });
 const lampHaloMat = new THREE.MeshBasicMaterial({ color: 0xffe6a6, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
 const lampPoolMat = new THREE.MeshBasicMaterial({ color: 0xffdca0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
 const lampHaloGeo = new THREE.SphereGeometry(0.55, 10, 8);
-const lampPoolGeo = new THREE.CircleGeometry(2.7, 20);
 function makeStreetLamp(x, z, group, h = 4.2) {
   const y0 = groundHeight(x, z);
   const pole = cyl(0.07, 0.09, h, 0x3a3d42);
@@ -3678,8 +3680,9 @@ function makeStreetLamp(x, z, group, h = 4.2) {
   const bulb = new THREE.Mesh(SPHERE, lampBulbMat); bulb.scale.setScalar(0.16);
   bulb.position.set(x, y0 + h - 0.08, z); group.add(bulb);
   const halo = new THREE.Mesh(lampHaloGeo, lampHaloMat); halo.position.copy(bulb.position); group.add(halo);
-  const pool = new THREE.Mesh(lampPoolGeo, lampPoolMat);
-  pool.rotation.x = -Math.PI / 2; pool.position.set(x, y0 + 0.07, z); pool.renderOrder = 1; group.add(pool);
+  // the light pool rides the terrain and bends with the curve like every other ground decal
+  const pool = terrainDisc(2.7, 20, x, z, lampPoolMat, 0.07);
+  pool.renderOrder = 1; group.add(pool);
   return bulb;
 }
 // The big lot's floods are their own dial: same three materials, same lit ramp, but a
@@ -3925,17 +3928,17 @@ function buildTown() {
   // that used to carry its own stall lines duplicating ground the big lot already painted.
   // Paved plain, no lines or parked cars, it reads as the throat of a driveway instead —
   // which is exactly what it needs to be once the west connector below runs through it.
-  townGroup.add(terrainPlane(14, 10, 4, 3, 16, 22, lotMat, 0.05));
+  townGroup.add(terrainPlane(14, 10, 7, 5, 16, 22, lotMat, 0.05));
   // east connector: starts flush at the lot's own east edge (x=71, zero overlap into the
   // lot's tarmac so its colour goes right up to the border cleanly) and runs to the x=100
   // road, noseing 0.6m past its kerb — roadJoinMat is what actually buries that far seam;
   // two separately-tessellated planes at the same grey and lift still don't agree along a
   // shared edge otherwise. The TOWN_RECTS entry above grades the ground flat under the
   // whole span so the road doesn't have to ride raw terrain noise and clip against it.
-  townGroup.add(terrainPlane(23.2, 6.4, 6, 2, 82.6, LOT.z, roadJoinMat, 0.04));
+  townGroup.add(terrainPlane(23.2, 6.4, 12, 4, 82.6, LOT.z, roadJoinMat, 0.04));
   // west connector: same deal in reverse — flush at the pocket's west edge (x=9, no overlap
   // into its tarmac either) out to the x=-20 road with the same kerb-lap on that end
-  townGroup.add(terrainPlane(23.2, 6.4, 6, 2, -2.6, 22, roadJoinMat, 0.04));
+  townGroup.add(terrainPlane(23.2, 6.4, 12, 4, -2.6, 22, roadJoinMat, 0.04));
   // a painted stripe across each flush seam — same white and same stroke width as the
   // parking-stall lines, sat at the midpoint between the lot's lift (0.05) and the road's
   // (0.04) so it straddles the seam rather than floating above both, and hides whatever
