@@ -17,9 +17,13 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win",
-    "build:dir": "electron-builder --win --dir"
+    "build:dir": "electron-builder --win --dir",
+    "apk:sync": "node scripts/copy-web.mjs && cap sync android"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/cli": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
     "electron": "^37.2.0",
     "electron-builder": "^26.0.12"
   },

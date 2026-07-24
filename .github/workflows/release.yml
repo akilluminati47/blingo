@@ -1,7 +1,8 @@
 name: Release
 
-# Every push to main (website deploy included) bumps the patch version by 0.0.1,
-# builds the Windows desktop app, and replaces the GitHub Release at the new tag.
+# Every push to main (website deploy included) increments the version with decimal rollover
+# (0.0.9 -> 0.1.0, 0.9.9 -> 1.0.0), builds the Windows app + Android APK, and posts them
+# all to one GitHub Release at the new tag.
 on:
   push:
     branches: [main]
@@ -14,17 +15,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  bump:
     # the version-bump commit this workflow pushes must not retrigger itself
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Bump version and tag
         id: bump
@@ -39,12 +41,47 @@ jobs:
           if ($patch -gt 9) { $patch = 0; $minor++
             if ($minor -gt 9) { $minor = 0; $major++ } }
           $v = "$major.$minor.$patch"
+          $code = $major * 100 + $minor * 10 + $patch
           npm version $v --no-git-tag-version --allow-same-version
-          git add package.json package-lock.json
+          # keep the android project in lockstep with the release version
+          $gradle = Get-Content android/app/build.gradle -Raw
+          $gradle = $gradle -replace 'versionCode \d+', "versionCode $code"
+          $gradle = $gradle -replace 'versionName "[^"]*"', "versionName ""$v"""
+          Set-Content android/app/build.gradle $gradle -NoNewline
+          git add package.json package-lock.json android/app/build.gradle
           git commit -m "Release v$v [skip ci]"
           git tag "v$v"
           git push origin main --follow-tags
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # create the (empty) release up front so the two build jobs can both upload to it
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.version }}
+          name: BLINGO v${{ steps.bump.outputs.version }}
+          make_latest: true
+          body: |
+            Standalone builds of **BLINGO** v${{ steps.bump.outputs.version }}.
+
+            - **BLINGO Setup ${{ steps.bump.outputs.version }}.exe** — Windows installer (recommended)
+            - **BLINGO-${{ steps.bump.outputs.version }}-portable.exe** — Windows no-install single file
+            - **BLINGO-${{ steps.bump.outputs.version }}-android.apk** — Android sideload (allow "install unknown apps" when prompted)
+
+            Play instantly in the browser instead: https://blingo.pages.dev
+
+  windows:
+    needs: bump
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main   # the bump commit, so the app embeds the new version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -52,19 +89,65 @@ jobs:
       - name: Build Windows app
         run: npx electron-builder --win --publish never
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Windows builds
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "v${{ needs.bump.outputs.version }}" dist/*.exe dist/*.blockmap --clobber
+
+  android:
+    needs: bump
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
-          tag_name: v${{ steps.bump.outputs.version }}
-          name: BLINGO v${{ steps.bump.outputs.version }}
-          make_latest: true
-          body: |
-            Standalone Windows build of **BLINGO** v${{ steps.bump.outputs.version }}.
+          ref: main   # the bump commit, so the APK wears the new versionName
 
-            - **BLINGO Setup ${{ steps.bump.outputs.version }}.exe** — installer (recommended)
-            - **BLINGO-${{ steps.bump.outputs.version }}-portable.exe** — no-install single file
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
 
-            Play instantly in the browser instead: https://blingo.pages.dev
-          files: |
-            dist/*.exe
-            dist/*.blockmap
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Stage web assets and sync Capacitor
+        run: |
+          node scripts/copy-web.mjs
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: bash gradlew assembleRelease --no-daemon
+
+      - name: Sign APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          V: ${{ needs.bump.outputs.version }}
+        run: |
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > /tmp/ks.p12
+          keytool -importkeystore -noprompt \
+            -srckeystore /tmp/ks.p12 -srcstoretype PKCS12 -srcstorepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -destkeystore /tmp/ks.jks -deststoretype JKS -deststorepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -destkeypass "$ANDROID_KEY_PASSWORD"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/zipalign" -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk /tmp/aligned.apk
+          "$BT/apksigner" sign --ks /tmp/ks.jks --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+            --key-pass "pass:$ANDROID_KEY_PASSWORD" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --out "BLINGO-$V-android.apk" /tmp/aligned.apk
+          "$BT/apksigner" verify "BLINGO-$V-android.apk" && echo "APK signature OK"
+          rm -f /tmp/ks.p12 /tmp/ks.jks
+
+      - name: Upload APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ needs.bump.outputs.version }}
+        run: gh release upload "v$V" "BLINGO-$V-android.apk" --clobber

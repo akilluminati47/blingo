@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BLINGO</string>
+    <string name="title_activity_main">BLINGO</string>
+    <string name="package_name">com.akilluminati47.blingo</string>
+    <string name="custom_url_scheme">com.akilluminati47.blingo</string>
+</resources>

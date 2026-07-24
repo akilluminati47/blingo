@@ -1,0 +1,11 @@
+{
+  "appId": "com.akilluminati47.blingo",
+  "appName": "BLINGO",
+  "webDir": "www",
+  "android": {
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
