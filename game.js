@@ -6353,6 +6353,7 @@ function updatePlayerTags(dt) {
     t.el.classList.toggle('down', a.downed);
     t.el.classList.toggle('landmark', !!a.landmark);
     t.el.classList.toggle('edge', pr.edge);
+    if (a.landmark && pr.y < 0) pr.y = 0;   // landmarks never sink below the horizon — ride the line where ground meets sky
     t.el.style.left = ((pr.x * 0.5 + 0.5) * innerWidth) + 'px';
     t.el.style.top = ((-pr.y * 0.5 + 0.5) * innerHeight) + 'px';
     // chevron stays upright — no rotation, no compass-needle pointing, just a signpost at the bearing
