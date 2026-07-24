@@ -100,6 +100,7 @@ function chunkRng(cx, cz) {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = t => t * t * (3 - 2 * t);
+const mild  = t => t <= 0 ? 0 : t >= 1 ? 1 : t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 const TAU = Math.PI * 2;
 function angLerp(a, b, t) {
   let d = (b - a) % TAU;
@@ -475,18 +476,38 @@ skyTex.colorSpace = THREE.SRGBColorSpace;
 skyTex.flipY = true;
 const skyDome = new THREE.Mesh(
   new THREE.SphereGeometry(240, 24, 16),
-  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false })
+  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true })
 );
 skyDome.renderOrder = -10;
 skyDome.material.defines = { NO_CURVE: 1 }; // rides the camera — bending it would dent the sky
 scene.add(skyDome);
+// ---------- the sky never snaps: every repaint crossfades in ----------
+// A repaint (1Hz tick, weather roll, debug setSky) used to land on the dome the
+// instant it painted — a visible jump. Now the fresh sky paints onto a second
+// dome and sweeps in over the settled one, then they trade places: colours
+// glide continuously instead of stepping once a second.
+const skyCanvas2 = document.createElement('canvas');
+skyCanvas2.width = 1024; skyCanvas2.height = 512;
+const skyTex2 = new THREE.CanvasTexture(skyCanvas2);
+skyTex2.colorSpace = THREE.SRGBColorSpace;
+skyTex2.flipY = true;
+const skyDome2 = new THREE.Mesh(
+  new THREE.SphereGeometry(239, 24, 16),
+  new THREE.MeshBasicMaterial({ map: skyTex2, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true, opacity: 0 })
+);
+skyDome2.renderOrder = -10;
+skyDome2.material.defines = { NO_CURVE: 1 };
+scene.add(skyDome2);
+const skyDomes = [skyDome, skyDome2], skyTexs = [skyTex, skyTex2], skyCvs = [skyCanvas, skyCanvas2];
+const SKY_FADE_S = 0.85; // a touch under the 1Hz repaint, so each sweep settles before the next lands
+let skyFront = 0, skyFadeT = 1, skyPrimed = false;
 const moonOff = new THREE.Vector3(-30, 50, -20); // key-light offset, follows the player
 const _skyMoodC = new THREE.Color('#9aa2b0'), _skyMoodR = new THREE.Color('#59606e');
 // p is a blended phase palette (see phaseMixAt) and W the live weather weights
 // { sunny, cloudy, rain } summing to 1 — mid-transition skies mix both moods.
-function drawSky(p, W) {
-  const ctx = skyCanvas.getContext('2d');
-  const CW = skyCanvas.width, H = skyCanvas.height;
+function paintSky(cv, p, W) {
+  const ctx = cv.getContext('2d');
+  const CW = cv.width, H = cv.height;
   // weather tints the palette itself (scaled by its blend weight) instead of
   // flat-washing the finished sky, so the gradient keeps its depth in any mood
   const tint = hex => '#' + new THREE.Color(hex)
@@ -513,7 +534,31 @@ function drawSky(p, W) {
   }
   // no more moon stamp here — the moon is a 3D sprite pair now (disc + halo, see
   // updateCelestial), arcing the sky in real time just like the sun
-  skyTex.needsUpdate = true;
+}
+// a repaint lands on the HIDDEN dome and sweeps in over the settled sky — the
+// only instant paint is the very first one (nobody wants a fade up from black)
+function drawSky(p, W) {
+  if (!skyPrimed) {
+    skyPrimed = true; skyFront = 0; skyFadeT = 1;
+    paintSky(skyCvs[0], p, W); skyTexs[0].needsUpdate = true;
+    return;
+  }
+  if (skyFadeT < 1) { skyFadeT = 1; skyDomes[skyFront].material.opacity = 1; } // settle an in-flight fade (frames a second apart are near-identical)
+  const into = 1 - skyFront;
+  paintSky(skyCvs[into], p, W); skyTexs[into].needsUpdate = true;
+  skyDomes[into].renderOrder = -9.5;          // the incoming sky paints OVER the settled one
+  skyDomes[1 - into].renderOrder = -10;
+  skyDomes[into].visible = true;
+  skyDomes[into].material.opacity = 0;
+  skyFront = into; skyFadeT = 0;
+}
+// per-frame: ease the incoming sky across the fade, then park the hidden dome
+// so a settled sky costs one draw, not two
+function updateSkyFade(dt) {
+  if (skyFadeT >= 1) { skyDomes[1 - skyFront].visible = false; return; }
+  skyFadeT = Math.min(1, skyFadeT + dt / SKY_FADE_S);
+  skyDomes[skyFront].material.opacity = skyFadeT * skyFadeT * (3 - 2 * skyFadeT); // smoothstep sweep
+  if (skyFadeT >= 1) skyDomes[1 - skyFront].visible = false;
 }
 // ---------- cloud dome ----------
 // The cartoon puff-stamps are gone: this is the frutiger-gallery FBM cloud shader
@@ -609,6 +654,10 @@ cloudDome.renderOrder = -9;
 scene.add(cloudDome);
 // scratch colours for the per-frame cloud dressing (see updateCelestial)
 const _cFillW = new THREE.Color(), _cFillR = new THREE.Color();
+// cloud coverage sweeps toward its target instead of snapping — same for cirrus streaks
+const _cloudSweep = { cover: 0.3, cirrus: 0.5 };
+// storm-flash blending colours (reused every frame so the flash is visible)
+const _flashFill = new THREE.Color(0xd8e4f0), _flashBelly = new THREE.Color(0xc8d8e8), _flashWhite = new THREE.Color(0xffffff);
 // ---------- 3D sun, its lens glare, the dark overhead cloud it ducks behind, and air motes ----------
 // The old sun was a flat stamp baked into the sky canvas. Now it's a sprite that ARCS across
 // the sky in real time off game.clock: it lifts off the horizon at dawn, slides up behind a
@@ -840,10 +889,21 @@ function updateCelestial(dt) {
   const gf = night ? '#272e46' : '#c6ccd8', gb = night ? '#1d2338' : '#a9b0bf';
   const rf = night ? '#1a1f30' : '#6d7484', rb = night ? '#141827' : '#565e6c';
   cloudUni.uTime.value += dt * (0.5 + windStr * 1.4);
-  cloudUni.uCover.value = 0.3 * W.sunny + 0.88 * W.cloudy + 1.0 * W.rain;
-  cloudUni.uCirrus.value = 0.55 * W.sunny + 0.3 * W.cloudy;
+  const coverTarget = 0.3 * W.sunny + 0.88 * W.cloudy + 1.0 * W.rain;
+  const cirrusTarget = 0.55 * W.sunny + 0.3 * W.cloudy;
+  _cloudSweep.cover = lerp(_cloudSweep.cover, coverTarget, 1 - Math.exp(-0.55 * dt));
+  _cloudSweep.cirrus = lerp(_cloudSweep.cirrus, cirrusTarget, 1 - Math.exp(-0.55 * dt));
+  cloudUni.uCover.value = _cloudSweep.cover;
+  cloudUni.uCirrus.value = _cloudSweep.cirrus;
   cloudUni.uFill.value.set(p.cloudC).lerp(_cFillW.set(gf), W.cloudy).lerp(_cFillR.set(rf), W.rain);
   cloudUni.uBelly.value.set(p.cloudB).lerp(_cFillW.set(gb), W.cloudy).lerp(_cFillR.set(rb), W.rain);
+  if (stormActive()) {
+    const flash = mild(stormT / lightningT);
+    _flashFill.set(0xd8e4f0).lerp(_flashWhite, 0.7);
+    _flashBelly.set(0xc8d8e8).lerp(_flashWhite, 0.6);
+    cloudUni.uFill.value.lerp(_flashFill, flash);
+    cloudUni.uBelly.value.lerp(_flashBelly, flash);
+  }
   cloudUni.uSunDir.value.copy(_sunDir);
   cloudUni.uSunCol.value.copy(_cSun).multiplyScalar(vis);
   cloudUni.uMoonDir.value.copy(_moonDir);
@@ -955,7 +1015,8 @@ let stormT = 0, lightningT = 0, stormNextT = 3 + Math.random() * 6;
 function stormActive() { return stormT > 0; }
 function wxWeights() {
   const w = { sunny: 0, cloudy: 0, rain: 0 };
-  w[wx.from] += 1 - wx.u; w[wx.to] += wx.u;
+  const su = wx.u < 1 ? smooth(wx.u) : 1;
+  w[wx.from] += 1 - su; w[wx.to] += su;
   return w;
 }
 function wxSet(kind) { wx.from = wx.to = kind; wx.u = 1; game.weather = kind; }
@@ -980,6 +1041,7 @@ function updateDayNight(dt) {
   game.weather = wx.u < 0.5 ? wx.from : wx.to;
   skyRedrawT -= dt;
   applyEnvironment(skyRedrawT <= 0);
+  updateSkyFade(dt); // sweep any freshly repainted sky across — never a jump cut
   updateStorm(dt);
 }
 // the storm: lightning flashes ride the rainy weather — a bright bolt in the cloud
@@ -994,9 +1056,6 @@ function updateStorm(dt) {
     if (Math.random() < 0.6) {
       stormT = 0.4 + Math.random() * 0.5; // flash lasts 0.4-0.9s
       lightningT = stormT;
-      // the flash: brighten the cloud fill/belly to a pale electric blue-white
-      cloudUni.uFill.value.set(0xd8e4f0).lerp(new THREE.Color(0xffffff), 0.7);
-      cloudUni.uBelly.value.set(0xc8d8e8).lerp(new THREE.Color(0xffffff), 0.6);
       // schedule the thunder — closer storms clap sooner, distant rolls drag
       const dist = 0.3 + Math.random() * 1.2; // 0.3-1.5s delay (roughly 100-500m)
       const loud = clamp(1.2 - dist * 0.7, 0.3, 1); // louder = closer
@@ -1013,7 +1072,7 @@ function updateStorm(dt) {
     }
     stormNextT = 2 + Math.random() * 7; // next strike in 2-9s
   }
-  // flash decay: stormT counts down, the cloud colors ease back to their rain palette
+  // flash decay: stormT counts down, the cloud colours blend back in updateCelestial
   if (stormT > 0) {
     stormT -= dt;
     if (stormT <= 0) {
