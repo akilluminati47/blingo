@@ -2507,8 +2507,9 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
     const carYaw = (rng() < 0.5 ? 0 : Math.PI) + (rng() - 0.5) * 0.1;
     const chw = (truck ? 2.0 : van ? 1.9 : 1.8) / 2 + 0.15, chl = (truck ? 5.4 : van ? 4.8 : 4) / 2 + 0.15;
     // never on a road, never lapping a town landmark (the truck-in-the-Jelly-House bug), and
-    // never into another vehicle already parked or piled up nearby
-    if (!onRoad(cxr, czr, 1) && !inTown(cxr, czr, 2) && carSpotClear(cxr, czr, carYaw, chw, chl, colliders))
+    // never into another vehicle already parked or piled up nearby — checked against every
+    // car the world knows about, not just this chunk's
+    if (!onRoad(cxr, czr, 1) && !inTown(cxr, czr, 2) && carSpotClearAll(cxr, czr, carYaw, chw, chl, colliders))
       makeCar(rng, cxr, czr, group, colliders, { broken: rng() < 0.6, truck, van, rotY: carYaw });
   }
   // barrels leaning against the outside walls
@@ -2773,6 +2774,16 @@ function carSpotClear(x, z, yaw, hw, hl, colliders) {
   }
   return true;
 }
+// the spawn-time clearance a wreck actually needs: every car the WORLD already knows about,
+// not just the chunk currently being built. carSpotClear used to read the chunk-local array
+// only, so a pileup (or a parked house car) never saw wrecks in an already-built neighbour
+// chunk or the town's fixed cars — that's how cars came out fused across the boundary. This
+// checks the live 3×3 chunk set plus the town colliders instead; pass the building chunk's
+// own array as `extra` too, since it isn't registered in `chunks` until it finishes building.
+function carSpotClearAll(x, z, yaw, hw, hl, extra) {
+  const all = nearbyColliders(x, z);
+  return carSpotClear(x, z, yaw, hw, hl, extra ? extra.concat(all) : all);
+}
 function makePileup(rng, x, z, along, group, colliders) {
   const n = 3 + ((rng() * 3) | 0);
   for (let i = 0; i < n; i++) {
@@ -2788,11 +2799,15 @@ function makePileup(rng, x, z, along, group, colliders) {
     // a wreck half-buried in a shop wall (or another wreck) reads as a bug, not a crash —
     // skip that one and let the pileup be a car lighter. The clearance grows with the
     // silhouette: a car is ~4.4 long (2.4 covers it however it spun), a van 4.8 (2.7),
-    // a truck 5.4 (3.0) — so the longer bodies can never lie into a neighbour.
-    if (!spotClearOf(px, pz, truck ? 3.0 : van ? 2.7 : 2.4, colliders)) continue;
+    // a truck 5.4 (3.0) — so the longer bodies can never lie into a neighbour. The check
+    // reads this chunk's colliders PLUS the world's (3×3 loaded chunks + town): buildChunk
+    // hasn't registered itself in `chunks` yet while it runs, so neither list alone is enough.
+    const worldCols = colliders.concat(nearbyColliders(px, pz));
+    if (!spotClearOf(px, pz, truck ? 3.0 : van ? 2.7 : 2.4, worldCols)) continue;
     // oriented pass on top of the coarse spotClearOf: no wreck lies into another, whether it's
-    // one already dropped in this pileup, the cross-street pileup, or a truck parked by a house
-    if (!carSpotClear(px, pz, rotY, hw, hl, colliders)) continue;
+    // one already dropped in this pileup, the cross-street pileup, a truck parked by a house,
+    // or one of the town's fixed cars
+    if (!carSpotClear(px, pz, rotY, hw, hl, worldCols)) continue;
     makeCar(rng, px, pz, group, colliders, { broken: true, flipped: rng() < 0.3, truck, van, rotY });
   }
 }
