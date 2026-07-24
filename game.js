@@ -2741,7 +2741,7 @@ function buildChunk(cx, cz) {
     // houses keep a wide berth (14m) off every town/landmark rect: a house pad that laps
     // onto a landmark re-grades ground the landmark already built on (floating benches,
     // half-buried statue pads), and its parked truck needs the room too
-    const p = freeSpot(10, 4, 14);
+    const p = freeSpot(10, 6, 14);
     if (p) buildings.push(makeBuilding(rng, p.x, p.z, group, colliders, crateList, pads));
   }
   if (cx === 0 && cz === 0) makeCrate(rng, 4.5, groundHeight(4.5, 5) + 0.02, 5, group, colliders, crateList, false);
@@ -2779,8 +2779,8 @@ function buildChunk(cx, cz) {
   // terrain LAST: every building above has registered its flat pad by now, so the
   // ground mesh (and the road skins riding it) bake those pads into their vertices
   group.add(terrainPlane(CHUNK, CHUNK, 10, 10, ox, oz, grassMat(rng())));
-  if (hasVRoad) group.add(terrainPlane(12.8, CHUNK, 3, 10, ox - 20, oz, roadMat, 0.04));
-  if (hasHRoad) group.add(terrainPlane(CHUNK, 12.8, 10, 3, ox, oz - 17, roadMat, 0.04));
+  if (hasVRoad) group.add(terrainPlane(12.8, CHUNK, 5, 10, ox - 20, oz, roadMat, 0.04));
+  if (hasHRoad) group.add(terrainPlane(CHUNK, 12.8, 10, 5, ox, oz - 17, roadMat, 0.04));
   // dotted yellow centre line between the two lanes, broken well clear of intersections
   for (const vert of [true, false]) {
     if (vert ? !hasVRoad : !hasHRoad) continue;
@@ -3639,9 +3639,9 @@ function buildTown() {
   // sit on transparent void when seen from far away. Sunk slightly below the
   // streamed chunk terrain so the detailed ground draws over it with no z-fighting.
   townGroup.add(terrainPlane(208, 208, 52, 52, 47, 2, grassMat(0.5), -0.15));
-  townGroup.add(terrainPlane(12.8, 208, 3, 52, -20, 2, roadMat, -0.06)); // far copy of the x=-20 road
-  townGroup.add(terrainPlane(12.8, 208, 3, 52, 100, 2, roadMat, -0.06)); // far copy of the x=100 road
-  townGroup.add(terrainPlane(208, 12.8, 52, 3, 47, -17, roadMat, -0.06)); // far copy of the z=-17 road
+  townGroup.add(terrainPlane(12.8, 208, 5, 52, -20, 2, roadMat, -0.06)); // far copy of the x=-20 road
+  townGroup.add(terrainPlane(12.8, 208, 5, 52, 100, 2, roadMat, -0.06)); // far copy of the x=100 road
+  townGroup.add(terrainPlane(208, 12.8, 52, 5, 47, -17, roadMat, -0.06)); // far copy of the z=-17 road
   // main street shops: road z in [-20,-14], shops face it from both sides
   const northNames = ['DINER', 'BAKERY', 'BOOKS', 'TOOLS', 'PIZZA'];
   const southNames = ['MART', 'LIQUOR', 'BARBER', 'TAILOR', 'RADIO'];
