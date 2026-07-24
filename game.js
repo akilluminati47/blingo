@@ -6369,6 +6369,19 @@ function edgeClampedProject(x, y, z) {
   }
   return { x: _edgeFlat.x, y: _edgeFlat.y, visible: true, edge: true };
 }
+// the TRUE horizon line in NDC y for the camera's current pitch: a level point out
+// along the view direction, forced to eye height, projects exactly onto the skyline.
+// y=0 in NDC is only the horizon when the camera is level — pitched up it sinks below
+// screen centre, pitched down it rises above it, and a marker pinned to 0 floats off
+// the ground-meets-sky line it's supposed to ride.
+const _hz = new THREE.Vector3();
+function horizonY() {
+  camera.getWorldDirection(_hz);
+  _hz.multiplyScalar(EDGE_REF).add(camera.position);
+  _hz.y = camera.position.y;
+  _hz.project(camera);
+  return _hz.y;
+}
 function tagEl(key) {
   let t = ptags.get(key);
   if (!t) {
@@ -6411,7 +6424,7 @@ function updatePlayerTags(dt) {
     t.el.classList.toggle('down', a.downed);
     t.el.classList.toggle('landmark', !!a.landmark);
     t.el.classList.toggle('edge', pr.edge);
-    if (a.landmark && pr.y < 0) pr.y = 0;   // landmarks never sink below the horizon — ride the line where ground meets sky
+    if (a.landmark) { const hz = horizonY(); if (pr.y < hz) pr.y = hz; }   // landmarks never sink below the true skyline — whatever the pitch, they ride the ground-meets-sky line
     t.el.style.left = ((pr.x * 0.5 + 0.5) * innerWidth) + 'px';
     t.el.style.top = ((-pr.y * 0.5 + 0.5) * innerHeight) + 'px';
     // chevron stays upright — no rotation, no compass-needle pointing, just a signpost at the bearing
@@ -6428,7 +6441,7 @@ function updatePlayerTags(dt) {
     const near = a.landmark ? (pr.edge ? 1 : lmFade) : (pr.edge ? 1 : clamp((dist - 3) / 4, 0, 1));
     t.op = lerp(t.op, a.landmark ? near : 0.35 + 0.65 * near, k);
     t.el.style.opacity = t.op.toFixed(3);
-    const scale = pr.edge ? 0.8 : clamp(26 / Math.max(dist, 1), 0.55, 1.5);   // perspective, roughly
+    const scale = pr.edge ? 1.2 : clamp(26 / Math.max(dist, 1), a.landmark ? 0.8 : 0.55, 1.5);   // perspective, roughly — landmarks keep a readable floor, edge markers stay big on the horizon
     t.el.style.transform = `translate(-50%,-100%) scale(${scale.toFixed(3)})`;
   }
   for (const [key, t] of ptags) if (!seen.has(key)) { t.el.remove(); ptags.delete(key); }
