@@ -11329,6 +11329,15 @@ function spawnPeckers() {
   }
   if (!cands.length) return;
   const zz = cands[(Math.random() * cands.length) | 0];
+  // crows are drawn to rot — a zombie they pick over gets the rot roll if it isn't
+  // already carrying the Rotten One's marks from spawn
+  if (!zz.rotE && !zz.rotR && !zz.rotB) {
+    const re = Math.random() < 0.28, rr = Math.random() < 0.26, rb = Math.random() < 0.3;
+    if (re || rr || rb) {
+      addRotGore(zz.blob, { hangEye: re, ribs: rr, belly: rb, eyeSide: Math.random() < 0.5 ? 1 : -1 });
+      zz.rotE = re; zz.rotR = rr; zz.rotB = rb;
+    }
+  }
   const n = 1 + (Math.random() < 0.45 ? 1 : 0);
   for (let i = 0; i < n; i++) {
     // the pair drop either side of the meal, never both onto the same patch of it
