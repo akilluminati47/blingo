@@ -38,6 +38,7 @@
       "index.html",
       "game.js",
       "themes.js",
+      "policies.js",
       "libs/**",
       "policies/**",
       "icons/**",

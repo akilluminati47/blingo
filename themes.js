@@ -4,7 +4,7 @@
 // compact packed data (no external .mid files any more), plus the shared chip-voice synth.
 //
 // Two consumers import this:
-//   * /policies  -- plays a song straight through ONCE, closing sting chord and all ("as-is").
+//   * the policies overlay  -- plays a song straight through ONCE, closing sting chord and all ("as-is").
 //   * the game   -- the SAME tracks as the run in-game music: the body run twice (the second
 //                   pass thickened with an octave lead), then looped, with the sting dropped.
 //

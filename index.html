@@ -664,6 +664,88 @@
     #btnEmote { left:calc(20px + env(safe-area-inset-left)); bottom:calc(222px + env(safe-area-inset-bottom)); font-size:13px; }
     #btnPause { left:calc(20px + env(safe-area-inset-left)); bottom:calc(276px + env(safe-area-inset-bottom)); font-size:11px; }
   }
+
+  /* ---------- policies overlay (cousin themes + terms, rolled into the main page) ---------- */
+  #policiesscreen { position:fixed; inset:0; z-index:40; overflow-y:auto; touch-action:pan-y;
+    color:#eef1f5; text-align:center; -webkit-font-smoothing:antialiased;
+    background:radial-gradient(120% 80% at 50% -10%, #14181f 0%, #0a0c10 60%), #0a0c10;
+    padding:calc(22px + env(safe-area-inset-top)) 18px calc(40px + env(safe-area-inset-bottom)); }
+  .pwrap { max-width:760px; margin:0 auto; }
+  .pmark { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-weight:700; font-size:clamp(28px,7vw,46px); letter-spacing:1px; line-height:1.06;
+    margin:0 auto 26px; max-width:16ch; text-shadow:0 0 26px rgba(255,160,60,.35); }
+  .pgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin:24px 0 8px; }
+  .ptile { --c:#fff; position:relative; background:rgba(255,255,255,.045); border:2px solid rgba(255,255,255,.13);
+    border-radius:16px; padding:12px 8px 14px; text-align:center; cursor:pointer; color:inherit;
+    font:inherit; transition:transform .16s ease,border-color .18s,background .18s,box-shadow .18s; }
+  .ptile:hover { transform:translateY(-3px); background:rgba(255,255,255,.07); }
+  .ptile.navfocus { outline:none; border-color:#ff8c42; box-shadow:0 0 20px -4px #ff8c42; }
+  .ptile.playing { border-color:var(--c); background:rgba(255,255,255,.07); box-shadow:0 0 26px -4px var(--c); }
+  .pblobcv { width:112px; height:112px; max-width:82%; display:block; margin:0 auto;
+    filter:blur(3.5px) brightness(.62) saturate(.85); transition:filter .4s ease; }
+  .ptile.playing .pblobcv { filter:none; }
+  .ptile.loading .pblobcv { filter:blur(2px) brightness(.8); }
+  .pnm { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-weight:700; font-size:16px; margin-top:2px; }
+  .pnow { margin:14px 0 4px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.13);
+    border-radius:14px; padding:14px 16px; display:flex; align-items:center; gap:14px; min-height:70px; text-align:left; }
+  .pnow.idle .peq, .pnow.idle .pnowmeta { opacity:.45; }
+  .peq { display:flex; align-items:flex-end; gap:3px; height:26px; width:30px; flex:0 0 auto; }
+  .peq span { flex:1; background:var(--c,#6fd8ff); border-radius:2px; height:30%; }
+  .pnow.playing .peq span { animation:peq .9s ease-in-out infinite; }
+  .pnow.playing .peq span:nth-child(2) { animation-delay:.2s; }
+  .pnow.playing .peq span:nth-child(3) { animation-delay:.45s; }
+  .pnow.playing .peq span:nth-child(4) { animation-delay:.15s; }
+  @keyframes peq { 0%,100% { height:22%; } 50% { height:100%; } }
+  .pnowmid { flex:1; min-width:0; }
+  .pnowmeta { display:flex; justify-content:space-between; gap:10px; font-size:12px; color:#98a2b0; margin-bottom:7px; }
+  .pnowmeta b { color:#eef1f5; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-weight:700; letter-spacing:.5px; }
+  .pbar { height:7px; background:rgba(255,255,255,.1); border-radius:6px; position:relative;
+    cursor:pointer; touch-action:none; }
+  .pbar::before { content:''; position:absolute; left:0; right:0; top:-9px; bottom:-9px; }
+  .pbar>i { position:relative; display:block; height:100%; width:0; background:var(--c,#6fd8ff);
+    border-radius:6px; transition:width .12s linear; }
+  #pnowHandle { position:absolute; right:-8px; top:50%; width:16px; height:16px; margin-top:-8px;
+    border-radius:50%; background:var(--c,#6fd8ff); border:2px solid rgba(255,255,255,.9);
+    box-shadow:0 0 10px var(--c,#6fd8ff),0 1px 3px rgba(0,0,0,.55); cursor:grab; transition:transform .12s ease; }
+  #pnowHandle:hover, .pnow.scrub #pnowHandle { transform:scale(1.18); cursor:grabbing; }
+  .pnow.scrub #pnowFill { transition:none; }
+  .pnow:not(.armed) #pnowHandle { display:none; }
+  .pvol { margin-top:10px; }
+  .ppips { display:flex; gap:4px; }
+  .ppip { flex:1; height:10px; border-radius:3px; background:rgba(255,255,255,.13); cursor:pointer;
+    transition:background .1s,box-shadow .1s; }
+  .ppip.on { background:var(--c,#6fd8ff); box-shadow:0 0 6px var(--c,#6fd8ff); }
+  .ppolicies { margin-top:34px; display:grid; gap:16px; text-align:left; }
+  .pdoc { background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.13); border-radius:16px; padding:18px 20px; }
+  .pdoc h2 { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-size:clamp(26px,6vw,36px); line-height:1.05; margin:0 0 4px; letter-spacing:.5px; }
+  .pdoc .pstamp { color:#98a2b0; font-size:11px; margin:0 0 12px; letter-spacing:.4px; }
+  .pdoc ul { margin:0; padding-left:18px; }
+  .pdoc li { margin:8px 0; line-height:1.55; font-size:14px; color:#d7dde5; }
+  .pdoc li b { color:#fff; }
+  .pdoc a { color:#6fd8ff; text-decoration:none; border-bottom:1px solid rgba(111,216,255,.35); }
+  .pdoc a:hover { border-bottom-color:#6fd8ff; }
+  .pret { display:flex; justify-content:center; margin-top:32px; }
+  .psignboard { position:relative; display:inline-block; padding-bottom:15px; }
+  .psignboard::before, .psignboard::after { content:''; position:absolute; bottom:0; width:8px; height:17px;
+    background:linear-gradient(#6a4820,#432c14); border-radius:2px; z-index:-1; }
+  .psignboard::before { left:24%; }
+  .psignboard::after { right:24%; }
+  .pchilisign { position:relative; cursor:pointer; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-weight:700; letter-spacing:3px; text-transform:uppercase; font-size:clamp(15px,4.4vw,21px); color:#ffe2b0;
+    background:#421511; border:0; border-radius:4px; padding:15px 32px;
+    box-shadow:0 5px 0 #2a0d0a,0 9px 16px rgba(0,0,0,.5); transition:color .18s,box-shadow .18s; }
+  .pchilisign::before { content:''; position:absolute; inset:6px; border:2px solid rgba(255,226,176,.55);
+    border-radius:2px; pointer-events:none; transition:border-color .18s; }
+  .pchilisign:hover, .pchilisign.navfocus, .pchilisign:focus-visible { color:#fff; outline:none;
+    box-shadow:0 0 26px -1px #ff8c42,0 5px 0 #2a0d0a,0 9px 16px rgba(0,0,0,.5); }
+  .pchilisign:hover::before, .pchilisign.navfocus::before, .pchilisign:focus-visible::before { border-color:#ff8c42; }
+  .pcredit { color:#98a2b0; font-size:12px; line-height:1.8; margin:18px auto 0; max-width:46ch; }
+  .pcredit a { color:#ff8c42; text-decoration:none; border-bottom:1px solid rgba(255,140,66,.4); font-weight:700; }
+  .pcredit a:hover { color:#ffd24a; border-bottom-color:#ffd24a; }
+  @media(max-width:420px){ .pgrid { grid-template-columns:repeat(2,1fr); } }
 </style>
 </head>
 <body>
@@ -770,7 +852,72 @@
     <button class="modebtn" id="playbtn">SINGLE PLAYER</button>
     <button class="modebtn" id="mpbtn">MULTIPLAYER</button>
   </div>
-  <p id="policieslink"><a href="policies/">Cousin Themes ♪ · Terms &amp; Privacy</a></p>
+  <p id="policieslink"><a href="#policies" id="policiesopen">Cousin Themes ♪ · Terms &amp; Privacy</a></p>
+</div>
+
+<!-- the policies overlay: cousin themes player + terms/privacy/ownership, rolled into the
+     main page so it works identically on the web and in the desktop app (no navigation).
+     The TO THE BLOCK sign closes it and lands you back on the picker. -->
+<div id="policiesscreen" class="hidden">
+  <div class="pwrap">
+    <h1 class="pmark">Cousin Themes and Policies</h1>
+
+    <div class="pgrid" id="pgrid" role="group" aria-label="Cousin themes"></div>
+
+    <div class="pnow idle" id="pnow" style="--c:#6fd8ff">
+      <div class="peq" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <div class="pnowmid">
+        <div class="pnowmeta"><b id="pnowName">Pick a cousin</b><span id="pnowInfo">live MIDI player</span></div>
+        <div class="pbar" id="pscrub" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="pnowFill"><span id="pnowHandle" aria-hidden="true"></span></i></div>
+        <div class="pvol"><div class="ppips" id="ppips" role="group" aria-label="Volume"></div></div>
+      </div>
+    </div>
+
+    <section class="ppolicies">
+      <div class="pdoc">
+        <h2>Terms of Use</h2>
+        <p class="pstamp">Effective 21 Jul 2026</p>
+        <ul>
+          <li>Blingo is a <b>free, ad-free game</b> made for fun and offered <b>as-is</b>, with no warranties. Play at your own risk of having a good time.</li>
+          <li>Please <b>play fair</b>: don't try to break, overload, or exploit the game or the peer-to-peer connections other players rely on, and don't use it for anything unlawful.</li>
+          <li>In multiplayer you're <b>responsible for your own conduct</b> and for who you share a lobby code with.</li>
+          <li>It's a hobby project, so we may <b>update, change, or take it offline</b> at any time; these terms may change with it.</li>
+        </ul>
+      </div>
+
+      <div class="pdoc">
+        <h2>Privacy Policy</h2>
+        <p class="pstamp">Effective 21 Jul 2026</p>
+        <ul>
+          <li><b>We don't collect anything.</b> No accounts, no ads, no analytics, no tracking cookies. There's no server logging your play.</li>
+          <li>Your <b>settings and progress</b> (audio levels, your prestige streak &amp; best time, and a random multiplayer id) are saved only <b>on your device</b> (browser localStorage on the web, the app data folder on desktop), and never sent to us.</li>
+          <li><b>Multiplayer is peer-to-peer</b> (PeerJS). To connect a lobby, a code is registered on the public PeerJS broker and your browser then exchanges connection info and live gameplay data <b>directly with the other players</b>. Like any direct connection, that means those peers can see your IP address. We run no game server and store none of it.</li>
+          <li>This game loads a font and the PeerJS library from <b>third-party CDNs</b>, which see your IP as part of serving those files. That's the extent of it.</li>
+          <li>Because we hold no data, there's nothing for us to export or delete; clearing your browser storage (or the app's data folder) wipes everything Blingo ever saved.</li>
+        </ul>
+      </div>
+
+      <div class="pdoc">
+        <h2>Ownership &amp; Copyright</h2>
+        <p class="pstamp">Effective 23 Jul 2026</p>
+        <ul>
+          <li>BLINGO — the name, the six cousins (Blingo, Blazo, Blizzy, Blomba, Bloopy, Blondie), Bluga, the story, artwork, music, and all code — is an <b>original work created and owned by <a href="https://github.com/akilluminati47" target="_blank" rel="noopener noreferrer">akilluminati47</a> (AK &amp; Co.)</b>. Copyright &copy; 2026, all rights reserved.</li>
+          <li>The <b>source code is visible for transparency</b>, but it is not open source: please don't copy, rehost, resell, or build derivative games from it without written permission.</li>
+          <li>The official ways to play are <b>this website</b> (<a href="https://blingo.pages.dev" target="_blank" rel="noopener noreferrer">blingo.pages.dev</a>) and the <b>standalone Windows builds</b> on <a href="https://github.com/akilluminati47/blingo/releases/latest" target="_blank" rel="noopener noreferrer">GitHub Releases</a>. Anything else claiming to be BLINGO isn't from us.</li>
+        </ul>
+      </div>
+    </section>
+
+    <div class="pret">
+      <div class="psignboard">
+        <button id="ptoblock" class="pchilisign" title="Return to the block">TO THE BLOCK</button>
+      </div>
+    </div>
+    <p class="pcredit">BLINGO is an original game created by
+      <a href="https://guns.lol/akilluminati47" target="_blank" rel="noopener noreferrer">AK &amp; Co.</a>
+      Thanks for playing our game!<br>
+      &copy; 2026 akilluminati47 (AK &amp; Co.). All rights reserved.</p>
+  </div>
 </div>
 
 <div class="screen hidden" id="lobbyscreen">
@@ -842,5 +989,6 @@
 </div>
 
 <script type="module" src="game.js"></script>
+<script type="module" src="policies.js"></script>
 </body>
 </html>

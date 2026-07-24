@@ -42,7 +42,7 @@ function serve() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       let urlPath = decodeURIComponent(req.url.split('?')[0]);
-      if (urlPath === '/') urlPath = '/index.html';
+      if (urlPath.endsWith('/')) urlPath += 'index.html';
       const file = path.normalize(path.join(ROOT, urlPath));
       if (!file.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
       fs.readFile(file, (err, data) => {
