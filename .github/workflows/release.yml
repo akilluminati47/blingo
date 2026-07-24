@@ -134,17 +134,16 @@ jobs:
           V: ${{ needs.bump.outputs.version }}
         run: |
           echo "$ANDROID_KEYSTORE_B64" | base64 -d > /tmp/ks.p12
-          keytool -importkeystore -noprompt \
-            -srckeystore /tmp/ks.p12 -srcstoretype PKCS12 -srcstorepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -destkeystore /tmp/ks.jks -deststoretype JKS -deststorepass "$ANDROID_KEYSTORE_PASSWORD" \
-            -destkeypass "$ANDROID_KEY_PASSWORD"
+          echo "decoded p12: $(stat -c%s /tmp/ks.p12) bytes, sha256 $(sha256sum /tmp/ks.p12 | cut -d' ' -f1)"
+          openssl pkcs12 -info -in /tmp/ks.p12 -passin "pass:$ANDROID_KEYSTORE_PASSWORD" -nokeys -noout \
+            && echo "openssl verify OK"
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/zipalign" -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk /tmp/aligned.apk
-          "$BT/apksigner" sign --ks /tmp/ks.jks --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+          "$BT/apksigner" sign --ks /tmp/ks.p12 --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
             --key-pass "pass:$ANDROID_KEY_PASSWORD" --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --out "BLINGO-$V-android.apk" /tmp/aligned.apk
           "$BT/apksigner" verify "BLINGO-$V-android.apk" && echo "APK signature OK"
-          rm -f /tmp/ks.p12 /tmp/ks.jks
+          rm -f /tmp/ks.p12
 
       - name: Upload APK
         env:
