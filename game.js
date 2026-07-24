@@ -6238,19 +6238,35 @@ function trackedActors() {
         x: z.pos.x, y: z.blob.root.position.y, z: z.pos.z, downed: false, boss: false, mini: true, scale: z.scale });
     }
   }
-  // the standing "way home" marker — always tracked like everyone else, so a run out
-  // toward a distant cousin's beacon (Blizzy alone can land 150+ units out) still leaves
-  // a fixed, findable bearing back to town once the road grid stops being any help.
-  out.push({ key: 'landmark', label: LANDMARK.label, color: LANDMARK.color,
-    x: LANDMARK.x, y: groundHeight(LANDMARK.x, LANDMARK.z) + 11, z: LANDMARK.z,
-    downed: false, boss: false, landmark: true });
-  // grandma's own marker only exists once there's somewhere to point: the trek only
-  // becomes a real destination once the Rotten One falls and spawnJellyMarks stands the
-  // real beacon up. Same orange as her actual pillar, so the chevron and the thing it's
-  // promising are visibly the same light.
+  // Bank landmark: hidden until the last unrecruited cousin beacon sinks below the
+  // curved horizon — then fades in so it's never spammy. Once the Two Horned One aggros
+  // his own pillar and chevron take over, so the bank marker is no longer needed.
+  const bossAggro = bossState.spawned && bossState.beamFade;
+  if (!bossAggro && companions.length > 0) {
+    let anyBeaconUp = false;
+    const unrecruited = companions.filter(c => !c.recruited);
+    if (unrecruited.length > 0) {
+      for (const c of unrecruited) {
+        const by = groundHeight(c.pos.x, c.pos.z) + BEACON_Y;
+        _edgeReal.set(c.pos.x, by - curveDrop(c.pos.x, c.pos.z), c.pos.z).project(camera);
+        if (_edgeReal.z <= 1 && _edgeReal.y >= 0) { anyBeaconUp = true; break; }
+      }
+    }
+    if (!anyBeaconUp) {
+      out.push({ key: 'landmark', label: LANDMARK.label, color: LANDMARK.color,
+        x: LANDMARK.x, y: groundHeight(LANDMARK.x, LANDMARK.z) + 11, z: LANDMARK.z,
+        downed: false, boss: false, landmark: true });
+    }
+  }
+  // HOME marker: only fades in once the jelly-house beacon has sunk below the curve —
+  // same visibility rule as the cousin beacons for the bank landmark.
   if (jelly.beacon) {
-    out.push({ key: 'jellyhouse', label: 'HOME', color: 0xffa040,
-      x: JELLY.x, y: jelly.gy + 60, z: JELLY.z, downed: false, boss: false, landmark: true });
+    const jby = jelly.gy + 60;
+    _edgeReal.set(JELLY.x, jby - curveDrop(JELLY.x, JELLY.z), JELLY.z).project(camera);
+    if (_edgeReal.z > 1 || _edgeReal.y < 0) {
+      out.push({ key: 'jellyhouse', label: 'HOME', color: 0xffa040,
+        x: JELLY.x, y: jelly.gy + 60, z: JELLY.z, downed: false, boss: false, landmark: true });
+    }
   }
   return out;
 }
