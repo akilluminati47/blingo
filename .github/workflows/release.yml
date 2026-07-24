@@ -26,14 +26,20 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Bump patch version and tag
+      - name: Bump version and tag
         id: bump
         shell: pwsh
         run: |
+          # decimal rollover: 0.0.9 -> 0.1.0, 0.9.9 -> 1.0.0 (no double digits per segment)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          npm version patch --no-git-tag-version
-          $v = node -p "require('./package.json').version"
+          $p = (node -p "require('./package.json').version").Split('.')
+          $major = [int]$p[0]; $minor = [int]$p[1]; $patch = [int]$p[2]
+          $patch++
+          if ($patch -gt 9) { $patch = 0; $minor++
+            if ($minor -gt 9) { $minor = 0; $major++ } }
+          $v = "$major.$minor.$patch"
+          npm version $v --no-git-tag-version --allow-same-version
           git add package.json package-lock.json
           git commit -m "Release v$v [skip ci]"
           git tag "v$v"

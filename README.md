@@ -23,7 +23,7 @@ Prefer a standalone? Grab the latest Windows build from [**GitHub Releases**](ht
 
 The desktop app is the same game, wrapped in Electron with the Chromium/ANGLE GPU stack tuned for desktop play: GPU blocklist ignored, GPU rasterization + zero-copy forced on, vsync/frame-rate cap lifted, and no browser tab throttling — your frame never freezes mid-run. Steam integration (overlay/achievements via steamworks.js) is wired in and activates when a Steam App ID ships with the build.
 
-Every push to `main` bumps the version by 0.0.1, rebuilds the app in GitHub Actions, and replaces the latest release — so the download is always current with the website.
+Every push to `main` increments the version (0.0.9 → 0.1.0, 0.9.9 → 1.0.0), rebuilds the app in GitHub Actions, and replaces the latest release — so the download is always current with the website.
 
 ---
 
