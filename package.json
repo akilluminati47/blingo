@@ -58,7 +58,12 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "BLINGO"
+      "shortcutName": "BLINGO",
+      "license": "LICENSE",
+      "installerIcon": "build/installerIcon.ico",
+      "uninstallerIcon": "build/installerIcon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallDisplayName": "BLINGO"
     },
     "portable": {
       "artifactName": "BLINGO-${version}-portable.exe"

@@ -18,7 +18,7 @@ The website is the home of BLINGO — the fastest way to play and always the fre
 
 Prefer a standalone? Grab the latest Windows build from [**GitHub Releases**](https://github.com/akilluminati47/blingo/releases/latest):
 
-- **Setup .exe** — installer with desktop shortcut (recommended)
+- **Setup .exe** — guided installer: license page, install-location choice, desktop shortcut offered (recommended)
 - **Portable .exe** — single file, no install
 
 The desktop app is the same game, wrapped in Electron with the Chromium/ANGLE GPU stack tuned for desktop play: GPU blocklist ignored, GPU rasterization + zero-copy forced on, vsync/frame-rate cap lifted, and no browser tab throttling — your frame never freezes mid-run. Steam integration (overlay/achievements via steamworks.js) is wired in and activates when a Steam App ID ships with the build.

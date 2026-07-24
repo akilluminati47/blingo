@@ -1709,7 +1709,7 @@ const MELEE_REST = -2.45;
 // side = horizontal roundhouse carried on rotation.z (bat, katana), diag = a high-out
 // cross-body slash (machete), over = the big overhead chop (sledge, axe — heaviest arc).
 const SWING_STYLE = {
-  pipe: 'jab', jelly: 'jab', chili: 'jab',
+  pipe: 'chop', jelly: 'jab', chili: 'jab',
   bat: 'side', katana: 'side',
   machete: 'diag',
   sledge: 'over', axe: 'over',
@@ -1718,11 +1718,11 @@ const SWING_STYLE = {
 // z = out-to-side tilt (mirrored for the lefty). rest = where it parks after a swing.
 // The sledge stays off the list — too heavy for anything but the ground-drag carry.
 const MELEE_HOLD = {
-  bat:     { x: -2.65, z: 0.5,  rest: -2.85 },  // slung over the shoulder, slugger style
-  katana:  { x: -0.95, z: 0.28, rest: -2.25 },  // low at the hip, blade trailing back
-  machete: { x: -0.85, z: 0.15, rest: -2.1 },   // down at the side, tip forward
-  pipe:    { x: -1.45, z: 0.2,  rest: -2.15 },  // half-raised mid carry
-  axe:     { x: -1.85, z: 0.35, rest: -2.6 },   // head up at the shoulder
+  bat:     { x: -2.35, z: 0, rest: -2.6 },   // upright beside the head, clear of it
+  katana:  { x: -0.95, z: 0, rest: -2.25 },  // low at the hip, blade straight down
+  machete: { x: -0.85, z: 0, rest: -2.1 },   // down at the side, straight
+  pipe:    { x: -1.45, z: 0, rest: -2.15 },  // half-raised mid carry
+  axe:     { x: -1.85, z: 0, rest: -2.6 },   // head up at the shoulder
 };
 // how long a fists chain stays live. Comfortably wider than the 0.4s fists rpm gap, so
 // held-down punching always chains, but a real pause drops you back to a 6 opener.
