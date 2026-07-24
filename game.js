@@ -1783,20 +1783,25 @@ function buildMeleeMesh(g, id, c) {
     const collar = cyl(0.06, 0.06, 0.08, 0x3a3d43); collar.rotation.x = Math.PI / 2; collar.position.set(0, 0, -0.56); g.add(collar);
     g.add(shaftZ(0.2, 0.047, 0.047, 0x2a2a2a, 0.08));
   } else if (id === 'axe') {
-    // Blazo's fire axe, straight off the reference: a pale hickory haft with the red
-    // rubber grip sleeve and a flared pommel, then the bright red head — flat wide top,
-    // the blade toe drooping at the front with the steel edge under it, and the silver
-    // poll face standing on the back
-    g.add(shaftZ(0.88, 0.034, 0.046, 0xe8d8b0));                       // pale hickory
-    g.add(shaftZ(0.26, 0.048, 0.052, c, 0.05));                        // red rubber grip sleeve
-    const knob = cyl(0.05, 0.057, 0.06, c); knob.rotation.x = Math.PI / 2; knob.position.set(0, 0, 0.3); g.add(knob);
-    // the head: red wedge, flat across the top
-    const head = box(0.07, 0.15, 0.28, c); head.position.set(0, 0.03, -0.74); g.add(head);
-    // the blade toe droops at the front, the steel edge riding under it
-    const toe = box(0.065, 0.13, 0.1, c); toe.position.set(0, -0.06, -0.87); toe.rotation.x = 0.25; g.add(toe);
-    const edge = box(0.06, 0.04, 0.11, 0xd8dde5); edge.position.set(0, -0.14, -0.87); edge.rotation.x = 0.4; g.add(edge);
-    // the silver poll face on the back of the head
-    const poll = box(0.075, 0.16, 0.05, 0xd8dde5); poll.position.set(0, 0.03, -0.59); g.add(poll);
+    // Blazo's fire axe, off the 3D reference: a plain brown wood haft with a slight end
+    // knob, then the complex head — a red wedge body with a flat crown, the blade
+    // flaring down-forward in two plates, the silver cutting edge curling under the
+    // sweep in two more, and the tapered pick spike off the back
+    g.add(shaftZ(0.88, 0.034, 0.046, 0x8a6b42));                       // plain wood haft
+    const knob = cyl(0.05, 0.056, 0.06, 0x7a5a36); knob.rotation.x = Math.PI / 2; knob.position.set(0, 0, 0.3); g.add(knob);
+    // the wedge body riding the haft's end, flat crown cap on top
+    const body = box(0.085, 0.15, 0.2, c); body.position.set(0, 0.05, -0.7); g.add(body);
+    const crown = box(0.08, 0.05, 0.22, c); crown.position.set(0, 0.13, -0.71); g.add(crown);
+    // the blade: two red plates flaring down-forward off the body
+    const flare1 = box(0.075, 0.16, 0.07, c); flare1.position.set(0, -0.04, -0.82); flare1.rotation.x = 0.18; g.add(flare1);
+    const flare2 = box(0.065, 0.14, 0.055, c); flare2.position.set(0, -0.17, -0.85); flare2.rotation.x = 0.42; g.add(flare2);
+    // the silver cutting edge curling under the sweep
+    const edge1 = box(0.06, 0.045, 0.05, 0xd8dde5); edge1.position.set(0, -0.27, -0.85); edge1.rotation.x = 0.6; g.add(edge1);
+    const edge2 = box(0.055, 0.05, 0.045, 0xd8dde5); edge2.position.set(0, -0.33, -0.8); edge2.rotation.x = 1.0; g.add(edge2);
+    // the pick: red base off the body, then the tapered dark spike
+    const pickBase = box(0.06, 0.07, 0.08, c); pickBase.position.set(0, 0.08, -0.57); g.add(pickBase);
+    const pick = box(0.04, 0.045, 0.14, 0x3f434a); pick.position.set(0, 0.09, -0.47); pick.rotation.x = -0.12; g.add(pick);
+    const pickTip = box(0.025, 0.03, 0.06, 0x3f434a); pickTip.position.set(0, 0.1, -0.39); pickTip.rotation.x = -0.12; g.add(pickTip);
   }
 }
 
