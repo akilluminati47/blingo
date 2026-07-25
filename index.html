@@ -1057,38 +1057,46 @@
     "find them, recruit them, fight together.",
     "Loot the glowing crates for guns & ammo."
   ];
+  const LUCK  = "Good Luck!";
 
   const gEl = document.querySelector('#typelore .gold');
   const wEl = document.querySelector('#typelore .white');
   if (!gEl || !wEl) return;
 
-  const TYPE = 42, WIPE = 4, HOLD = 3800, BLANK = 700;
-  let gText = GOLD.join('\n'), wText = WHITE.join('\n');
+  const TYPE = 42, WIPE = 4, HOLD = 7600, BLANK = 900, LUCK_TYPE = 120;
+  const gText = GOLD.join('\n'), wText = WHITE.join('\n');
 
-  function type(el, text, i, cb) {
+  function type(el, text, speed, i, cb) {
+    i = i || 0;
     if (i > text.length) { cb(); return; }
     el.textContent = text.slice(0, i);
-    setTimeout(() => type(el, text, i + 1, cb), TYPE);
+    setTimeout(function() { type(el, text, speed, i + 1, cb); }, speed);
   }
   function wipe(el, len, cb) {
     if (len <= 0) { el.textContent = ''; cb(); return; }
-    el.textContent = el.textContent.slice(0, -1);
-    setTimeout(() => wipe(el, len - 1, cb), WIPE);
+    el.textContent = String(el.textContent || '').slice(0, -1);
+    setTimeout(function() { wipe(el, len - 1, cb); }, WIPE);
   }
   function pause(ms, cb) { setTimeout(cb, ms); }
 
   function cycle() {
     gEl.textContent = ''; wEl.textContent = '';
-    // Type gold lines
-    type(gEl, gText, 0, () => {
-      pause(400, () => {
-        // Type white lines
-        type(wEl, wText, 0, () => {
-          pause(HOLD, () => {
-            // Wipe white first, then gold
-            wipe(wEl, wText.length, () => {
-              wipe(gEl, gText.length, () => {
-                pause(BLANK, cycle);
+    type(gEl, gText, TYPE, 0, function() {
+      pause(400, function() {
+        type(wEl, wText, TYPE, 0, function() {
+          pause(HOLD, function() {
+            wipe(wEl, wText.length, function() {
+              wipe(gEl, gText.length, function() {
+                // type Good Luck! as white, larger, slower
+                wEl.style.fontSize = '20px';
+                type(wEl, LUCK, LUCK_TYPE, 0, function() {
+                  pause(HOLD, function() {
+                    wipe(wEl, LUCK.length, function() {
+                      wEl.style.fontSize = '';
+                      pause(BLANK, cycle);
+                    });
+                  });
+                });
               });
             });
           });
