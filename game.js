@@ -11576,8 +11576,8 @@ function buildCrow(x, y, z, roost) {
     const roll = new THREE.Group(); piv.add(roll);
     const inner = new THREE.Mesh(SPHERE, mat(blk)); inner.scale.set(0.28, 0.022, 0.18); inner.position.x = 0.28 * sgn;
     roll.add(inner);
-    const tip = new THREE.Group(); tip.position.set(0.35 * sgn, 0, 0);
-    const outer = new THREE.Mesh(SPHERE, mat(blk)); outer.scale.set(0.12, 0.016, 0.14); outer.position.set(0.10 * sgn, 0, -0.02);
+    const tip = new THREE.Group(); tip.position.set(0.40 * sgn, 0, 0);
+    const outer = new THREE.Mesh(SPHERE, mat(blk)); outer.scale.set(0.14, 0.014, 0.10); outer.position.set(0.12 * sgn, 0, -0.01);
     tip.add(outer);
     for (let f = 0; f < 3; f++) { // primary feather fingers on the trailing edge
       const fe = box(0.06, 0.035, 0.18, blk);
