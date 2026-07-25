@@ -15,7 +15,8 @@ mkdirSync(OUT, { recursive: true });
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
-  '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon',
+  '.css': 'text/css', '.png': 'image/png',   '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4',
   '.jpg': 'image/jpeg', '.json': 'application/json', '.webmanifest': 'application/json',
   '.wasm': 'application/wasm',
 };
