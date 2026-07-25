@@ -14019,7 +14019,7 @@ window.__dbg = {
   // cutscene director — direct references so console scripts can destructure freely
   renderer, scene, wxSet, COUSINS, buildBlob, spawnZombie,
   skyDome, skyDomes, cloudDome, hemi, moon, addRotGore,
-  mat, SPHERE, BOX, bossState,
+  mat, SPHERE, BOX, bossState, THREE,
 };
 
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------
