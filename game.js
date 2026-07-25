@@ -3588,11 +3588,11 @@ function buildChurchyard(rng) {
   }
   const gshape = new THREE.Shape();
   gshape.moveTo(-w / 2, 0); gshape.lineTo(w / 2, 0); gshape.lineTo(0, rh); gshape.closePath();
-  const ggeo = new THREE.ShapeGeometry(gshape);
-  const gmat = new THREE.MeshLambertMaterial({ color: 0x4a4038, side: THREE.DoubleSide });
+  const ggeo = new THREE.ExtrudeGeometry(gshape, { depth: 0.28, bevelEnabled: false });
+  const gmat = mat(0x6b6a62);
   for (const s of [-1, 1]) {
     const gable = new THREE.Mesh(ggeo, gmat);
-    gable.position.set(cx, y0 + h - 0.05, cz + s * d / 2);
+    gable.position.set(cx, y0 + h - 0.05, cz + s * (d / 2 - 0.14));
     townGroup.add(gable);
   }
   roofSlope(townColliders, cx, y0 + h - 0.05, cz, 'z', d / 2 + 0.45, w / 2 + 0.5, rh); // scalable nave roof
