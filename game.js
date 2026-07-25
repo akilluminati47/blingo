@@ -2086,11 +2086,13 @@ function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly 
     const pit = ball(0.06, 0xa84a5e); pit.position.set(0.16 * es, 0.05, 0.2); // the soft back of the hole
     blob.head.add(track(pit));
     const hang = new THREE.Group(); hang.position.set(0.16 * es, 0.0, 0.24);
-    const stalk = cyl(0.015, 0.025, 0.42, 0x8a2430, 5);
-    stalk.position.set(0, -0.18, 0.02); stalk.rotation.x = 0.18;
+    const stalkLen = 0.22 + Math.random() * 0.30; // some short, some long
+    const stalk = cyl(0.015, 0.025, stalkLen, 0x8a2430, 5);
+    stalk.position.set(0, -stalkLen * 0.42, 0.02); stalk.rotation.x = 0.18;
     hang.add(track(stalk));
-    const eyeball = ball(0.11, 0xe8e4da); eyeball.position.set(0, -0.40, 0.04); hang.add(track(eyeball));
-    const pupil = ball(0.05, 0x7a1010); pupil.position.set(0, -0.41, 0.12); hang.add(track(pupil));
+    const eyeDrop = stalkLen * 0.86;
+    const eyeball = ball(0.11, 0xe8e4da); eyeball.position.set(0, -eyeDrop, 0.04); hang.add(track(eyeball));
+    const pupil = ball(0.05, 0x7a1010); pupil.position.set(0, -eyeDrop - 0.01, 0.12); hang.add(track(pupil));
     blob.head.add(hang);
     blob.hangEye = hang;
   }
