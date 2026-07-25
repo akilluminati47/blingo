@@ -338,13 +338,17 @@ function navGrid(){
   const pdownBtns = [...document.querySelectorAll('.pdown-btn:not(.pdown-loading)')].filter(el => el.offsetParent !== null);
   const ghbadge = document.querySelector('.pdown-ghbadge');
   const ptoblock = document.getElementById('ptoblock');
-  return [
-    ptiles,
-    ppips,
-    pdownBtns,
-    ...(ghbadge && ghbadge.offsetParent !== null ? [[ghbadge]] : []),
-    ...(ptoblock && ptoblock.offsetParent !== null ? [[ptoblock]] : []),
-  ].filter(row => row.length > 0);
+  const pcredit = document.getElementById('pcreditlink');
+  const rows = [];
+  // 2 rows of 3 cousins (matches the 3-column CSS grid)
+  if (ptiles.length > 3) { rows.push(ptiles.slice(0, 3)); rows.push(ptiles.slice(3, 6)); }
+  else if (ptiles.length > 0) rows.push(ptiles);
+  if (ppips.length > 0) rows.push(ppips);
+  if (pdownBtns.length > 0) rows.push(pdownBtns);
+  if (ghbadge && ghbadge.offsetParent !== null) rows.push([ghbadge]);
+  if (ptoblock && ptoblock.offsetParent !== null) rows.push([ptoblock]);
+  if (pcredit && pcredit.offsetParent !== null) rows.push([pcredit]);
+  return rows;
 }
 function navItems(){ return navGrid().flat(); }
 let navRow = -1, navCol = 0;
@@ -362,9 +366,7 @@ function applyNav(){
   const el = getFocusedEl();
   if (el) {
     el.classList.add('navfocus');
-    const saved = screenEl.scrollTop;
-    el.focus({preventScroll:true});
-    screenEl.scrollTop = saved;
+    el.scrollIntoView({block:'nearest', behavior:'instant'});
   }
 }
 function moveH(dir){
