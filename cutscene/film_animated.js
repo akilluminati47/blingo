@@ -255,7 +255,6 @@ const SHOTS = [
     clearAll();
     player.pos.set(124, groundHeight(124, 182), 182);
     const bluga = buildBlob({ color: 0x141519, scale: 1, hands: 0x141519 });
-    bluga.head.material.color.set(0x141519);
     bluga.root.position.set(124, groundHeight(124, 182) + 0.3, 182);
     bluga.root.rotation.y = Math.PI;
     scene.add(bluga.root); cleanup.push(bluga.root);
