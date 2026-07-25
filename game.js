@@ -14079,7 +14079,7 @@ window.__dbg = {
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateJelly(dt); updateCelebration(dt); updateFx(dt); },
   // cutscene director — direct references so console scripts can destructure freely
   renderer, scene, wxSet, COUSINS, buildBlob, spawnZombie,
-  skyDome, cloudDome, hemi, moon, addRotGore,
+  skyDome, cloudDome, hemi, sunLight, addRotGore,
   mat, SPHERE, BOX, bossState, THREE,
 };
 
