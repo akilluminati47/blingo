@@ -1,30 +1,30 @@
 # BLINGO
 
-An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. Play as one of six immune blob cousins of blob-kind, clear the wasteland, loot glowing crates for guns and ammo, and recruit the other cousins to fight alongside you.
+An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. Play as one of six immune blob cousins of blob-kind — in your browser, or grab the app for Windows, Android, or iOS. Clear the wasteland, loot glowing crates for guns and ammo, and recruit the other cousins to fight alongside you. All platforms share the same lobbies — squad up with anyone, anywhere.
 
 ---
 
 ## Play
 
-- **https://blingo.pages.dev** — Public or Private (code-based) Multiplayer in browser
-- Solo or squad up with friends
-- No downloads, no sign-ups — just pick a cousin and drop in
+- **Browser: [blingo.pages.dev](https://blingo.pages.dev)** — play instantly on any device with a web browser (desktop, phone, tablet). No downloads, no sign-ups — just pick a cousin and drop in.
+- **Cross-platform multiplayer** — browser players and standalone app players share the same lobbies. Squad up with friends regardless of how they're playing.
+- Solo or team up in Public/Private lobbies
 
-The website is the home of BLINGO — the fastest way to play and always the freshest build.
+The website is always the freshest build and the fastest way to start. Prefer a dedicated app? See below.
 
 ---
 
-## Standalone Apps (Windows + Android)
+## Standalone Apps (Windows · Android · iOS)
 
-Prefer a standalone? Grab the latest builds from [**GitHub Releases**](https://github.com/akilluminati47/blingo/releases/latest):
+Download the latest builds from [**GitHub Releases**](https://github.com/akilluminati47/blingo/releases/latest):
 
-- **Setup .exe** — Windows guided installer: license page, install-location choice, desktop shortcut offered (recommended)
-- **Portable .exe** — Windows single file, no install
-- **Android .apk** — sideload on your phone/tablet (allow "install unknown apps" when prompted)
+- **Windows .exe** — guided installer (recommended) or portable single-file — both with desktop GPU tuning for higher framerates, no browser throttling, and native fullscreen
+- **Android .apk** — sideload on your phone or tablet (allow "install unknown apps" when prompted)
+- **iOS .ipa** — unsigned development build for sideloading via AltStore, SideStore, or Xcode
 
-The Windows app is the same game, wrapped in Electron with the Chromium/ANGLE GPU stack tuned for desktop play: GPU blocklist ignored, GPU rasterization + zero-copy forced on, vsync/frame-rate cap lifted, and no browser tab throttling — your frame never freezes mid-run. The Android app wraps the same build in a Capacitor WebView. Steam integration (overlay/achievements via steamworks.js) is wired in and activates when a Steam App ID ships with the build.
+Standalone apps run the same game with better performance — the Windows build runs on Electron with Chromium's ANGLE GPU stack (GPU blocklist ignored, rasterization + zero-copy forced on, vsync cap lifted), and the mobile builds wrap the same engine in a native WebView. All versions share the same multiplayer lobbies — play with anyone, anywhere, on any platform.
 
-Every push to `main` increments the version (0.0.9 → 0.1.0, 0.9.9 → 1.0.0), rebuilds the app in GitHub Actions, and replaces the latest release — so the download is always current with the website.
+Every push to `main` increments the version, rebuilds all three apps in GitHub Actions, and updates the latest release automatically — so the downloads are always current with the website.
 
 ---
 
@@ -160,11 +160,13 @@ Each boss spawns with a colored beam pillar marking their location. Beating them
 
 ## Multiplayer
 
+Play with anyone, anywhere. Browser players and standalone app players (Windows, Android, iOS) all connect to the same peer-to-peer lobbies — there's only one player base.
+
 <details>
 <summary><strong>Lobby System</strong></summary>
 
 - Public lobbies — drop in with anyone
-- Private code-based lobbies — share a code with friends
+- Private code-based lobbies — share a code with friends, no matter what device they're on
 - Host runs the world simulation; clients see synchronized ghosts of every player and zombie
 - Player tags float over every human's head with their number and color
 - Boss health bars, chevron markers, and world state sync across all screens
