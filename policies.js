@@ -369,7 +369,8 @@ function applyNav(){
     const cr = screenEl.getBoundingClientRect();
     const er = el.getBoundingClientRect();
     if (er.top < cr.top || er.bottom > cr.bottom) {
-      el.scrollIntoView({block:'nearest', behavior:'instant'});
+      const block = navRow === 0 ? 'start' : navRow >= grid.length - 2 ? 'end' : 'nearest';
+      el.scrollIntoView({block, behavior:'instant'});
     }
   }
 }
