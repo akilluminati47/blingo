@@ -53,7 +53,8 @@
       "icons/**",
       "*.png",
       "*.ico",
-      "site.webmanifest",
+      "*.mp4",
+      "*.webmanifest",
       "!dist/**",
       "!node_modules/**"
     ],
