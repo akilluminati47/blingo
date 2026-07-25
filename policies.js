@@ -318,7 +318,9 @@ function openPolicies(){
   screenEl.scrollTop = 0;
   navRow = -1; navCol = 0;
   gpPrev = {};
-  if(location.hash !== '#policies') history.replaceState(null, '', '#policies');
+  const v = document.getElementById('policybg');
+  if (v) { v.currentTime = 0; v.play(); }
+  if (location.hash !== '#policies') history.replaceState(null, '', '#policies');
 }
 function closePolicies(){
   if(P.playing) stop(false);
@@ -326,6 +328,7 @@ function closePolicies(){
   navRow = -1; navCol = 0; applyNav();
   if(location.hash === '#policies') history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('policiesopen').blur();
+  if (window._resetTypewriter) window._resetTypewriter();
 }
 document.getElementById('policiesopen').addEventListener('click', e=>{ e.preventDefault(); openPolicies(); });
 document.getElementById('ptoblock').addEventListener('click', closePolicies);

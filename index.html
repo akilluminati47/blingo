@@ -1074,22 +1074,24 @@
     el.innerHTML = h;
   }
 
+  var _tid = null;
+  function clearTypewriter() { if (_tid) { clearTimeout(_tid); _tid = null; } }
+  function schedule(ms, fn) { clearTypewriter(); _tid = setTimeout(function() { _tid = null; fn(); }, ms); }
+
   function fill(el, text, fullText, color, i, cb) {
     i = i || 0;
     if (i > text.length) { cb(); return; }
-    // Render the FULL text (including luck below) so it never disappears,
-    // but only colour characters up to i (the rest stay grey)
     render(el, fullText, i, color);
-    setTimeout(function() { fill(el, text, fullText, color, i + 1, cb); }, TYPE);
+    schedule(TYPE, function() { fill(el, text, fullText, color, i + 1, cb); });
   }
 
   function wipe(el, text, pos, color, cb) {
     if (pos < 0) { el.innerHTML = text.replace(/\n/g, '<br>'); cb(); return; }
     render(el, text, pos, color);
-    setTimeout(function() { wipe(el, text, pos - 1, color, cb); }, WIPE);
+    schedule(WIPE, function() { wipe(el, text, pos - 1, color, cb); });
   }
 
-  function pause(ms, cb) { setTimeout(cb, ms); }
+  function pause(ms, cb) { schedule(ms, cb); }
 
   function cycle() {
     gEl.innerHTML = gText.replace(/\n/g, '<br>');
@@ -1119,6 +1121,8 @@
       });
     });
   }
+
+  window._resetTypewriter = function() { clearTypewriter(); cycle(); };
 
   // Wait until the splash is dismissed before starting the cycle
   var _started = false;
