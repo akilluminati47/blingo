@@ -14096,10 +14096,13 @@ tabTitle = (function livingTab() {
     if (li === 0) {
       const dataUrl = faceIcon(c.color, c.id === 'blondie');
       link.href = dataUrl; tabCousin = ci;
-      // also push to Electron taskbar if available
+      // Push to Electron taskbar AND ensure the DOM favicon is visible
       if (window.electronAPI && window.electronAPI.setIcon) {
         try { window.electronAPI.setIcon(dataUrl); } catch (_) {}
       }
+      // Force the link element to be re-read by the browser/Electron
+      document.head.removeChild(link);
+      document.head.appendChild(link);
     } // this cousin's turn begins
     li++;
     if (li >= c.name.length) {
