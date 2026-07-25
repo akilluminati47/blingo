@@ -344,7 +344,9 @@ function navGrid(){
   if (ptiles.length > 3) { rows.push(ptiles.slice(0, 3)); rows.push(ptiles.slice(3, 6)); }
   else if (ptiles.length > 0) rows.push(ptiles);
   if (ppips.length > 0) rows.push(ppips);
-  if (pdownBtns.length > 0) rows.push(pdownBtns);
+  if (pdownBtns.length > 0) {
+    for (const btn of pdownBtns) rows.push([btn]);
+  }
   if (ghbadge) rows.push([ghbadge]);
   if (ptoblock) rows.push([ptoblock]);
   if (pcredit) rows.push([pcredit]);
