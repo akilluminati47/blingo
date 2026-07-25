@@ -1063,7 +1063,8 @@
   if (!gEl || !wEl) return;
 
   var TYPE = 32, WIPE = 4, HOLD = 4200, BLANK = 900;
-  var gText = GOLD.join('\n'), wText = WHITE.join('\n'), wFull = wText + '\n' + LUCK;
+  var gText = GOLD.join('\n'), wText = WHITE.join('\n');
+  var gFull = gText + '\n' + LUCK;
 
   function render(el, text, pos, color) {
     var h = '';
@@ -1092,20 +1093,18 @@
   function pause(ms, cb) { setTimeout(cb, ms); }
 
   function cycle() {
-    gEl.innerHTML = gText.replace(/\n/g, '<br>');
-    wEl.innerHTML = wFull.replace(/\n/g, '<br>');
+    gEl.innerHTML = gFull.replace(/\n/g, '<br>');
+    wEl.innerHTML = wText.replace(/\n/g, '<br>');
     gEl.style.color = '#5a5a64';
     wEl.style.color = '#5a5a64';
 
-    fill(gEl, gText, gText, '#ffd9a8', 0, function() {
+    fill(gEl, gText, gFull, '#ffd9a8', 0, function() {
+      render(gEl, gFull, gFull.length, '#ffd9a8');
       pause(200, function() {
-        fill(wEl, wText, wFull, '#eef1f5', 0, function() {
-          // Flash luck line instantly
-          render(wEl, wFull, wFull.length, '#eef1f5');
+        fill(wEl, wText, wText, '#eef1f5', 0, function() {
           pause(HOLD, function() {
-            // Wipe white (including luck) right-to-left, then gold
-            wipe(wEl, wFull, wFull.length - 1, '#eef1f5', function() {
-              wipe(gEl, gText, gText.length - 1, '#ffd9a8', function() {
+            wipe(wEl, wText, wText.length - 1, '#eef1f5', function() {
+              wipe(gEl, gFull, gFull.length - 1, '#ffd9a8', function() {
                 pause(BLANK, cycle);
               });
             });
