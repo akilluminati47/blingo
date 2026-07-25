@@ -366,12 +366,10 @@ function applyNav(){
   const el = getFocusedEl();
   if (el) {
     el.classList.add('navfocus');
-    if (navRow === 0) {
+    if (navRow <= 2) {
       screenEl.scrollTop = 0;
-    } else if (navRow >= grid.length - 2) {
-      screenEl.scrollTop = screenEl.scrollHeight;
     } else {
-      el.scrollIntoView({block:'nearest', behavior:'instant'});
+      screenEl.scrollTop = screenEl.scrollHeight;
     }
   }
 }
