@@ -14,6 +14,8 @@ import * as THREE from './libs/three.module.js';
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 
@@ -70,9 +72,15 @@ function curveDrop(x, z) {
 
 const hemi = new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 0.9);
 scene.add(hemi);
-const moon = new THREE.DirectionalLight(0xaebfff, 0.8);
-moon.position.set(-30, 50, -20);
-scene.add(moon);
+const sunLight = new THREE.DirectionalLight(0xaebfff, 0.8);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(1024, 1024);
+sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 200;
+sunLight.shadow.camera.left = -60; sunLight.shadow.camera.right = 60;
+sunLight.shadow.camera.top = 60; sunLight.shadow.camera.bottom = -60;
+sunLight.shadow.bias = -0.0004; sunLight.shadow.normalBias = 0.02;
+sunLight.position.set(-30, 50, -20);
+scene.add(sunLight);
 const warm = new THREE.AmbientLight(0x64513a, 0.35);
 scene.add(warm);
 
@@ -324,9 +332,9 @@ function ownMat(mesh) {
 }
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const SPHERE = new THREE.SphereGeometry(1, 14, 12);
-function box(w, h, d, color, opts) { const m = new THREE.Mesh(BOX, mat(color, opts)); m.scale.set(w, h, d); return m; }
-function ball(r, color, opts) { const m = new THREE.Mesh(SPHERE, mat(color, opts)); m.scale.setScalar(r); return m; }
-function cyl(r1, r2, h, color, sides = 8) { return new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, sides), mat(color)); }
+function box(w, h, d, color, opts) { const m = new THREE.Mesh(BOX, mat(color, opts)); m.scale.set(w, h, d); m.castShadow = true; m.receiveShadow = true; return m; }
+function ball(r, color, opts) { const m = new THREE.Mesh(SPHERE, mat(color, opts)); m.scale.setScalar(r); m.castShadow = true; m.receiveShadow = true; return m; }
+function cyl(r1, r2, h, color, sides = 8) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, sides), mat(color)); m.castShadow = true; m.receiveShadow = true; return m; }
 
 // canvas texture helpers
 function canvasTex(w, h, draw) {
@@ -483,6 +491,7 @@ const skyDome = new THREE.Mesh(
 skyDome.renderOrder = -10;
 skyDome.material.defines = { NO_CURVE: 1 };
 scene.add(skyDome);
+skyDome.castShadow = false; skyDome.receiveShadow = false;
 
 const moonOff = new THREE.Vector3(-30, 50, -20); // key-light offset, follows the player
 const _skyMoodC = new THREE.Color('#9aa2b0'), _skyMoodR = new THREE.Color('#59606e');
@@ -614,6 +623,7 @@ const cloudDome = new THREE.Mesh(
   })
 );
 cloudDome.renderOrder = -9;
+cloudDome.castShadow = false; cloudDome.receiveShadow = false;
 scene.add(cloudDome);
 // scratch colours for the per-frame cloud dressing (see updateCelestial)
 const _cFillW = new THREE.Color(), _cFillR = new THREE.Color();
@@ -799,9 +809,9 @@ function updateCelestial(dt) {
   const hx = Math.cos(u * Math.PI);                        // +1 east .. -1 west
   const elAng = el * 1.28, hLen = Math.cos(elAng);       // peak ~73°, a touch shy of the zenith
   _sunDir.set(hx * hLen, Math.sin(elAng), -0.32 * hLen).normalize();
-  const aboveH = ss(-0.04, 0.14, _sunDir.y);             // fades through twilight
+  const aboveH = ss(-0.1, 0.1, _sunDir.y);               // fades through twilight — wider window
   const overcast = 1 - ss(0.34, 0.62, _sunDir.angleTo(_ohDir)); // 1 = dead behind the cloud, 0 = clear
-  const wxClear = Math.max(0, 1 - 0.55 * W.cloudy - 0.85 * W.rain);
+  const wxClear = Math.max(0.2, 1 - 0.35 * W.cloudy - 0.7 * W.rain); // sun still visible through light cloud
   const warmU = clamp(1 - el, 0, 1);                     // low sun burns warmer/oranger
   const vis = aboveH * wxClear;
   _cSun.set(p.sun).lerp(_warmSun, 0.35 * warmU);
@@ -1101,7 +1111,7 @@ function applyEnvironment(redraw = true) {
   const dimD = W.sunny + W.cloudy * 0.55 + W.rain * 0.35;
   const dimH = W.sunny + W.cloudy * 0.85 + W.rain * 0.7;
   hemi.color.set(p.hemiSky); hemi.groundColor.set(p.hemiGnd); hemi.intensity = p.hemiI * dimH;
-  moon.color.set(p.dirC); moon.intensity = p.dirI * dimD;
+  sunLight.color.set(p.dirC); sunLight.intensity = p.dirI * dimD;
   moonOff.set(p.dirPos[0], p.dirPos[1], p.dirPos[2]);
   warm.color.set(p.ambC); warm.intensity = p.ambI;
   const fogC = new THREE.Color(p.fog);
@@ -1125,20 +1135,13 @@ function applyEnvironment(redraw = true) {
   if (stormActive()) {
     const f = stormT / 0.9; // 1 → 0 as the flash decays
     hemi.intensity *= 1 + f * 0.6;
-    moon.intensity *= 1 + f * 0.4;
+    sunLight.intensity *= 1 + f * 0.4;
   }
   setLampGlow(lampLitFor(game.clock ?? 13, W)); // the street lamps take over as the sky goes down
 }
 
 // fake blob shadow
-const shadowGeo = new THREE.CircleGeometry(1, 20);
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.32, depthWrite: false });
-function makeShadow(r) {
-  const s = new THREE.Mesh(shadowGeo, shadowMat);
-  s.rotation.x = -Math.PI / 2; s.scale.setScalar(r); s.position.y = 0.02; s.renderOrder = 1;
-  return s;
-}
-
+// fake blob shadow geometry removed — using real sun shadows now
 // ---------- settings (5-notch bars in the pause menu, persisted) ----------
 // coarse-pointer touch device? decided once, up here, because the default draw distance
 // leans on it (phones start at the lightest notch) — the input code reuses it as isTouch
@@ -2025,15 +2028,10 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   arms[gunArm].add(gunSocket);
 
   root.scale.setScalar(scale);
-  // shadow lives in world space (not parented to the body) so it stays flat on the
-  // ground when the character jumps and stays under their center when they topple over.
-  const shadow = makeShadow(0.55 * scale);
-  scene.add(shadow);
-
   // collect skin meshes for red damage flash
   const skinList = [];
   root.traverse(o => { if (o.isMesh && o.material !== shadowMat) skinList.push({ mesh: o, mat: o.material }); });
-  return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, pupils, mouth, shadow, stainCount, skinList, flashT: 0,
+  return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, pupils, mouth, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
 }
 // ---------- rot gore (the Rotten One and his sickness) ----------
@@ -2155,18 +2153,7 @@ function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly 
   }
   for (const m of rotFlash) blob.skinList.push({ mesh: m, mat: m.material });
 }
-// keep a blob's shadow pinned flat under its centre, projected onto whatever surface
-// is below (terrain, car roofs, crates...). Shadow shrinks with height (jumps, leaps)
-// and swells when grounded (slides, giant mode).
-function placeShadow(blob, x, z, y) {
-  if (!blob.shadow) return;
-  const sy = supportTop(x, z, y === undefined ? groundHeight(x, z) : y, 0.1);
-  const above = y !== undefined ? Math.max(0, y - sy) : 0;
-  const baseScale = blob.root ? blob.root.scale.x : 1;
-  const heightScale = 1 - clamp(above / 8, 0, 0.65); // shrinks with altitude
-  blob.shadow.scale.setScalar(baseScale * heightScale);
-  blob.shadow.position.set(x, sy + 0.015, z);
-}
+function placeShadow(blob, x, z, y) { /* dynamic sun shadows replace the old blob circles */ }
 // fold a mesh added AFTER buildBlob's skinList sweep (horns, blood stains, boss dressing)
 // into the flash list, so every feature flashes with the body when the blob is shot
 function foldSkin(blob, m) { blob.skinList.push({ mesh: m, mat: m.material }); return m; }
@@ -2237,11 +2224,8 @@ function terrainPlane(w, d, segW, segD, cx, cz, material, lift = 0) {
   geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, material);
   m.position.set(cx, 0, cz);
-  // vertices already in world-offset space relative to center
-  m.geometry.translate(0, 0, 0);
+  m.receiveShadow = true; m.castShadow = false;
   m.position.set(cx, 0, cz);
-  // undo double-offset: we sampled with cx+localX, so mesh must sit at cx, but geometry x is local. correct.
-  return m;
 }
 // same ground-following approach as terrainPlane, but a fan disc instead of a grid — for round
 // ground decals (floodlight pools) that need to ride the terrain's own tilt instead of sinking
@@ -2259,6 +2243,7 @@ function terrainDisc(r, segs, cx, cz, material, lift = 0, rings = 0) {
   geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, material);
   m.position.set(cx, 0, cz);
+  m.receiveShadow = true; m.castShadow = false;
   return m;
 }
 
@@ -3189,7 +3174,7 @@ function updateChunks(px, pz) {
 function unloadChunk(key, ch) {
   scene.remove(ch.group);
   ch.group.traverse(o => {
-    if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose();
+    if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE) o.geometry.dispose();
     if (o.material && o.material.userData.owned) o.material.dispose(); // per-house shell clones
   });
   // drop any half-faded slab of this chunk before its materials go
@@ -3376,7 +3361,7 @@ const townPads = []; // the poured east-side pads, so a prestige rebuild can lif
 // re-irons itself to the new rects. The heart of town rebuilds identically (same seed);
 // only the five outer landmark blocks land somewhere new.
 function rebuildTownWorld() {
-  townGroup.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose(); });
+  townGroup.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE) o.geometry.dispose(); });
   townGroup.clear();
   for (const cr of townCrates) { const i = allCrates.indexOf(cr); if (i >= 0) allCrates.splice(i, 1); }
   townCrates.length = 0;
@@ -12322,9 +12307,9 @@ function updateCamera(dt) {
   cloudDome.position.copy(camera.position); // drift lives in the shader's uTime, wind-paced
   updateCelestial(dt); // arc the sun + moon, dress the clouds' uniforms, drift the motes
   updateSunGlare();    // lens flare from the sun — warm glare + ghost rings
-  moon.position.set(player.pos.x + moonOff.x, moonOff.y, player.pos.z + moonOff.z);
-  moon.target.position.copy(player.pos);
-  moon.target.updateMatrixWorld();
+  sunLight.position.set(player.pos.x + moonOff.x, moonOff.y, player.pos.z + moonOff.z);
+  sunLight.target.position.copy(player.pos);
+  sunLight.target.updateMatrixWorld();
 }
 
 // ---- see-through house ----
@@ -14222,7 +14207,7 @@ function splashWarmup() {
   } catch (e) {}
   setTimeout(() => {                       // one beat later: the pocket leaves, caches stay warm
     scene.remove(pocket);
-    pocket.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE && o.geometry !== shadowGeo) o.geometry.dispose(); });
+    pocket.traverse(o => { if (o.geometry && o.geometry !== BOX && o.geometry !== SPHERE) o.geometry.dispose(); });
     splash.ready = true;
     document.getElementById('splashHint').textContent = IS_TOUCH ? 'TAP ANYWHERE .ᐟ' : 'CLICK .ᐟ ANY KEY .ᐟ ANY BUTTON .ᐟ';
   }, 120);
