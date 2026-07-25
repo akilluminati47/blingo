@@ -33,19 +33,22 @@ let _origEscape = null;
 function directorMode() {
   const dbg = window.__dbg;
   if (!dbg) return;
-  // Prevent boss spawns during filming — we want the cousins at the fountain shot clean
+  // Keep simulation running even if the user paused before filming
+  if (dbg.game && dbg.game.state !== 'playing') {
+    try { dbg.startRun(); } catch(_) {}
+  }
   if (dbg.bossState) {
     dbg.bossState._wasSpawned = dbg.bossState.spawned;
-    dbg.bossState.spawned = true; // mark as spawned so nothing tries to spawn
+    dbg.bossState.spawned = true;
   }
-  // Override the pause toggle so neither Escape nor pause button interrupts capture
   _origEscape = window.onkeydown;
   const oldPause = dbg.pauseGame;
   dbg._oldPause = oldPause;
-  dbg.pauseGame = function() {}; // no-op the pause function
-  // Suppress the pause button visually
+  dbg.pauseGame = function() {};
   const pauseBtn = document.getElementById('btnPause');
   if (pauseBtn) pauseBtn.style.display = 'none';
+  //Ensure game is running for AI and updates
+  if (dbg.game) dbg.game.state = 'playing';
 }
 function endDirectorMode() {
   const dbg = window.__dbg;
