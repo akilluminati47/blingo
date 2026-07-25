@@ -956,9 +956,11 @@ const glareEls = [];
 function updateSunGlare() {
   const el = document.getElementById('sunglow');
   if (!el || glareEls.length === 0) return;
+  // only visible when the sun is actually above or near the horizon
+  if (_sunDir.y <= -0.02) { el.style.opacity = '0'; return; }
   const W = wxWeights();
   const wxClear = Math.max(0, 1 - 0.55 * W.cloudy - 0.85 * W.rain);
-  const lowSun = clamp((0.08 - _sunDir.y) / 0.18, 0, 1); // 0 = overhead, 1 = near/below horizon
+  const lowSun = clamp((0.08 - _sunDir.y) / 0.18, 0, 1);
   const want = wxClear * lowSun;
   if (want < 0.01) { el.style.opacity = '0'; return; }
   _sunGlareDir.copy(_sunDir).multiplyScalar(480).add(camera.position);
