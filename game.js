@@ -14,7 +14,7 @@ import * as THREE from './libs/three.module.js';
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = false; // only at max draw distance
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -897,59 +897,6 @@ function updateCelestial(dt) {
   airMotes.material.uniforms.uFrac.value = MOTE_BASE + (1 - MOTE_BASE) * (0.25 * W.cloudy + W.rain);
 }
 
-// ── sun lens glare: warm DOM overlay stacked rings positioned at the projected sun
-//    Frautiger-gallery style: compositor-only transforms, zero repaint.
-const _sunGlareDir = new THREE.Vector3(), _sunGlareNdc = new THREE.Vector3();
-const GLARE_SPECS = [
-  { size: 420, dist: 0.00, kind: 'core' },
-  { size: 42,  dist: 0.18, kind: 'ring' },
-  { size: 66,  dist: 0.34, kind: 'ring' },
-  { size: 110, dist: 0.50, kind: 'ring' },
-  { size: 52,  dist: 0.64, kind: 'ring' },
-  { size: 86,  dist: 0.80, kind: 'ring' },
-  { size: 120, dist: 1.00, kind: 'glow' },
-];
-function glareGradient(spec) {
-  const a = `circle ${(spec.size/2)|0}px at 50% 50%`;
-  if (spec.kind === 'core') return `radial-gradient(${a}, rgba(255,247,224,.85) 0%, rgba(255,236,188,.5) 25%, rgba(255,222,150,.22) 48%, rgba(255,214,150,.07) 66%, transparent 78%)`;
-  if (spec.kind === 'ring') return `radial-gradient(${a}, rgba(255,255,255,0) 0%, rgba(200,225,255,.45) 55%, rgba(170,210,255,.2) 82%, rgba(170,210,255,0) 100%)`;
-  return `radial-gradient(${a}, rgba(207,230,255,.5) 0%, rgba(190,220,255,.22) 45%, rgba(170,210,255,0) 72%)`;
-}
-const glareEls = [];
-(function initSunGlare() {
-  const el = document.getElementById('sunglow');
-  if (!el) return;
-  GLARE_SPECS.forEach(spec => {
-    const d = document.createElement('div');
-    d.style.cssText = `position:absolute;left:0;top:0;width:${spec.size}px;height:${spec.size}px;opacity:0;will-change:transform,opacity;background:${glareGradient(spec)}`;
-    el.appendChild(d);
-    glareEls.push({ el: d, spec });
-  });
-})();
-
-function updateSunGlare() {
-  const el = document.getElementById('sunglow');
-  if (!el || glareEls.length === 0) return;
-  // only visible when the sun is actually above or near the horizon
-  if (_sunDir.y <= -0.02) { el.style.opacity = '0'; return; }
-  const W = wxWeights();
-  const wxClear = Math.max(0, 1 - 0.55 * W.cloudy - 0.85 * W.rain);
-  const lowSun = clamp((0.08 - _sunDir.y) / 0.18, 0, 1);
-  const want = wxClear * lowSun;
-  if (want < 0.01) { el.style.opacity = '0'; return; }
-  _sunGlareDir.copy(_sunDir).multiplyScalar(480).add(camera.position);
-  _sunGlareNdc.copy(_sunGlareDir).project(camera);
-  const off = Math.hypot(_sunGlareNdc.x, _sunGlareNdc.y);
-  el.style.opacity = (want * 0.85).toFixed(3);
-  glareEls.forEach((g) => {
-    const f = 1 - 2 * g.spec.dist;
-    const x = ((_sunGlareNdc.x * f * 0.5 + 0.5) * window.innerWidth).toFixed(1);
-    const y = ((-_sunGlareNdc.y * f * 0.5 + 0.5) * window.innerHeight).toFixed(1);
-    g.el.style.transform = `translate(${x}px,${y}px) translate(-50%,-50%)`;
-    const distAlpha = 1 - Math.abs(f) * 0.45;
-    g.el.style.opacity = (want * distAlpha).toFixed(3);
-  });
-}
 // live wind: direction & strength drift over time, gusting harder in worse weather.
 // rain streaks lean and drift with it, and the wind bed swells/pans to match.
 let windYaw = Math.random() * TAU, windTgtYaw = windYaw, windStr = 0.4, windTgtStr = 0.4, windShiftT = 0;
@@ -12365,18 +12312,19 @@ function updateCamera(dt) {
   skyDome.position.copy(camera.position); // the sky rides along so it never has edges
   cloudDome.position.copy(camera.position); // drift lives in the shader's uTime, wind-paced
   updateCelestial(dt); // arc the sun + moon, dress the clouds' uniforms, drift the motes
-  updateSunGlare();    // lens flare from the sun — warm glare + ghost rings
-  // twin directional shadow lights: sun by day, moon by night — crossfade at dawn/dusk
+  // twin directional shadow lights: sun by day, moon by night — only at max draw distance
+  const shadowsOn = notches.drawDist >= 5;
+  if (renderer.shadowMap.enabled !== shadowsOn) renderer.shadowMap.enabled = shadowsOn;
   const dayW = clamp((_sunDir.y + 0.05) / 0.1, 0, 1);
   const sd = _sunDir, md = _moonDir;
   sunLight.position.set(player.pos.x + sd.x * 80, player.pos.y + sd.y * 80, player.pos.z + sd.z * 80);
   sunLight.target.position.copy(player.pos); sunLight.target.updateMatrixWorld();
-  sunLight.intensity = (0.8 + dayW * 0.4) * (dayW > 0.05 ? 1 : 0);
-  sunLight.castShadow = dayW > 0.05;
+  sunLight.intensity = shadowsOn ? (0.8 + dayW * 0.4) * (dayW > 0.05 ? 1 : 0) : 0;
+  sunLight.castShadow = shadowsOn && dayW > 0.05;
   moonLight.position.set(player.pos.x + md.x * 80, player.pos.y + md.y * 80, player.pos.z + md.z * 80);
   moonLight.target.position.copy(player.pos); moonLight.target.updateMatrixWorld();
-  moonLight.intensity = 0.35 + (1 - dayW) * 0.25;
-  moonLight.castShadow = dayW < 0.95;
+  moonLight.intensity = shadowsOn ? 0.35 + (1 - dayW) * 0.25 : 0;
+  moonLight.castShadow = shadowsOn && dayW < 0.95;
 }
 
 // ---- see-through house ----

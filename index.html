@@ -102,7 +102,6 @@
   #tradepact.accepted .tplabel { opacity:1; transform:scale(1.12); }
 
   #vignette { position:absolute; inset:0; background:radial-gradient(ellipse at center, transparent 55%, rgba(160,0,0,.55) 100%); opacity:0; transition:opacity .25s; }
-  #sunglow { position:fixed; inset:0; z-index:2; pointer-events:none; opacity:0; will-change:opacity; }
 
   #topbar { position:absolute; top:calc(10px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); display:flex; gap:16px; align-items:center;
     background:rgba(8,10,14,.55); border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:6px 14px; color:#eee; backdrop-filter:blur(6px); }
@@ -782,7 +781,6 @@
 <div id="uiveil"></div>
 
 <div id="hud">
-  <div id="sunglow" aria-hidden="true"></div>
   <div id="vignette"></div>
   <div id="bloodsplat"></div>
   <div id="scope"><div id="scopehair"></div></div>
