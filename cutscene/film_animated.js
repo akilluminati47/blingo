@@ -155,20 +155,20 @@ const SHOTS = [
     console.log('🎬 S1: The Block flyover');
     clearAll();
     player.pos.set(20, groundHeight(20, 50), 50);
-    // seamless flyover: each shot starts where the last one ended
+    // seamless flyover: each shot starts where the last one ended — position AND look-at
     // Night — start high behind the church, descending toward the graveyard
     setClock(23.5); setWeather('sunny'); applyEnvironment(true);
     await pause(300);
     await panShot('s01a_night', 4, v3(28, 30, 100), v3(20, 22, 70), v3(20, 5, 50));
     // Dawn — continue from the graveyard across the plaza
     setClock(6); applyEnvironment(true);
-    await panShot('s01b_dawn', 4, v3(20, 22, 70), v3(15, 18, 40), v3(10, 5, 30));
+    await panShot('s01b_dawn', 4, v3(20, 22, 70), v3(15, 18, 40), v3(20, 5, 50));
     // Noon — descend across the plaza toward the bank
     setClock(13); applyEnvironment(true);
-    await panShot('s01c_noon', 4, v3(15, 18, 40), v3(8, 14, 10), v3(5, 4, 0));
+    await panShot('s01c_noon', 4, v3(15, 18, 40), v3(8, 14, 10), v3(15, 5, 30));
     // Sunset — slow pan down to the bank steps
     setClock(18.5); applyEnvironment(true);
-    await panShot('s01d_sunset', 6, v3(8, 14, 10), v3(2, 8, -20), v3(0, 3, -30));
+    await panShot('s01d_sunset', 6, v3(8, 14, 10), v3(2, 8, -20), v3(8, 4, 0));
   },
 
   // SHOT 2 — Cousins on bank steps facing the fountain (10s slow pan)
