@@ -1095,12 +1095,12 @@
           pause(HOLD, function() {
             wipe(wEl, wText.length, function() {
               wipe(gEl, gText.length, function() {
-                // type Good Luck! as white, larger, slower
-                wEl.style.fontSize = '20px';
-                type(wEl, LUCK, LUCK_TYPE, 0, function() {
+                // type Good Luck! as gold, larger, slower
+                gEl.style.fontSize = '20px';
+                type(gEl, LUCK, LUCK_TYPE, 0, function() {
                   pause(HOLD, function() {
-                    wipe(wEl, LUCK.length, function() {
-                      wEl.style.fontSize = '';
+                    wipe(gEl, LUCK.length, function() {
+                      gEl.style.fontSize = '';
                       pause(BLANK, cycle);
                     });
                   });
