@@ -23,7 +23,7 @@ if (!$) { console.error('window.__dbg not found — is the game loaded?'); throw
 const {
   renderer, camera, scene, game, player, settings,
   wxSet, applyEnvironment, COUSINS, buildBlob, spawnZombie,
-  skyDome, cloudDome, hemi, moon, addRotGore,
+  skyDome, cloudDome, hemi, sunLight, addRotGore,
   groundHeight, bossState, zombies,
 } = $;
 // verify critical refs loaded
@@ -265,9 +265,9 @@ const SHOTS = [
     cam(129, 1.5, -40, 132, 3.5, -36);
     await pause(300); snapHD('shot05_hero_low');
     // lightning flash: boost hemisphere light briefly
-    hemi.intensity *= 2.2; moon.intensity *= 1.8;
+    hemi.intensity *= 2.2; sunLight.intensity *= 1.8;
     await pause(100); snapHD('shot05_lightning');
-    hemi.intensity /= 2.2; moon.intensity /= 1.8;
+    hemi.intensity /= 2.2; sunLight.intensity /= 1.8;
   },
 
   // SHOT 6 — Family Fights Back

@@ -11,7 +11,7 @@ if (!$) { console.error('window.__dbg not found — is the game loaded?'); retur
 const {
   renderer, camera, scene, game, player, settings,
   wxSet, applyEnvironment, buildBlob, spawnZombie,
-  skyDome, cloudDome, hemi, moon, addRotGore,
+  skyDome, cloudDome, hemi, sunLight, addRotGore,
   groundHeight, bossState, zombies, THREE,
 } = $;
 
