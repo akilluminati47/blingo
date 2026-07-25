@@ -2087,12 +2087,12 @@ function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly 
     punch(blob.head, socket);                     // carve the face skin away over the socket
     const pit = ball(0.06, 0xa84a5e); pit.position.set(0.16 * es, 0.05, 0.2); // the soft back of the hole
     blob.head.add(track(pit));
-    const hang = new THREE.Group(); hang.position.set(0.16 * es, 0.0, 0.26);
-    const stalkLen = 0.12 + Math.random() * 0.08; // short and tight — never reaches the chest
-    const stalk = cyl(0.018, 0.022, stalkLen, 0x8a2430, 5);
-    stalk.position.set(0, -stalkLen * 0.44, 0.02); stalk.rotation.x = 0.14;
+    const hang = new THREE.Group(); hang.position.set(0.16 * es, 0.05, 0.24); // anchored at the inner socket
+    const stalkLen = 0.14 + Math.random() * 0.08; // short tendon from socket to eye
+    const stalk = cyl(0.016, 0.020, stalkLen, 0x8a2430, 5);
+    stalk.position.set(0, -stalkLen * 0.48, 0); stalk.rotation.x = 0.12;
     hang.add(track(stalk));
-    const eyeDrop = stalkLen * 0.88;
+    const eyeDrop = stalkLen * 0.82;
     const eyeball = ball(0.11, 0xe8e4da); eyeball.position.set(0, -eyeDrop, 0.04); hang.add(track(eyeball));
     // Keep the original pupil colour — blind zombies keep their white/grey pupil
     const pupil = ball(0.05, pupilColor); pupil.position.set(0, -eyeDrop - 0.01, 0.12); hang.add(track(pupil));
@@ -7202,7 +7202,7 @@ function setNotch(key, n, silent) {
   saveNotches();
   refreshRow(key);
   if (key === 'gore') refreshRow('extraGore');
-  if (key === 'extraGore' || key === 'zombieSpawn') updateGoreHordeUI();
+  if (key === 'extraGore' || key === 'zombieSpawn' || key === 'music' || key === 'drawDist') updateGoreHordeUI();
   if (!silent) notchClickSfx(n);
   // the host turning a spawn dial updates every client's greyed copy live — even from
   // the pause menu, where the periodic snapshot isn't flowing
@@ -7255,14 +7255,16 @@ function updateGoreHordeUI() {
   const localMax = goreHordeLocal();
   const clientForced = net.role === 'client' && net.hostGoreHorde;
   const grey = clientForced && !localMax;
-  for (const key of ['extraGore', 'zombieSpawn']) {
+  for (const key of ['extraGore', 'zombieSpawn', 'music', 'drawDist']) {
     const row = rowEls[key];
     if (!row) continue;
-    // the Extra Gore row only glows for its OWN maxed slider; the Zombies row glows whenever
-    // the horde is on (host-forced included, in grey)
-    const rowOn = key === 'extraGore' ? localMax : (localMax || clientForced);
+    const rowOn = key === 'extraGore' ? localMax
+                : key === 'music' ? notches.music >= 5
+                : key === 'drawDist' ? notches.drawDist >= 5
+                : (localMax || clientForced);
     row.classList.toggle('gorehorde', rowOn);
     row.classList.toggle('greygore', rowOn && grey);
+    if (key === 'music' || key === 'drawDist') row.classList.toggle('live', rowOn);
   }
 }
 syncSettingsUI();
