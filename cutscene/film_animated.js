@@ -184,6 +184,26 @@ const SHOTS = [
     await pause(600);
     await panShot('s02', 10, v3(-5, 3, -30), v3(6, 2.5, -30), v3(0, 1.5, -35));
   },
+
+  // SHOT 5 — Rotten One closeup (9s, storm + lightning)
+  async function() {
+    console.log('🎬 S5: Rotten One');
+    setClock(23); setWeather('rain'); setFog(18, 65);
+    clearAll();
+    const bx = 132, bz = -36, gy = groundHeight(bx, bz);
+    player.pos.set(bx, gy, bz);
+    bossState.spawned4 = true;
+    const boss = buildBlob({ color: 0x77a12c, zombie: true, scale: 3.1, hands: 0x3f5a14 });
+    if (addRotGore) addRotGore(boss, { hangEye: true, chestHole: true });
+    boss.root.position.set(bx, gy, bz);
+    scene.add(boss.root); cleanup.push(boss.root);
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2, d = 5 + Math.random() * 4;
+      spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true, shield: true });
+    }
+    await pause(300);
+    await panShot('s05', 6, v3(bx + 10, 5, bz + 8), v3(bx - 6, 4, bz + 6), v3(bx, 3, bz));
+  },
 ];
 
 // ── Director UI ──
