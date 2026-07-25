@@ -155,19 +155,20 @@ const SHOTS = [
     console.log('🎬 S1: The Block flyover');
     clearAll();
     player.pos.set(20, groundHeight(20, 50), 50);
-    // Night — start high behind the church, looking south toward the sleeping town
+    // seamless flyover: each shot starts where the last one ended
+    // Night — start high behind the church, descending toward the graveyard
     setClock(23.5); setWeather('sunny'); applyEnvironment(true);
     await pause(300);
     await panShot('s01a_night', 4, v3(28, 30, 100), v3(20, 22, 70), v3(20, 5, 50));
-    // Dawn — fly over the graveyard toward the plaza
+    // Dawn — continue from the graveyard across the plaza
     setClock(6); applyEnvironment(true);
-    await panShot('s01b_dawn', 4, v3(20, 24, 70), v3(15, 18, 40), v3(10, 5, 30));
+    await panShot('s01b_dawn', 4, v3(20, 22, 70), v3(15, 18, 40), v3(10, 5, 30));
     // Noon — descend across the plaza toward the bank
     setClock(13); applyEnvironment(true);
-    await panShot('s01c_noon', 4, v3(15, 20, 40), v3(8, 14, 10), v3(5, 4, 0));
-    // Sunset — slow pan down to the bank steps, sun low behind camera
+    await panShot('s01c_noon', 4, v3(15, 18, 40), v3(8, 14, 10), v3(5, 4, 0));
+    // Sunset — slow pan down to the bank steps
     setClock(18.5); applyEnvironment(true);
-    await panShot('s01d_sunset', 6, v3(8, 16, 10), v3(2, 8, -20), v3(0, 3, -30));
+    await panShot('s01d_sunset', 6, v3(8, 14, 10), v3(2, 8, -20), v3(0, 3, -30));
   },
 
   // SHOT 2 — Cousins on bank steps facing the fountain (10s slow pan)
@@ -201,10 +202,8 @@ const SHOTS = [
       spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true, shield: true });
     }
     await pause(300);
-    // wide orbit
-    await panShot('s05_orbit', 5, v3(138, 5, -28), v3(127, 4, -40), v3(bx, 3, bz));
-    // close on exposed chest + dangling eye from the front
-    await panShot('s05_close', 4, v3(bx - 2, 4, bz + 2), v3(bx + 1, 3.5, bz + 1.5), v3(bx, 3, bz));
+    // wide orbit around the boss
+    await panShot('s05', 9, v3(138, 5, -28), v3(127, 4, -40), v3(bx, 3, bz));
   },
 ];
 
