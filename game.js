@@ -2491,8 +2491,19 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
     gable.position.set(bx + s * w / 2, by, bz);
     group.add(gable);
   }
+  // inner ceiling — a thin DoubleSide plane inside the roofline visible from below,
+  // so bulletholes shot while standing in the house show against a surface instead of
+  // floating in empty air. Fades with the rest of the shell during the house peek.
+  const ceilMat = new THREE.MeshLambertMaterial({ color: 0x524840, side: THREE.DoubleSide, transparent: true, depthWrite: false });
+  ceilMat.userData.owned = true;
+  ceilMat.userData.noDepthWrite = true; // keep depthWrite off so bulletholes show through the ceiling
+  const ceilMesh = new THREE.Mesh(BOX, ceilMat);
+  ceilMesh.scale.set(w - 0.6, 0.06, d - 0.6);
+  ceilMesh.position.set(bx, by, bz);
+  group.add(ceilMesh);
   if (!colliders) return null;
   roofSlope(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
+  const roofBox = colliders[colliders.length - 1]; // main roof body — covers the full footprint for peek
   // Gable end colliders — bullet-stopping triangles at each end of the roof
   for (const s of [-1, 1]) {
     const gx = bx + s * w / 2 - s * gdepth / 2; // centred on the gable body, flush with wall face
@@ -2500,9 +2511,7 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
     c.slope = { gx: 0, gz: s * rh / (w / 2), rh };
     colliders.push(c);
   }
-  // the slabs are pitched, but their collider's bounding box is a fine blocker to test
-  // against — it errs a touch large, which only means the roof clears a shade early
-  return { mats: [roofMat, gmat], box: colliders[colliders.length - 1], op: 1, want: 1 };
+  return { mats: [roofMat, gmat, ceilMat], box: roofBox, op: 1, want: 1 };
 }
 
 function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
@@ -12388,7 +12397,7 @@ function updateHousePeek(dt) {
     const clear = s.op < 1;
     for (const m of s.mats) {
       // transparent flips the material's shader program, so only poke it on the change
-      if (m.transparent !== clear) { m.transparent = clear; m.depthWrite = !clear; m.needsUpdate = true; }
+      if (m.transparent !== clear) { m.transparent = clear; if (!m.userData.noDepthWrite) m.depthWrite = !clear; m.needsUpdate = true; }
       m.opacity = s.op;
     }
     if (solid) peeking.delete(s); // settled solid, stop tracking it
