@@ -316,13 +316,13 @@ function openPolicies(){
   build();
   screenEl.classList.remove('hidden');
   screenEl.scrollTop = 0;
-  navIdx = -1;
+  navRow = -1; navCol = 0;
   if(location.hash !== '#policies') history.replaceState(null, '', '#policies');
 }
 function closePolicies(){
   if(P.playing) stop(false);
   screenEl.classList.add('hidden');
-  navIdx = -1; applyNav();
+  navRow = -1; navCol = 0; applyNav();
   if(location.hash === '#policies') history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('policiesopen').blur();
 }
@@ -331,31 +331,66 @@ document.getElementById('ptoblock').addEventListener('click', closePolicies);
 addEventListener('hashchange', ()=>{ if(location.hash==='#policies' && !isOpen()) openPolicies(); });
 
 /* ---- keyboard + gamepad navigation (only while the overlay is open) ---- */
-function navItems(){
+function navGrid(){
+  const ptiles = [...document.querySelectorAll('.ptile')].filter(el => el.offsetParent !== null);
+  const ppips = [...document.querySelectorAll('.ppip')].filter(el => el.offsetParent !== null);
+  const pdownBtns = [...document.querySelectorAll('.pdown-btn:not(.pdown-loading)')].filter(el => el.offsetParent !== null);
+  const ghbadge = document.querySelector('.pdown-ghbadge');
+  const ptoblock = document.getElementById('ptoblock');
   return [
-    ...document.querySelectorAll('.ptile'),
-    ...document.querySelectorAll('.ppip'),
-    ...document.querySelectorAll('.pdown-btn:not(.pdown-loading)'),
-    document.querySelector('.pdown-ghbadge'),
-    document.getElementById('ptoblock'),
-  ].filter(Boolean).filter(el => el.offsetParent !== null);
+    ptiles,
+    ppips,
+    pdownBtns,
+    ...(ghbadge && ghbadge.offsetParent !== null ? [[ghbadge]] : []),
+    ...(ptoblock && ptoblock.offsetParent !== null ? [[ptoblock]] : []),
+  ].filter(row => row.length > 0);
 }
-let navIdx = -1;
+function navItems(){ return navGrid().flat(); }
+let navRow = -1, navCol = 0;
+function getFocusedEl(){
+  const grid = navGrid();
+  if (navRow < 0 || navRow >= grid.length) return null;
+  const row = grid[navRow];
+  if (!row.length) return null;
+  navCol = ((navCol % row.length) + row.length) % row.length;
+  return row[navCol];
+}
 function applyNav(){
-  const items=navItems();
-  items.forEach((el,i)=>el.classList.toggle('navfocus', i===navIdx));
-  if(navIdx>=0 && items[navIdx]) items[navIdx].focus({preventScroll:true});
+  const grid = navGrid();
+  grid.flat().forEach(el => el.classList.remove('navfocus'));
+  const el = getFocusedEl();
+  if (el) {
+    el.classList.add('navfocus');
+    const saved = screenEl.scrollTop;
+    el.focus({preventScroll:true});
+    screenEl.scrollTop = saved;
+  }
 }
-function move(dir){
-  const n=navItems().length;
-  navIdx = navIdx<0 ? (dir>0?0:n-1) : (navIdx+dir+n)%n;
+function moveH(dir){
+  const grid = navGrid();
+  if (!grid.length) return;
+  if (navRow < 0) { navRow = 0; navCol = 0; applyNav(); return; }
+  const row = grid[navRow];
+  navCol = row.length ? (navCol + dir + row.length) % row.length : 0;
+  applyNav();
+}
+function moveV(dir){
+  const grid = navGrid();
+  if (!grid.length) return;
+  if (navRow < 0) { navRow = 0; navCol = 0; applyNav(); return; }
+  const oldCol = navCol;
+  navRow = (navRow + dir + grid.length) % grid.length;
+  const row = grid[navRow];
+  navCol = Math.min(oldCol, row.length - 1);
   applyNav();
 }
 addEventListener('keydown', e=>{
   if(!isOpen()) return;
   if(e.key==='Escape'){ e.preventDefault(); closePolicies(); return; }
-  if(['ArrowRight','ArrowDown'].includes(e.key)){ e.preventDefault(); move(1); }
-  else if(['ArrowLeft','ArrowUp'].includes(e.key)){ e.preventDefault(); move(-1); }
+  if(e.key==='ArrowRight'){ e.preventDefault(); moveH(1); }
+  else if(e.key==='ArrowLeft'){ e.preventDefault(); moveH(-1); }
+  else if(e.key==='ArrowDown'){ e.preventDefault(); moveV(1); }
+  else if(e.key==='ArrowUp'){ e.preventDefault(); moveV(-1); }
 });
 
 let gpPrev={};
@@ -371,23 +406,17 @@ function gpPoll(){
       dUp:pressed(12), dDown:pressed(13), dLeft:pressed(14), dRight:pressed(15),
       lx:ax[0]||0, ly:ax[1]||0, rx:ax[2]||0, ry:ax[3]||0,
     };
-    const moveDir = now.dRight||now.dDown||now.lx>0.55||now.ly>0.55||now.rb ? 1
-                  : now.dLeft||now.dUp||now.lx<-0.55||now.ly<-0.55||now.lb ? -1 : 0;
     if(isOpen()){
-      if(moveDir && !gpPrev._moveDir) move(moveDir);
-      if(now.a&&!gpPrev.a){ const el=navItems()[navIdx]; if(el) el.click(); }
+      if((now.dRight&&!gpPrev.dRight)||(now.rb&&!gpPrev.rb)) moveH(1);
+      if((now.dLeft&&!gpPrev.dLeft)||(now.lb&&!gpPrev.lb)) moveH(-1);
+      if((now.dDown&&!gpPrev.dDown)||(now.ly>0.55&&gpPrev.ly<=0.55)) moveV(1);
+      if((now.dUp&&!gpPrev.dUp)||(now.ly<-0.55&&gpPrev.ly>=-0.55)) moveV(-1);
+      if(now.a&&!gpPrev.a){ const el=getFocusedEl(); if(el) el.click(); }
       if(now.b&&!gpPrev.b) closePolicies();
       // R-stick vertical = scroll
       if(Math.abs(now.ry)>0.15) screenEl.scrollTop += now.ry * 12;
-    } else {
-      // On start screen: highlight and activate the policies link
-      const link = document.getElementById('policiesopen');
-      if(link){
-        if(moveDir && !gpPrev._moveDir){ link.focus(); link.classList.add('navfocus'); }
-        if(now.a&&!gpPrev.a && document.activeElement === link) link.click();
-      }
     }
-    gpPrev=now; gpPrev._moveDir=moveDir;
+    gpPrev=now;
     break;
   }
   requestAnimationFrame(gpPoll);

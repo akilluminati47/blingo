@@ -7370,7 +7370,7 @@ function currentScreen() {
 function menuFocusables() {
   const s = currentScreen();
   if (!s) return [];
-  return [...s.querySelectorAll('button, .card, #lobbycode, .lobbyrow, .vkkey')].filter(el => el.offsetParent !== null);
+  return [...s.querySelectorAll('button, .card, #lobbycode, .lobbyrow, .vkkey, #policiesopen')].filter(el => el.offsetParent !== null);
 }
 function setMenuFocus(i) {
   const els = menuFocusables();
@@ -8809,7 +8809,10 @@ function stepFrame(dt) {
   // swallows the gamepad, so "any button" wakes the audio instead of clicking the
   // menu waiting underneath
   if (splash.active) splashTick(dt);
-  else pollGamepad(dt);
+  else {
+    const pol = document.getElementById('policiesscreen');
+    if (!pol || pol.classList.contains('hidden')) pollGamepad(dt);
+  }
   // the death transition: fade runs on real time, the simulation runs on an ever-smaller
   // slice of it. The floor (5%) keeps the horde chewing right up until the black lands —
   // by the time the world would visibly stop, there's nothing left to see it stop.
