@@ -653,7 +653,7 @@ const cloudDome = new THREE.Mesh(
       }`
   })
 );
-cloudDome.renderOrder = -9;
+cloudDome.renderOrder = -8.8; // above settled/fading sky, below sun/moon/glare
 scene.add(cloudDome);
 // scratch colours for the per-frame cloud dressing (see updateCelestial)
 const _cFillW = new THREE.Color(), _cFillR = new THREE.Color();
