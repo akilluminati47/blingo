@@ -335,7 +335,7 @@ addEventListener('hashchange', ()=>{ if(location.hash==='#policies' && !isOpen()
 function navGrid(){
   const ptiles = [...document.querySelectorAll('.ptile')];
   const ppips = [...document.querySelectorAll('.ppip')];
-  const pdownBtns = [...document.querySelectorAll('.pdown-btn:not(.pdown-loading)')];
+  const pdownBtns = [...document.querySelectorAll('.pdown-btn')];
   const ghbadge = document.querySelector('.pdown-ghbadge');
   const ptoblock = document.getElementById('ptoblock');
   const pcredit = document.getElementById('pcreditlink');
