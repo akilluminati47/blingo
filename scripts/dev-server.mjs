@@ -4,7 +4,7 @@
 // Then open http://localhost:3000 in your browser, paste film_storyboard.js into console, run dirRunAll()
 
 import { createServer } from 'node:http';
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -38,7 +38,7 @@ const server = createServer((req, res) => {
         const b64 = data.replace(/^data:image\/png;base64,/, '');
         const file = join(OUT, name.replace(/[^a-zA-Z0-9_\-]/g, '_') + '.png');
         writeFileSync(file, Buffer.from(b64, 'base64'));
-        const count = existsSync(OUT) ? require('fs').readdirSync(OUT).length : 0;
+        const count = existsSync(OUT) ? readdirSync(OUT).length : 0;
         console.log(`  ✅ ${name}.png  (${count} files in keyframes/)`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true, file }));
@@ -53,7 +53,7 @@ const server = createServer((req, res) => {
 
   // Status endpoint
   if (req.method === 'GET' && req.url === '/status') {
-    const files = existsSync(OUT) ? require('fs').readdirSync(OUT) : [];
+    const files = existsSync(OUT) ? readdirSync(OUT) : [];
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ count: files.length, files }));
     return;
