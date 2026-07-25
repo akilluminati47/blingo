@@ -518,13 +518,13 @@ function drawSky(p, W) {
   // one clean sweep from zenith to horizon. The top stop is held flat for the first
   // stretch so the sphere's pole pinch lands inside a single tone — no more grey
   // circle stamped overhead — and no haze band muddying the horizon line.
-  const g = ctx.createLinearGradient(0, 0, 0, H * 0.62);
-  g.addColorStop(0, tint(p.top)); g.addColorStop(0.14, tint(p.top));
-  g.addColorStop(0.5, tint(p.mid)); g.addColorStop(0.85, tint(p.hor)); g.addColorStop(1, tint(p.hor));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, H * 0.62);
-  // below the horizon a single quiet floor tone — terrain and fog own that half anyway
-  ctx.fillStyle = '#' + new THREE.Color(tint(p.hor)).multiplyScalar(0.22).getHexString();
-  ctx.fillRect(0, H * 0.60, CW, H * 0.40);
+  const g = ctx.createLinearGradient(0, 0, 0, H * 0.78);
+  g.addColorStop(0, tint(p.top)); g.addColorStop(0.1, tint(p.top));
+  g.addColorStop(0.45, tint(p.mid)); g.addColorStop(0.75, tint(p.hor)); g.addColorStop(1, tint(p.hor));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, H * 0.78);
+  // thin dark floor band below — fog owns most of it
+  ctx.fillStyle = '#' + new THREE.Color(tint(p.hor)).multiplyScalar(0.18).getHexString();
+  ctx.fillRect(0, H * 0.76, CW, H * 0.24);
   const starA = (p.starA || 0) * W.sunny; // stars need clear night: fade with dawn AND cover
   if (starA > 0.05) {
     const srng = mulberry32(42);

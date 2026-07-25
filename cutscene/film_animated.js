@@ -26,6 +26,20 @@ const COUSINS = [
 const D = { shot: 0, frames: 0, CAP_W: 1920, CAP_H: 1080, FPS: 24 };
 const SAVE = 'http://localhost:3000/save';
 let _saveQ = Promise.resolve(), cleanup = [];
+let _prevDrawDist = 2;
+
+// ── Max out draw distance for shadows during capture ──
+function maxSettings() {
+  if (window.__dbg && window.__dbg.notches) {
+    _prevDrawDist = window.__dbg.notches.drawDist;
+    window.__dbg.setNotch('drawDist', 5, true);
+  }
+}
+function restoreSettings() {
+  if (window.__dbg && window.__dbg.notches) {
+    window.__dbg.setNotch('drawDist', _prevDrawDist, true);
+  }
+}
 
 function beginCapture() {
   const w = C.width || window.innerWidth, h = C.height || window.innerHeight;
@@ -106,13 +120,24 @@ function clearAll() {
 
 const SHOTS = [
 
-  // SHOT 1 — The Block (6s aerial pull-back)
+  // SHOT 1 — Low flyover with time progression: night → dawn → noon → sunset (18s)
   async function() {
-    console.log('🎬 S1: The Block');
-    setClock(18.5); setWeather('sunny'); setFog(30, 110);
+    console.log('🎬 S1: The Block flyover');
     clearAll();
     player.pos.set(20, groundHeight(20, 50), 50);
-    await panShot('s01', 6, v3(20, 35, 90), v3(20, 75, 140), v3(20, 5, 50));
+    // Night — start high behind the church, looking south toward the sleeping town
+    setClock(23.5); setWeather('sunny'); applyEnvironment(true);
+    await pause(300);
+    await panShot('s01a_night', 4, v3(28, 30, 100), v3(20, 22, 70), v3(20, 5, 50));
+    // Dawn — fly over the graveyard toward the plaza
+    setClock(6); applyEnvironment(true);
+    await panShot('s01b_dawn', 4, v3(20, 24, 70), v3(15, 18, 40), v3(10, 5, 30));
+    // Noon — descend across the plaza toward the bank
+    setClock(13); applyEnvironment(true);
+    await panShot('s01c_noon', 4, v3(15, 20, 40), v3(8, 14, 10), v3(5, 4, 0));
+    // Sunset — slow pan down to the bank steps, sun low behind camera
+    setClock(18.5); applyEnvironment(true);
+    await panShot('s01d_sunset', 6, v3(8, 16, 10), v3(2, 8, -20), v3(0, 3, -30));
   },
 
   // SHOT 2 — Cousins on bank steps facing the fountain (10s slow pan)
