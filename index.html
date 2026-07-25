@@ -1062,69 +1062,59 @@
   var wEl = document.querySelector('#typelore .white');
   if (!gEl || !wEl) return;
 
+  // Merge into one span so the wipe is a single clean pass
+  var el = gEl;
+  wEl.style.display = 'none';
+  el.style.color = '#5a5a64';
+
   var TYPE = 32, WIPE = 4, HOLD = 4200, BLANK = 900;
-  var gText = GOLD.join('\n'), wText = WHITE.join('\n');
+  var fullText = GOLD.join('\n') + '\n\n' + WHITE.join('\n') + '\n' + LUCK;
+  var goldLen = GOLD.join('\n').length;
+  var whiteStart = goldLen + 2; // skip two \n
+  var whiteEnd = whiteStart + WHITE.join('\n').length;
 
-  // Pre-render everything in grey
-  gEl.innerHTML = gText.replace(/\n/g, '<br>');
-  wEl.innerHTML = wText.replace(/\n/g, '<br>');
-  gEl.style.color = '#5a5a64';
-  wEl.style.color = '#5a5a64';
+  // Pre-render
+  el.innerHTML = fullText.replace(/\n/g, '<br>');
 
-  function render(el, text, pos, color) {
+  function render(pos) {
     var h = '';
-    for (var i = 0; i < text.length; i++) {
-      var c = text[i] === '\n' ? '<br>' : text[i];
-      h += '<span style="color:' + (i < pos ? color : '#5a5a64') + '">' + c + '</span>';
+    for (var i = 0; i < fullText.length; i++) {
+      var ch = fullText[i] === '\n' ? '<br>' : fullText[i];
+      var color, style = '';
+      if (i < pos) {
+        if (i < goldLen) { color = '#ffd9a8'; }
+        else { color = '#eef1f5'; style = 'font-style:normal;'; }
+      } else {
+        color = '#5a5a64';
+      }
+      h += '<span style="color:' + color + ';' + style + '">' + ch + '</span>';
     }
     el.innerHTML = h;
   }
 
-  function fill(el, text, color, speed, i, cb) {
-    i = i || 0;
-    if (i > text.length) { cb(); return; }
-    render(el, text, i, color);
-    setTimeout(function() { fill(el, text, color, speed, i + 1, cb); }, speed);
+  function fill(pos, cb) {
+    if (pos > fullText.length) { cb(); return; }
+    render(pos);
+    setTimeout(function() { fill(pos + 1, cb); }, TYPE);
+  }
+
+  function wipe(pos, cb) {
+    if (pos < 0) { el.innerHTML = fullText.replace(/\n/g, '<br>'); cb(); return; }
+    render(pos);
+    setTimeout(function() { wipe(pos - 1, cb); }, WIPE);
   }
 
   function pause(ms, cb) { setTimeout(cb, ms); }
 
   function cycle() {
-    // Reset to all grey
-    gEl.innerHTML = gText.replace(/\n/g, '<br>');
-    wEl.innerHTML = (wText + '\n' + LUCK).replace(/\n/g, '<br>');
-    gEl.style.color = '#5a5a64';
-    wEl.style.color = '#5a5a64';
-
-    fill(gEl, gText, '#ffd9a8', TYPE, 0, function() {
-      pause(200, function() {
-        // Fill main white text character by character, then flash the luck line
-        fill(wEl, wText, '#eef1f5', TYPE, 0, function() {
-          // Append luck line in one instant render
-          var full = wText + '\n' + LUCK;
-          render(wEl, full, full.length, '#eef1f5');
-          pause(HOLD, function() {
-            // Wipe everything right-to-left at WIPE speed
-            var total = gText.length + 1 + full.length;
-            var combined = gText + '\n' + full;
-            (function wipeAll(i) {
-              if (i < 0) { pause(BLANK, cycle); return; }
-              var gEnd = gText.length;
-              var gHtml = '', wHtml = '';
-              for (var j = 0; j < gText.length; j++) {
-                var c = gText[j] === '\n' ? '<br>' : gText[j];
-                gHtml += '<span style="color:' + (j < i ? '#ffd9a8' : '#5a5a64') + '">' + c + '</span>';
-              }
-              for (var k = 0; k < full.length; k++) {
-                var d = full[k] === '\n' ? '<br>' : full[k];
-                var wIdx = gText.length + 1 + k;
-                wHtml += '<span style="color:' + (wIdx < i ? '#eef1f5' : '#5a5a64') + '">' + d + '</span>';
-              }
-              gEl.innerHTML = gHtml;
-              wEl.innerHTML = wHtml;
-              setTimeout(function() { wipeAll(i - 1); }, WIPE);
-            })(total);
-          });
+    el.innerHTML = fullText.replace(/\n/g, '<br>');
+    // Fill gold
+    fill(0, function() {
+      // Main white text is already done — flash luck line
+      render(fullText.length);
+      pause(HOLD, function() {
+        wipe(fullText.length - 1, function() {
+          pause(BLANK, cycle);
         });
       });
     });
