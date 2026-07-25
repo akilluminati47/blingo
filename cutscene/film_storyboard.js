@@ -18,8 +18,8 @@ const D = {
 };
 
 // ── Grab game internals from the dev toolbox ──
-const $ = window.__dbg && window.__dbg.director;
-if (!$) { console.error('window.__dbg.director not found — is the game loaded?'); throw new Error('Missing __dbg.director'); }
+const $ = window.__dbg;
+if (!$) { console.error('window.__dbg not found — is the game loaded?'); throw new Error('Missing __dbg'); }
 const {
   renderer, camera, scene, game, player, settings,
   wxSet, applyEnvironment, COUSINS, buildBlob, spawnZombie,
