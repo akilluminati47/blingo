@@ -8863,10 +8863,11 @@ function updatePlayer(dt) {
   // mid-meal (eating, growing, the look-around): rooted to the spot, that's the ritual
   if (player.giantPhase === 'eat' || player.giantPhase === 'grow' || player.giantPhase === 'rise') { mx = 0; my = 0; }
   const sprinting = (keys['ShiftLeft'] || keys['ShiftRight'] || sprintToggle || input.sprintGamepad) && ml > 0.1 && !player.downed;
-  // bare fists keep you light on your feet: 5% quicker stride, 10% springier jumps
+  // bare fists keep you light on your feet: 20% quicker stride, slide, and hop
   const fists = player.weapon.id === 'fists';
+  const fistMul = fists ? 1.20 : 1;
   // downed you can still move, but only at a drag; a chili giant covers ground like a boss
-  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73) * (fists ? 1.05 : 1) * (player.downed ? 0.24 : 1) * (playerGiantOn() ? 1.45 : 1);
+  const speed = (sprinting ? 7.26 * player.sprintMult : 4.73) * fistMul * (player.downed ? 0.24 : 1) * (playerGiantOn() ? 1.45 : 1);
 
   // camera-relative: forward = away from camera
   const sin = Math.sin(player.camYaw), cos = Math.cos(player.camYaw);
@@ -8890,13 +8891,13 @@ function updatePlayer(dt) {
   if (player.slideT > 0) {
     player.slideT -= dt;
     const s = Math.max(player.slideT, 0) / 0.55;
-    mvx += player.slideDX * 7.5 * s * gSlide;
-    mvz += player.slideDZ * 7.5 * s * gSlide;
+    mvx += player.slideDX * 7.5 * s * gSlide * fistMul;
+    mvz += player.slideDZ * 7.5 * s * gSlide * fistMul;
   }
   if (player.hopT > 0) { // slide-hop momentum carried through the air
     player.hopT -= dt;
-    mvx += player.slideDX * 6.5 * gSlide;
-    mvz += player.slideDZ * 6.5 * gSlide;
+    mvx += player.slideDX * 6.5 * gSlide * fistMul;
+    mvz += player.slideDZ * 6.5 * gSlide * fistMul;
   }
   if (player.stumbleT > 0) {
     player.stumbleT -= dt;
@@ -8907,7 +8908,7 @@ function updatePlayer(dt) {
   // riding a drop kick: the dive owns your movement outright — no air steering, no
   // slide momentum on top, you go where you committed
   if (player.dropKick) {
-    const sp = player.dropKickHard ? 11 : 8.5;
+    const sp = (player.dropKickHard ? 11 : 8.5) * fistMul;
     mvx = player.dkX * sp; mvz = player.dkZ * sp;
   }
   let nx = player.pos.x + mvx * dt;
