@@ -462,6 +462,9 @@
   #startscreen > p { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     font-size:17px; line-height:1.6; max-width:780px; }
   .screen p.lore { color:#ffd9a8; font-style:italic; }
+  #typelore { min-height:5.2em; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; color:#ffd9a8; font-style:italic; font-size:16px; line-height:1.7; margin:10px auto 14px; max-width:54ch; }
+  #typeloreCursor { color:#6fd8ff; animation:blink 0.9s step-end infinite; }
+  @keyframes blink { 50% { opacity:0; } }
 
   /* ---------- reconnect soft-pause banner (world stays visible behind it) ---------- */
   #reconnecting { position:fixed; inset:0; z-index:34; display:flex; align-items:center; justify-content:center;
@@ -865,9 +868,7 @@
 
 <div class="screen" id="startscreen">
   <h1>BL<span class="z">I</span>NGO</h1>
-  <p class="lore">When the horde came, every blob turned . . except six cousins.<br>The bites never took.</p>
-  <p class="lore">Now the immune cousins are clearing the wasteland, block by block, so the rest of blob-kind can finally move back home.</p>
-  <p>Pick your cousin. The other five are out there somewhere, find them, recruit them, fight together. Loot the glowing crates for guns &amp; ammo.</p>
+  <div id="typelore"><span id="typeloreLine" aria-live="polite"></span><span id="typeloreCursor" aria-hidden="true">|</span></div>
   <div id="prestige"></div>
   <div id="cousincards"></div>
   <div id="modepanel">
@@ -1043,5 +1044,66 @@
 
 <script type="module" src="game.js"></script>
 <script type="module" src="policies.js"></script>
+<script>
+(function() {
+  const LINES = [
+    "When the horde came, every blob turned . . except six cousins.",
+    "The bites never took.",
+    "",
+    "Now the immune cousins are clearing the wasteland, block by block,",
+    "so the rest of blob-kind can finally move back home.",
+    "",
+    "Pick your cousin. The other five are out there somewhere,",
+    "find them, recruit them, fight together.",
+    "Loot the glowing crates for guns & ammo."
+  ];
+
+  const el = document.getElementById('typeloreLine');
+  const cursor = document.getElementById('typeloreCursor');
+  if (!el || !cursor) return;
+
+  const TYPE_MS = 45;       // ms per character
+  const LINE_PAUSE = 420;   // pause after each line
+  const HOLD_MS = 3500;     // hold after full block before wipe
+  const WIPE_MS = 18;       // ms per character during backspace
+  const BLANK_PAUSE = 900;  // pause while blank before retyping
+
+  let fullText = '';
+  for (const L of LINES) fullText += L + (L ? '\n' : '\n');
+
+  function typeOut(i, cb) {
+    if (i > fullText.length) { cb(); return; }
+    const ch = fullText[i];
+    el.textContent += ch === '\n' ? '\n' : ch;
+    setTimeout(() => typeOut(i + 1, cb), TYPE_MS);
+  }
+
+  function wipe(i, cb) {
+    if (i < 0) { cb(); return; }
+    const txt = el.textContent;
+    el.textContent = txt.slice(0, -1);
+    setTimeout(() => wipe(i - 1, cb), WIPE_MS);
+  }
+
+  function cycle() {
+    el.textContent = '';
+    cursor.style.display = 'inline';
+    const totalChars = fullText.length;
+    typeOut(0, () => {
+      setTimeout(() => {
+        cursor.style.display = 'none';
+        setTimeout(() => {
+          cursor.style.display = 'inline';
+          wipe(totalChars - 1, () => {
+            setTimeout(cycle, BLANK_PAUSE);
+          });
+        }, HOLD_MS);
+      }, LINE_PAUSE);
+    });
+  }
+
+  cycle();
+})();
+</script>
 </body>
 </html>
