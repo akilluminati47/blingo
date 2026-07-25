@@ -548,7 +548,7 @@ const CLOUD_THOR = Math.sqrt(2 * CLOUD_RP * CLOUD_CH + CLOUD_CH * CLOUD_CH); // 
 const cloudDome = new THREE.Mesh(
   new THREE.SphereGeometry(232, 24, 16),
   new THREE.ShaderMaterial({
-    side: THREE.BackSide, transparent: true, depthWrite: false, depthTest: false, fog: false,
+    side: THREE.BackSide, transparent: true, depthWrite: false, fog: false,
     uniforms: cloudUni,
     vertexShader: /* glsl */`
       varying vec3 vP;
@@ -611,7 +611,7 @@ const cloudDome = new THREE.Mesh(
       }`
   })
 );
-cloudDome.renderOrder = -8.8; // above settled/fading sky, below sun/moon/glare
+cloudDome.renderOrder = -9;
 scene.add(cloudDome);
 // scratch colours for the per-frame cloud dressing (see updateCelestial)
 const _cFillW = new THREE.Color(), _cFillR = new THREE.Color();
