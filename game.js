@@ -11579,11 +11579,10 @@ function buildCrow(x, y, z, roost) {
     const tip = new THREE.Group(); tip.position.set(0.40 * sgn, 0, 0);
     const outer = new THREE.Mesh(SPHERE, mat(blk)); outer.scale.set(0.14, 0.014, 0.10); outer.position.set(0.12 * sgn, 0, -0.01);
     tip.add(outer);
-    for (let f = 0; f < 3; f++) { // primary feather fingers on the trailing edge
-      const fe = box(0.06, 0.035, 0.18, blk);
-      fe.position.set((0.05 + f * 0.085) * sgn, 0, -0.18 + f * 0.02);
-      tip.add(fe);
-    }
+    // staggered primary feathers: shortest innermost, longest outermost, all rooted inside the wing
+    const f0 = box(0.06, 0.032, 0.11, blk); f0.position.set(0.04 * sgn, 0, -0.14); tip.add(f0);
+    const f1 = box(0.06, 0.034, 0.15, blk); f1.position.set(0.13 * sgn, 0, -0.13); tip.add(f1);
+    const f2 = box(0.06, 0.035, 0.19, blk); f2.position.set(0.22 * sgn, 0, -0.12); tip.add(f2);
     roll.add(tip); g.add(piv);
     return { piv, roll, tip };
   };
