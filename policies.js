@@ -366,7 +366,11 @@ function applyNav(){
   const el = getFocusedEl();
   if (el) {
     el.classList.add('navfocus');
-    el.scrollIntoView({block:'nearest', behavior:'instant'});
+    const cr = screenEl.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    if (er.top < cr.top || er.bottom > cr.bottom) {
+      el.scrollIntoView({block:'nearest', behavior:'instant'});
+    }
   }
 }
 function moveH(dir){
@@ -410,8 +414,8 @@ function gpPoll(){
       lx:ax[0]||0, ly:ax[1]||0, rx:ax[2]||0, ry:ax[3]||0,
     };
     if(isOpen()){
-      if((now.dRight&&!gpPrev.dRight)||(now.rb&&!gpPrev.rb)) moveH(1);
-      if((now.dLeft&&!gpPrev.dLeft)||(now.lb&&!gpPrev.lb)) moveH(-1);
+      if((now.dRight&&!gpPrev.dRight)||(now.rb&&!gpPrev.rb)||(now.lx>0.55&&gpPrev.lx<=0.55)) moveH(1);
+      if((now.dLeft&&!gpPrev.dLeft)||(now.lb&&!gpPrev.lb)||(now.lx<-0.55&&gpPrev.lx>=-0.55)) moveH(-1);
       if((now.dDown&&!gpPrev.dDown)||(now.ly>0.55&&gpPrev.ly<=0.55)) moveV(1);
       if((now.dUp&&!gpPrev.dUp)||(now.ly<-0.55&&gpPrev.ly>=-0.55)) moveV(-1);
       if(now.a&&!gpPrev.a){ const el=getFocusedEl(); if(el) el.click(); }
