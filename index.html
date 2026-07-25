@@ -1062,7 +1062,7 @@
   var wEl = document.querySelector('#typelore .white');
   if (!gEl || !wEl) return;
 
-  var TYPE = 42, WIPE = 4, HOLD = 4200, BLANK = 900;
+  var TYPE = 32, WIPE = 4, HOLD = 4200, BLANK = 900;
   var gText = GOLD.join('\n'), wText = WHITE.join('\n');
 
   // Pre-render everything in grey
@@ -1096,29 +1096,29 @@
     gEl.style.color = '#5a5a64';
     wEl.style.color = '#5a5a64';
 
-    // The combined white + luck text
-    var wFull = wText + '\n' + LUCK;
-
     fill(gEl, gText, '#ffd9a8', TYPE, 0, function() {
       pause(200, function() {
-        fill(wEl, wFull, '#eef1f5', TYPE, 0, function() {
+        // Fill main white text character by character, then flash the luck line
+        fill(wEl, wText, '#eef1f5', TYPE, 0, function() {
+          // Append luck line in one instant render
+          var full = wText + '\n' + LUCK;
+          render(wEl, full, full.length, '#eef1f5');
           pause(HOLD, function() {
             // Wipe everything right-to-left at WIPE speed
-            var total = gText.length + 1 + wFull.length;
-            var combined = gText + '\n' + wFull;
+            var total = gText.length + 1 + full.length;
+            var combined = gText + '\n' + full;
             (function wipeAll(i) {
               if (i < 0) { pause(BLANK, cycle); return; }
-              // Colour up to i in gold, then up to gText.length in gold, then rest in white
               var gEnd = gText.length;
               var gHtml = '', wHtml = '';
               for (var j = 0; j < gText.length; j++) {
                 var c = gText[j] === '\n' ? '<br>' : gText[j];
                 gHtml += '<span style="color:' + (j < i ? '#ffd9a8' : '#5a5a64') + '">' + c + '</span>';
               }
-              for (var k = 0; k < wFull.length; k++) {
-                var d = wFull[k] === '\n' ? '<br>' : wFull[k];
-                var gIdx = gText.length + 1 + k;
-                wHtml += '<span style="color:' + (gIdx < i ? '#eef1f5' : '#5a5a64') + '">' + d + '</span>';
+              for (var k = 0; k < full.length; k++) {
+                var d = full[k] === '\n' ? '<br>' : full[k];
+                var wIdx = gText.length + 1 + k;
+                wHtml += '<span style="color:' + (wIdx < i ? '#eef1f5' : '#5a5a64') + '">' + d + '</span>';
               }
               gEl.innerHTML = gHtml;
               wEl.innerHTML = wHtml;
