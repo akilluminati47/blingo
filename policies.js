@@ -389,9 +389,6 @@ if(location.hash === '#policies') openPolicies();
   const badgeEl = document.getElementById('pdown-badge');
   if (!verEl || !btnExe || !btnApk) return;
   const CACHE_KEY = 'blingo_release', CACHE_TTL = 300000; // 5 min
-  const ua = navigator.userAgent || '';
-  const isWin = /Windows/i.test(ua), isAndroid = /Android/i.test(ua);
-  const isMac = /Mac/i.test(ua), isLinux = /Linux/i.test(ua) && !isAndroid;
   let data = null;
   try {
     const cached = sessionStorage.getItem(CACHE_KEY);
@@ -415,13 +412,11 @@ if(location.hash === '#policies') openPolicies();
   btnApk.classList.remove('pdown-loading');
   if (exeAsset) {
     btnExe.href = exeAsset.browser_download_url;
-    if (isWin) btnExe.classList.add('recommended');
   } else { btnExe.style.opacity = '0.5'; btnExe.title = 'No Windows build for this release'; }
   if (apk) {
     btnApk.href = apk.browser_download_url;
-    if (isAndroid) btnApk.classList.add('recommended');
   } else { btnApk.style.opacity = '0.5'; btnApk.title = 'No Android build for this release'; }
   const ghLink = document.getElementById('pdown-ghlink');
   if (ghLink && data.html_url) ghLink.href = data.html_url;
-  if (data.tag_name) { badgeEl.hidden = false; badgeEl.textContent = data.tag_name; badgeEl.className = 'pdown-badge'; }
+  if (data.tag_name && badgeEl) { badgeEl.hidden = false; badgeEl.textContent = data.tag_name; }
 })();

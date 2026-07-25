@@ -729,22 +729,21 @@
   .pdoc a:hover { border-bottom-color:#6fd8ff; }
   .pdown-benefits { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:14px 0 18px; }
   .pdown-benefit { background:rgba(255,255,255,.06); border-radius:10px; padding:10px 12px; display:flex; align-items:center; gap:8px; font-size:13px; color:#c8d0d8; }
-  .pdown-bicon { font-size:16px; flex-shrink:0; }
+  .pdown-bicon { width:22px; height:22px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+  .pdown-bicon svg { width:18px; height:18px; stroke:#aab4c0; }
   .pdown-btns { display:flex; gap:12px; flex-wrap:wrap; }
   .pdown-btn { flex:1; min-width:140px; display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); border-radius:12px; padding:12px 16px; text-decoration:none; color:#e8edf2; transition:background .15s,border-color .15s; }
   .pdown-btn:hover { background:rgba(111,216,255,.12); border-color:#6fd8ff; }
-  .pdown-btn.recommended { border-color:#6fd8ff; background:rgba(111,216,255,.08); cursor:default; }
   .pdown-btnicon { width:28px; height:28px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
   .pdown-btnicon svg { width:24px; height:24px; fill:#aab4c0; }
-  .pdown-btn:hover .pdown-btnicon svg, .pdown-btn.recommended .pdown-btnicon svg { fill:#6fd8ff; }
+  .pdown-btn:hover .pdown-btnicon svg { fill:#6fd8ff; }
   .pdown-btnlabel { font-size:13px; line-height:1.3; }
   .pdown-btnlabel small { display:block; color:#8892a0; font-size:11px; }
-  .pdown-github { margin-top:14px; font-size:13px; }
-  .pdown-github a { color:#9aa4b2; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
-  .pdown-github a:hover { color:#6fd8ff; }
-  .pdown-github svg { width:18px; height:18px; fill:#9aa4b2; }
-  .pdown-github a:hover svg { fill:#6fd8ff; }
-  .pdown-badge { display:inline-flex; align-items:center; gap:4px; background:rgba(111,216,255,.12); border:1px solid rgba(111,216,255,.25); border-radius:6px; padding:2px 8px; font-size:11px; color:#6fd8ff; margin-left:6px; vertical-align:middle; }
+  .pdown-ghbadge { display:flex; align-items:center; gap:8px; width:100%; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); border-radius:12px; padding:12px 16px; text-decoration:none; color:#9aa4b2; font-size:13px; transition:background .15s,border-color .15s,color .15s; margin-top:14px; box-sizing:border-box; }
+  .pdown-ghbadge:hover { background:rgba(111,216,255,.08); border-color:#6fd8ff; color:#c8e8ff; }
+  .pdown-ghbadge svg { width:20px; height:20px; fill:#9aa4b2; flex-shrink:0; }
+  .pdown-ghbadge:hover svg { fill:#6fd8ff; }
+  .pdown-badge { margin-left:auto; display:inline-flex; align-items:center; background:rgba(111,216,255,.14); border:1px solid rgba(111,216,255,.28); border-radius:6px; padding:3px 10px; font-size:11px; color:#8ad4ff; white-space:nowrap; font-weight:700; }
   .pdown-loading { opacity:.6; pointer-events:none; }
   @media(max-width:420px){ .pdown-benefits { grid-template-columns:1fr; } .pdown-btns { flex-direction:column; } }
   .pret { display:flex; justify-content:center; margin-top:32px; }
@@ -928,13 +927,13 @@
       </div>
 
       <div class="pdoc" id="pdownload">
-        <h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" style="vertical-align:-5px;margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.387.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.73.083-.73 1.205.085 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.604-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.605-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z" fill="#aab4c0"/></svg>Get the App</h2>
+        <h2><svg width="28" height="28" viewBox="0 0 24 24" fill="none" style="vertical-align:-5px;margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.387.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.73.083-.73 1.205.085 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.604-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.605-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z" fill="#aab4c0"/></svg>Install the Game</h2>
         <p class="pstamp" id="pdownver">Checking latest release...</p>
         <div class="pdown-benefits">
-          <div class="pdown-benefit"><span class="pdown-bicon">&#x26A1;</span><span>Enhanced Performance</span></div>
-          <div class="pdown-benefit"><span class="pdown-bicon">&#x1F4E1;</span><span>Gaming Offline</span></div>
-          <div class="pdown-benefit"><span class="pdown-bicon">&#x1F504;</span><span>Check for Updates</span></div>
-          <div class="pdown-benefit"><span class="pdown-bicon">&#x1F3AE;</span><span>Full Screen Native</span></div>
+          <div class="pdown-benefit"><span class="pdown-bicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10c0-3 1.2-5.4 3-7 1.8 1.6 3 4 3 7v6H9v-6z"/><path d="M8.4 16h7.2v3H8.4z"/></svg></span><span>Enhanced Performance</span></div>
+          <div class="pdown-benefit"><span class="pdown-bicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="1.2"/><path d="M4 11h16M12 7v13M4 7l2.5-3h11L20 7"/></svg></span><span>Gaming Offline</span></div>
+          <div class="pdown-benefit"><span class="pdown-bicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.8 2M9.5 3h5"/></svg></span><span>Check for Updates</span></div>
+          <div class="pdown-benefit"><span class="pdown-bicon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a7 7 0 0 0-7 7c0 2.6 1.2 4.4 3 5.6V19h8v-3.4c1.8-1.2 3-3 3-5.6a7 7 0 0 0-7-7z"/><circle cx="9.2" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="14.8" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><path d="M10 19v2.2M14 19v2.2"/></svg></span><span>Full Screen Native</span></div>
         </div>
         <div class="pdown-btns">
           <a class="pdown-btn pdown-loading" id="pdown-exe" href="#" target="_blank" rel="noopener noreferrer">
@@ -942,17 +941,15 @@
             <span class="pdown-btnlabel">Windows <small>.exe</small></span>
           </a>
           <a class="pdown-btn pdown-loading" id="pdown-apk" href="#" target="_blank" rel="noopener noreferrer">
-            <span class="pdown-btnicon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="5" r="1.2" fill="#1a1a2e"/><rect x="6" y="14" width="12" height="7" rx="3.5"/><rect x="7" y="8" width="3" height="8" rx="1.5"/><rect x="14" y="8" width="3" height="8" rx="1.5"/></svg></span>
+            <span class="pdown-btnicon"><svg viewBox="0 0 24 24"><path d="M6 18V9a6 6 0 0112 0v9H6z" fill="currentColor"/><circle cx="9" cy="12" r="1.3" fill="#1a1a2e"/><circle cx="15" cy="12" r="1.3" fill="#1a1a2e"/><line x1="8.5" y1="5" x2="6.5" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="15.5" y1="5" x2="17.5" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
             <span class="pdown-btnlabel">Android <small>.apk</small></span>
           </a>
         </div>
-        <p class="pdown-github">
-          <a href="https://github.com/akilluminati47/blingo/releases/latest" target="_blank" rel="noopener noreferrer" id="pdown-ghlink">
-            <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.387.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.73.083-.73 1.205.085 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.604-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.605-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>
-            View all releases on GitHub
-          </a>
-          <span id="pdown-badge" hidden></span>
-        </p>
+        <a class="pdown-ghbadge" href="https://github.com/akilluminati47/blingo/releases/latest" target="_blank" rel="noopener noreferrer" id="pdown-ghlink">
+          <svg viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.387.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.73.083-.73 1.205.085 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.418-1.305.762-1.604-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.605-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>
+          <span>View all releases on GitHub</span>
+          <span class="pdown-badge" id="pdown-badge" hidden></span>
+        </a>
       </div>
     </section>
 
