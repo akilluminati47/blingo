@@ -2262,6 +2262,7 @@ function terrainDisc(r, segs, cx, cz, material, lift = 0, rings = 0) {
 // indoor: a box someone stashed under a roof rather than one left lying in a field. Worth
 // more when you open it — see rollLoot.
 function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf, indoor) {
+  if (net.role === 'client') return null;
   const g = new THREE.Group();
   const base = box(0.7, 0.5, 0.7, 0x8a5a2b);
   base.position.y = 0.25;
@@ -2279,7 +2280,7 @@ function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf, indoor) {
   g.rotation.y = rng() * TAU;
   group.add(g);
   // a shelf only ever stands inside a building, so anything on one is indoors by definition
-  const crate = { mesh: g, lid, trim, glow, opened: false, shrink: 0, pos: new THREE.Vector3(x, y, z), t: rng() * 10, list: crateList, indoor: !!indoor || !!onShelf };
+  const crate = { mesh: g, lid, trim, glow, opened: false, shrink: 0, pos: new THREE.Vector3(x, y, z), t: rng() * 10, list: crateList, indoor: !!indoor || !!onShelf, nid: ++net.pkid };
   crateList.push(crate);
   allCrates.push(crate);
   if (!onShelf) {
@@ -2291,6 +2292,7 @@ function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf, indoor) {
 }
 // respawn a crate somewhere random in a loaded chunk
 function respawnCrateElsewhere() {
+  if (net.role === 'client') return;
   const keys = [...chunks.keys()];
   for (let tries = 0; tries < 14; tries++) {
     const ch = chunks.get(keys[(Math.random() * keys.length) | 0]);
@@ -8541,6 +8543,12 @@ function updateSkinOfferTimers(dt) {
       ? (c.skinOfferT || 0) + dt : 0;
 }
 function openCrate(cr) {
+  // ghost crate on a client: ask the host to open it — the grant comes back as giveWeapon/pickup
+  // and the crate leaves the stream on the next snapshot
+  if (cr.netGhost && net.role === 'client') {
+    try { net.conns[0].send({ t: 'crateOpen', i: cr.nid }); } catch(e) {}
+    return;
+  }
   cr.opened = true;
   game.cratesOpened++;
   hud.crates.textContent = game.cratesOpened;
@@ -12123,8 +12131,32 @@ function updateCrows(dt) {
               c.hopTo = { x: s.x, z: s.z };
               c.hopP = 0;
               if (c.roost.face == null) g.rotation.y = Math.atan2(s.x - g.position.x, 0) + (Math.random() - 0.5) * 0.8;
-            }
-          }
+    }
+  }
+  // host crates mirrored as ghosts: same crates on every screen, first to open one wins.
+  // When a ghost leaves the stream (opened by someone), it disappears on every client.
+  if (m.cr) {
+    const seenC = new Set();
+    for (const e of m.cr) {
+      seenC.add(e.i);
+      if (!allCrates.some(c => c.netGhost && c.nid === e.i)) {
+        const y = groundHeight(e.x, e.z) + 0.02;
+        const g = new THREE.Group();
+        const baseM = box(0.7, 0.5, 0.7, 0x8a5a2b); baseM.position.y = 0.25; g.add(baseM);
+        const trimM = box(0.74, 0.1, 0.74, 0xc8a44a, { emissive: 0x886600, emissiveIntensity: 0.6 }); trimM.position.y = 0.5; g.add(trimM);
+        const lidM = box(0.72, 0.1, 0.72, 0x6e451f); lidM.position.y = 0.57; g.add(lidM);
+        const glowM = makeLootGlow(0xffdc78, { r: 0.78, y: 1.05, s: 1.7 }); g.add(glowM);
+        g.position.set(e.x, y, e.z);
+        scene.add(g);
+        const ghost = { mesh: g, lid: lidM, trim: trimM, glow: glowM, opened: false, shrink: 0, pos: new THREE.Vector3(e.x, y, e.z), netGhost: true, nid: e.i, t: Math.random() * 10, list: [], indoor: false };
+        allCrates.push(ghost);
+      }
+    }
+    for (let i = allCrates.length - 1; i >= 0; i--) {
+      const c = allCrates[i];
+      if (c.netGhost && !seenC.has(c.nid)) { c.mesh.removeFromParent(); allCrates.splice(i, 1); }
+    }
+  }
         }
       }
     }
@@ -12158,6 +12190,7 @@ function updateFountain(dt) {
 function updateCrates(dt) {
   for (let i = allCrates.length - 1; i >= 0; i--) {
     const cr = allCrates[i];
+    if (cr.netGhost) continue; // ghost crates are managed by the snapshot stream
     cr.t += dt;
     if (!cr.opened) {
       const p = animateLootGlow(cr.glow, game.time);
@@ -12878,6 +12911,16 @@ function wireHostConn(conn) {
           try { conn.send({ t: 'pkGive', k: p.kind === 'ammo' ? 0 : p.kind === 'medkit' ? 1 : 2 }); } catch (e) {}
         }
       }
+    } else if (m.t === 'crateOpen') {
+      const cr2 = allCrates.find(c => !c.netGhost && c.nid === m.i && !c.opened);
+      if (cr2) {
+        cr2.opened = true; cr2.glow.visible = false; cr2.trim.visible = false;
+        game.cratesOpened++; hud.crates.textContent = game.cratesOpened;
+        SFX.crate();
+        const loot = rollCrateLoot(Math.random, cr2);
+        const code = loot === 'sniperammo' ? 'sa' : loot === 'ammo' ? 'am' : loot === 'medkit' ? 'hp' : loot;
+        try { conn.send({ t: 'crateGive', k: code }); } catch(e) {}
+      }
     } else if (m.t === 'crowShot') {
       // a client's round found a bird: the host lands the kill — the gore plays here, the
       // drop spawns here (and streams back), and the ghost leaves every screen's flock
@@ -13049,6 +13092,8 @@ function netHostTick(dt) {
   // ops): kind coded small, so every screen can SEE and walk up on the same loot
   const pk = pickups.filter(p => !p.netGhost).map(p => ({ i: p.nid,
     k: p.kind === 'ammo' ? 0 : p.kind === 'medkit' ? 1 : 2, x: R(p.pos.x), z: R(p.pos.z) }));
+  // host-owned crates: stream every unopened crate so all screens see and can loot them
+  const cr = allCrates.filter(c => !c.opened && !c.netGhost).map(c => ({ i: c.nid, x: R(c.pos.x), z: R(c.pos.z) }));
   // the murder streams whole (it's small): same birds on the same ledges on every screen,
   // so when Blomba picks one out of the sky, everyone watches the SAME crow drop
   base.cw = crows.map(c => ({ i: c.nid, x: R(c.g.position.x), y: R(c.g.position.y), z: R(c.g.position.z),
@@ -13071,10 +13116,11 @@ function netHostTick(dt) {
       const sx = seat ? seat.pos.x : player.pos.x, sz = seat ? seat.pos.z : player.pos.z;
       base.zb = zb.filter(e => e.bo || e.fb || Math.hypot(e.x - sx, e.z - sz) < INTEREST);
       base.pk = pk.filter(e => Math.hypot(e.x - sx, e.z - sz) < INTEREST);
+      base.cr = cr.filter(e => Math.hypot(e.x - sx, e.z - sz) < INTEREST);
       conn.send(base);
     } catch (e) {}
   }
-  base.zb = null; base.pk = null; // never let the last client's filtered lists linger on the shared object
+  base.zb = null; base.pk = null; base.cr = null; // never let the last client's filtered lists linger on the shared object
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs) {
   const R = v => Math.round(v * 20) / 20;
@@ -13342,6 +13388,31 @@ function netClientData(m, conn, peer, code) {
     SFX.pickup();
     rumble(50, 0.2, 0.4);
     updateAmmoHUD();
+  } else if (m.t === 'crateGive') {
+    if (playerGiantOn()) {
+      if (m.k === 'hp') { player.hp = Math.min(player.maxHp, player.hp + 40); toast('+40 HP'); SFX.pickup(); }
+      else { toast('TOO BIG FOR THE GUNS . .'); }
+    } else if (m.k === 'sa') {
+      const add = Math.ceil(WEAPONS.sniper.mag * (1.5 + Math.random()) * player.ammoMult);
+      reserves.sniper = (reserves.sniper | 0) + add;
+      toast(`+${add} SNIPER AMMO`);
+      SFX.pickup(); updateAmmoHUD();
+    } else if (m.k === 'am') {
+      if (player.weapon.melee) giveWeapon('pistol');
+      else {
+        const add = Math.ceil(player.weapon.mag * (1.5 + Math.random()) * player.ammoMult);
+        reserves[player.weapon.id] = (reserves[player.weapon.id] | 0) + add;
+        toast(`+${add} ${player.weapon.name.toUpperCase()} AMMO`);
+        SFX.pickup(); updateAmmoHUD();
+      }
+    } else if (m.k === 'hp') {
+      player.hp = Math.min(player.maxHp, player.hp + 40);
+      toast('+40 HP'); SFX.pickup();
+    } else {
+      giveWeapon(m.k);
+    }
+    rumble(110, 0.3, 0.5);
+    game.cratesOpened++; hud.crates.textContent = game.cratesOpened;
   } else if (m.t === 'finale') {
     // grandma remembered: melt out of wherever we are (the splash blur), cross the map,
     // and bloom back in on the ring spot the host set for us (player.finaleTp, updateJelly)
