@@ -393,9 +393,9 @@ function makeLootGlow(color, { r = 1, y = 0.9, s = 1.6, dark = false } = {}) {
 // losing his shield) without tearing the group down.
 function animateLootGlow(g, t) {
   const u = g.userData.glow;
-  if (!u) return;
+  if (!u) return 0;
   g.visible = u.mul > 0.02;
-  if (!g.visible) return;
+  if (!g.visible) return 0;
   const p = Math.sin(t * 3);
   u.ring.scale.setScalar(1 + p * 0.12);
   u.ring.material.opacity = (0.38 + p * 0.18) * u.mul;
@@ -404,6 +404,8 @@ function animateLootGlow(g, t) {
   u.orb.material.opacity = (0.6 + p * 0.24) * u.mul;
   u.orb.scale.setScalar(u.s * (1 + p * 0.07));
   u.orb.position.y = u.orbY + p * 0.05;
+  u._p = p;
+  return p;
 }
 // Extra Gore at full is the "gore horde": locally it's the slider maxed; a client also
 // inherits it from the host, since the host's world is the one doing the spawning. It lights
@@ -12119,9 +12121,8 @@ function updateCrates(dt) {
     const cr = allCrates[i];
     cr.t += dt;
     if (!cr.opened) {
-      const p = Math.sin(cr.t * 3);
+      const p = animateLootGlow(cr.glow, cr.t);
       cr.trim.material.emissiveIntensity = 0.32 + p * 0.22;
-      animateLootGlow(cr.glow, cr.t);
       continue;
     }
     // open lid, then shrink away, then respawn elsewhere
