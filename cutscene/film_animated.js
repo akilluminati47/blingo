@@ -40,6 +40,16 @@ function directorMode() {
     dbg.bossState._wasSpawned = dbg.bossState.spawned;
     dbg.bossState.spawned = true;
   }
+  // Kill all existing zombies and stop spawner — no attackers during filming
+  if (dbg.zombies) {
+    for (let i = dbg.zombies.length - 1; i >= 0; i--) {
+      try { dbg.killZombie(dbg.zombies[i], 0, 0, false); } catch(_) {}
+    }
+  }
+  if (dbg.settings) {
+    dbg._prevSpawn = dbg.settings.zombieSpawn;
+    dbg.settings.zombieSpawn = 0;
+  }
   _origEscape = window.onkeydown;
   const oldPause = dbg.pauseGame;
   dbg._oldPause = oldPause;
