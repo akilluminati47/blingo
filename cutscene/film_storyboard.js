@@ -30,23 +30,39 @@ const {
 const C = document.getElementById('c');
 let _origW, _origH;
 
-// force the renderer to HD for capture, then restore
+// force the renderer to HD for capture, then save to disk (or download as fallback)
+const SAVE_URL = 'http://localhost:3000/save';
+let _saveQueue = Promise.resolve();
+
 function snapHD(name) {
   _origW = C.width; _origH = C.height;
   renderer.setSize(D.CAP_W, D.CAP_H);
   camera.aspect = D.CAP_W / D.CAP_H;
   camera.updateProjectionMatrix();
   renderer.render(scene, camera);
-  const a = document.createElement('a');
-  a.download = (name || ('shot' + D.shot)) + '.png';
-  a.href = C.toDataURL('image/png');
-  a.click();
+  const dataUrl = C.toDataURL('image/png');
   // restore viewport size
   renderer.setSize(_origW, _origH);
   camera.aspect = _origW / _origH;
   camera.updateProjectionMatrix();
+  // try saving to local dev server first, fall back to download
   D.captures.push(name);
-  console.log('📷', name, '(' + D.CAP_W + '×' + D.CAP_H + ')');
+  _saveQueue = _saveQueue.then(() =>
+    fetch(SAVE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, data: dataUrl }),
+    }).then(r => r.json()).then(j => {
+      console.log('💾', name + '.png', j.file ? '→ keyframes/' : '⚠');
+    }).catch(() => {
+      // server not running — fall back to browser download
+      const a = document.createElement('a');
+      a.download = name + '.png';
+      a.href = dataUrl;
+      a.click();
+      console.log('⬇', name + '.png (download)');
+    })
+  );
 }
 
 function pause(ms) { return new Promise(r => setTimeout(r, ms)); }

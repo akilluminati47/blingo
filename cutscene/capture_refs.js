@@ -13,6 +13,7 @@
 
   const C = document.getElementById('c');
   const CAP_W = 1920, CAP_H = 1080;
+  const SAVE_URL = 'http://localhost:3000/save';
   let _origW, _origH;
   function snap(name) {
     _origW = C.width; _origH = C.height;
@@ -20,14 +21,24 @@
     camera.aspect = CAP_W / CAP_H;
     camera.updateProjectionMatrix();
     renderer.render(scene, camera);
-    const a = document.createElement('a');
-    a.download = name + '.png';
-    a.href = C.toDataURL('image/png');
-    a.click();
+    const dataUrl = C.toDataURL('image/png');
     renderer.setSize(_origW, _origH);
     camera.aspect = _origW / _origH;
     camera.updateProjectionMatrix();
-    console.log('📷', name, '(' + CAP_W + '×' + CAP_H + ')');
+    // try local server first, fall back to download
+    fetch(SAVE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, data: dataUrl }),
+    }).then(r => r.json()).then(j => {
+      console.log('💾', name + '.png');
+    }).catch(() => {
+      const a = document.createElement('a');
+      a.download = name + '.png';
+      a.href = dataUrl;
+      a.click();
+      console.log('⬇', name + '.png (download)');
+    });
   }
 
   function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
