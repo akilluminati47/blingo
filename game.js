@@ -10596,9 +10596,9 @@ function spawnBoss4() {
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;
   z.state = 'chase';
-  // the beacon's pointing is done the moment he aggros — his chevron tracks him from
-  // here, so the pillar drains away instead of hanging over the fight
-  bossState.beamFade = true;
+  // remove the beacon pillar — the boss is up, the chevron tracks him now
+  if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
+  bossState.beamFade = false;
   dressBossBar(z);
   bossBarEl.classList.add('show');
   toast(z.isBoss4 ? 'THE ROTTEN ONE CRASHES THE PICNIC .ᐟ' : z.isBoss3 ? 'THE INFECTED ONE DISTURBS THE LOT .ᐟ' : z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS .ᐟ', true);
