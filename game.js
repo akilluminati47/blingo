@@ -7192,9 +7192,6 @@ function setNotch(key, n, silent) {
   // "extra" means more than full: dialing up Extra Gore quietly fills the Gore bar first
   if (key === 'extraGore' && n > 0 && notches.gore < 5) setNotch('gore', 5, true);
   if (key === 'gore' && n < 5 && notches.extraGore > 0) { notches.extraGore = 0; refreshRow('extraGore'); }
-  // Extra Gore maxed forces the Zombies dial to full too — the horde IS the gore now. (A
-  // client can't set the host-owned Zombies dial; the host's forced 5 rides down to them.)
-  if (key === 'extraGore' && n >= 5 && notches.zombieSpawn < 5 && net.role !== 'client') setNotch('zombieSpawn', 5, true);
   if (n === notches[key]) return;
   notches[key] = n;
   syncDerived();
@@ -7202,7 +7199,7 @@ function setNotch(key, n, silent) {
   saveNotches();
   refreshRow(key);
   if (key === 'gore') refreshRow('extraGore');
-  if (key === 'extraGore' || key === 'zombieSpawn' || key === 'music' || key === 'drawDist') updateGoreHordeUI();
+  if (key === 'extraGore' || key === 'zombieSpawn' || key === 'drawDist') updateGoreHordeUI();
   if (!silent) notchClickSfx(n);
   // the host turning a spawn dial updates every client's greyed copy live — even from
   // the pause menu, where the periodic snapshot isn't flowing
@@ -7238,13 +7235,7 @@ function refreshRow(key) {
     if (on && !p.classList.contains('on')) { p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop'); }
     p.classList.toggle('on', on);
   });
-  // Extra Gore has a live state its pips can't show: it does nothing at all unless Gore is
-  // maxed under it, so it lights its name only while it's actually running, read off the same
-  // test the game itself uses rather than a second opinion here that could drift out of step.
-  // (Music no longer has a hidden threshold — the full cousin track now plays in-game at any
-  // level above zero, so the pips already tell the whole story.)
-  if (key === 'extraGore') row.classList.toggle('live', extraGoreOn());
-  if (key === 'music') row.classList.toggle('live', notches.music >= 5);
+  if (key === 'extraGore') row.classList.toggle('live', notches.extraGore >= 5);
   if (key === 'drawDist') row.classList.toggle('live', notches.drawDist >= 5);
 }
 function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); updateGoreHordeUI(); }
@@ -7255,16 +7246,15 @@ function updateGoreHordeUI() {
   const localMax = goreHordeLocal();
   const clientForced = net.role === 'client' && net.hostGoreHorde;
   const grey = clientForced && !localMax;
-  for (const key of ['extraGore', 'zombieSpawn', 'music', 'drawDist']) {
+  for (const key of ['extraGore', 'zombieSpawn', 'drawDist']) {
     const row = rowEls[key];
     if (!row) continue;
     const rowOn = key === 'extraGore' ? localMax
-                : key === 'music' ? notches.music >= 5
                 : key === 'drawDist' ? notches.drawDist >= 5
                 : (localMax || clientForced);
     row.classList.toggle('gorehorde', rowOn);
     row.classList.toggle('greygore', rowOn && grey);
-    if (key === 'music' || key === 'drawDist') row.classList.toggle('live', rowOn);
+    if (key === 'drawDist') row.classList.toggle('live', rowOn);
   }
 }
 syncSettingsUI();
