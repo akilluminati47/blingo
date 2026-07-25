@@ -396,14 +396,14 @@ function animateLootGlow(g, t) {
   if (!u) return;
   g.visible = u.mul > 0.02;
   if (!g.visible) return;
-  const beat = Math.sin(t * 2.6), soft = Math.sin(t * 2.6 + 1.1);
-  u.ring.scale.setScalar(1 + beat * 0.14);
-  u.ring.material.opacity = (0.36 + beat * 0.2) * u.mul;
-  u.pool.scale.setScalar(1 + soft * 0.1);
-  u.pool.material.opacity = (0.38 + soft * 0.14) * u.mul;
-  u.orb.material.opacity = (0.6 + beat * 0.28) * u.mul;
-  u.orb.scale.setScalar(u.s * (1 + beat * 0.09));
-  u.orb.position.y = u.orbY + beat * 0.07;
+  const p = Math.sin(t * 3);
+  u.ring.scale.setScalar(1 + p * 0.12);
+  u.ring.material.opacity = (0.38 + p * 0.18) * u.mul;
+  u.pool.scale.setScalar(1 + p * 0.08);
+  u.pool.material.opacity = (0.4 + p * 0.12) * u.mul;
+  u.orb.material.opacity = (0.6 + p * 0.24) * u.mul;
+  u.orb.scale.setScalar(u.s * (1 + p * 0.07));
+  u.orb.position.y = u.orbY + p * 0.05;
 }
 // Extra Gore at full is the "gore horde": locally it's the slider maxed; a client also
 // inherits it from the host, since the host's world is the one doing the spawning. It lights
@@ -10002,9 +10002,8 @@ function updateZombies(dt) {
       // the shielded boss glows in his own colours; the glow drains off as the last
       // guard drops, so "he's open" reads from clear across the fight
       if (b.bossGlow) {
-        const u = b.bossGlow.userData.glow;
-        u.mul = lerp(u.mul, bossShielded() ? 1 : 0, 1 - Math.exp(-4 * dt));
-        animateLootGlow(b.bossGlow, game.time);
+        b.bossGlow.userData.glow.mul = 0; // boss never wears his own glow
+        b.bossGlow.visible = false;
       }
     }
 
@@ -13656,9 +13655,8 @@ function netClientWorldTick(dt) {
     // fades in with his shield (streamed sh flag) and drains off when the last guard drops
     if (b.guardGlow) animateLootGlow(b.guardGlow, game.time + (g.walkPhase || 0));
     if (b.bossGlow) {
-      const u = b.bossGlow.userData.glow;
-      u.mul = lerp(u.mul, g.sh ? 1 : 0, 1 - Math.exp(-4 * dt));
-      animateLootGlow(b.bossGlow, game.time);
+      b.bossGlow.userData.glow.mul = 0;
+      b.bossGlow.visible = false;
     }
     g.pos.x = lerp(g.pos.x, g.tx ?? g.pos.x, k);
     g.pos.z = lerp(g.pos.z, g.tz ?? g.pos.z, k);
