@@ -1869,10 +1869,10 @@ function buildMeleeMesh(g, id, c) {
     // handle rides the spine side — connects at the guard and extends back
     const hilt = cyl(0.042, 0.052, 0.2, 0x3a2a1a, 8);
     hilt.rotation.x = Math.PI / 2;
-    hilt.position.set(0, 0.07, 0.13);
+    hilt.position.set(0, 0.07, 0.15);
     g.add(hilt);
     for (const gy2 of [0.04, -0.02]) {
-      const rivet = ball(0.018, 0xc8a44a); rivet.position.set(0.05, gy2 + 0.07, 0.13); g.add(rivet);
+      const rivet = ball(0.018, 0xc8a44a); rivet.position.set(0.05, gy2 + 0.07, 0.15); g.add(rivet);
     }
   } else if (id === 'katana') {
     const blade = box(0.022, 0.12, 1.0, c); blade.position.set(0, 0.02, -0.56); g.add(blade);
