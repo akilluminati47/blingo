@@ -331,12 +331,21 @@ document.getElementById('ptoblock').addEventListener('click', closePolicies);
 addEventListener('hashchange', ()=>{ if(location.hash==='#policies' && !isOpen()) openPolicies(); });
 
 /* ---- keyboard + gamepad navigation (only while the overlay is open) ---- */
-function navItems(){ return [...document.querySelectorAll('.ptile'), document.getElementById('ptoblock')]; }
+function navItems(){
+  return [
+    ...document.querySelectorAll('.ptile'),
+    ...document.querySelectorAll('.ppip'),
+    ...document.querySelectorAll('.pdown-btn:not(.pdown-loading)'),
+    document.querySelector('.pdown-ghbadge'),
+    document.getElementById('ptoblock'),
+  ].filter(Boolean).filter(el => el.offsetParent !== null);
+}
 let navIdx = -1;
 function applyNav(){
   const items=navItems();
   items.forEach((el,i)=>el.classList.toggle('navfocus', i===navIdx));
-  if(navIdx>=0 && items[navIdx]) items[navIdx].focus({preventScroll:false});
+  if(navIdx>=0 && items[navIdx]) items[navIdx].focus({preventScroll:true});
+}
 }
 function move(dir){
   const n=navItems().length;
@@ -358,19 +367,28 @@ function gpPoll(){
     const pressed=i=>!!(gp.buttons[i] && gp.buttons[i].pressed);
     const ax=gp.axes||[];
     const now={
-      a:pressed(0), b:pressed(1),
-      up:pressed(12)||ax[1]<-0.55, down:pressed(13)||ax[1]>0.55,
-      left:pressed(14)||ax[0]<-0.55, right:pressed(15)||ax[0]>0.55,
+      a:pressed(0), b:pressed(1), x:pressed(2), y:pressed(3),
+      lb:pressed(4), rb:pressed(5),
+      dUp:pressed(12), dDown:pressed(13), dLeft:pressed(14), dRight:pressed(15),
+      lx:ax[0]||0, ly:ax[1]||0, rx:ax[2]||0, ry:ax[3]||0,
     };
+    const moveDir = now.dRight||now.dDown||now.lx>0.55||now.ly>0.55 ? 1
+                  : now.dLeft||now.dUp||now.lx<-0.55||now.ly<-0.55 ? -1 : 0;
     if(isOpen()){
-      if(now.right&&!gpPrev.right) move(1);
-      if(now.down &&!gpPrev.down)  move(1);
-      if(now.left &&!gpPrev.left)  move(-1);
-      if(now.up   &&!gpPrev.up)    move(-1);
+      if(moveDir && !gpPrev._moveDir) move(moveDir);
       if(now.a&&!gpPrev.a){ const el=navItems()[navIdx]; if(el) el.click(); }
       if(now.b&&!gpPrev.b) closePolicies();
+      // R-stick vertical = scroll
+      if(Math.abs(now.ry)>0.15) screenEl.scrollTop += now.ry * 12;
+    } else {
+      // On start screen: highlight and activate the policies link
+      const link = document.getElementById('policiesopen');
+      if(link){
+        if(moveDir && !gpPrev._moveDir){ link.focus(); link.classList.add('navfocus'); }
+        if(now.a&&!gpPrev.a && document.activeElement === link) link.click();
+      }
     }
-    gpPrev=now;
+    gpPrev=now; gpPrev._moveDir=moveDir;
     break;
   }
   requestAnimationFrame(gpPoll);
