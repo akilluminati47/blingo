@@ -1074,11 +1074,13 @@
     el.innerHTML = h;
   }
 
-  function fill(el, text, color, i, cb) {
+  function fill(el, text, fullText, color, i, cb) {
     i = i || 0;
     if (i > text.length) { cb(); return; }
-    render(el, text, i, color);
-    setTimeout(function() { fill(el, text, color, i + 1, cb); }, TYPE);
+    // Render the FULL text (including luck below) so it never disappears,
+    // but only colour characters up to i (the rest stay grey)
+    render(el, fullText, i, color);
+    setTimeout(function() { fill(el, text, fullText, color, i + 1, cb); }, TYPE);
   }
 
   function wipe(el, text, pos, color, cb) {
@@ -1095,9 +1097,9 @@
     gEl.style.color = '#5a5a64';
     wEl.style.color = '#5a5a64';
 
-    fill(gEl, gText, '#ffd9a8', 0, function() {
+    fill(gEl, gText, gText, '#ffd9a8', 0, function() {
       pause(200, function() {
-        fill(wEl, wText, '#eef1f5', 0, function() {
+        fill(wEl, wText, wFull, '#eef1f5', 0, function() {
           // Flash luck line instantly
           render(wEl, wFull, wFull.length, '#eef1f5');
           pause(HOLD, function() {
