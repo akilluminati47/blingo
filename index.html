@@ -1064,7 +1064,7 @@
 
   var TYPE = 32, WIPE = 4, HOLD = 4200, BLANK = 900;
   var gText = GOLD.join('\n'), wText = WHITE.join('\n');
-  var gFull = gText + '\n' + LUCK;
+  var wFull = wText + '\n' + LUCK;
 
   function render(el, text, pos, color) {
     var h = '';
@@ -1093,20 +1093,25 @@
   function pause(ms, cb) { setTimeout(cb, ms); }
 
   function cycle() {
-    gEl.innerHTML = gFull.replace(/\n/g, '<br>');
-    wEl.innerHTML = wText.replace(/\n/g, '<br>');
+    gEl.innerHTML = gText.replace(/\n/g, '<br>');
+    wEl.innerHTML = wFull.replace(/\n/g, '<br>');
     gEl.style.color = '#5a5a64';
     wEl.style.color = '#5a5a64';
 
-    // Fill gold lore — luck line stays grey at the bottom
-    fill(gEl, gText, gFull, '#ffd9a8', 0, function() {
+    fill(gEl, gText, gText, '#ffd9a8', 0, function() {
       pause(200, function() {
-        fill(wEl, wText, wText, '#eef1f5', 0, function() {
-          // Flash the waiting luck line gold
-          render(gEl, gFull, gFull.length, '#ffd9a8');
+        fill(wEl, wText, wFull, '#eef1f5', 0, function() {
+          // Flash the luck line gold — it's the last line in the white span
+          wEl.innerHTML = wFull.replace(/\n/g, '<br>');
+          var html = '';
+          for (var i = 0; i < wFull.length; i++) {
+            var ch = wFull[i] === '\n' ? '<br>' : wFull[i];
+            html += '<span style="color:' + (i >= wText.length + 1 ? '#ffd9a8' : '#eef1f5') + '">' + ch + '</span>';
+          }
+          wEl.innerHTML = html;
           pause(HOLD, function() {
-            wipe(wEl, wText, wText.length - 1, '#eef1f5', function() {
-              wipe(gEl, gFull, gFull.length - 1, '#ffd9a8', function() {
+            wipe(gEl, gText, gText.length - 1, '#ffd9a8', function() {
+              wipe(wEl, wFull, wFull.length - 1, '#ffd9a8', function() {
                 pause(BLANK, cycle);
               });
             });
