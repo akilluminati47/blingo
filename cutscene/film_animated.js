@@ -25,21 +25,32 @@ const COUSINS = [
   { id: 'blondie', color: 0xffd84a, weapon: 'sniper'   },
 ];
 
-const D = { shot: 0, frames: 0, CAP_W: 1920, CAP_H: 1080, FPS: 30 };
+const D = { shot: 0, frames: 0, CAP_W: 1920, CAP_H: 1080, FPS: 24 };
 const SAVE = 'http://localhost:3000/save';
-let _saveQ = Promise.resolve(), _origW, _origH, cleanup = [];
+let _saveQ = Promise.resolve(), cleanup = [];
+let _origW = 0, _origH = 0;
 
-// ── capture one HD frame and POST to local server ──
-function snap(name) {
-  _origW = C.width; _origH = C.height;
+// ── enter HD capture mode (call once before shot sequence) ──
+function beginCapture() {
+  _origW = C.width || window.innerWidth;
+  _origH = C.height || window.innerHeight;
+  if (_origW < 100 || _origH < 100) { _origW = 1920; _origH = 1080; }
   renderer.setSize(D.CAP_W, D.CAP_H);
   camera.aspect = D.CAP_W / D.CAP_H;
   camera.updateProjectionMatrix();
-  renderer.render(scene, camera);
-  const dataUrl = C.toDataURL('image/png');
+}
+
+// ── restore viewport (call once after shot sequence) ──
+function endCapture() {
   renderer.setSize(_origW, _origH);
   camera.aspect = _origW / _origH;
   camera.updateProjectionMatrix();
+}
+
+// ── capture one HD frame and POST to local server ──
+function snap(name) {
+  renderer.render(scene, camera);
+  const dataUrl = C.toDataURL('image/png');
   D.frames++;
   _saveQ = _saveQ.then(() =>
     fetch(SAVE, { method:'POST', headers:{'Content-Type':'application/json'},
@@ -50,9 +61,10 @@ function snap(name) {
 
 // ── capture N frames over duration seconds, moving camera from A to B ──
 async function panShot(name, dur, camA, camB, lookAt) {
+  beginCapture();
   const n = Math.round(dur * D.FPS);
   for (let i = 0; i < n; i++) {
-    const t = i / (n - 1 || 1);
+    const t = i / Math.max(n - 1, 1);
     camera.position.lerpVectors(camA, camB, t);
     camera.lookAt(lookAt);
     skyDome.position.copy(camera.position);
@@ -62,10 +74,13 @@ async function panShot(name, dur, camA, camB, lookAt) {
     if (window.__step) window.__step(1, 1 / D.FPS);
     await new Promise(r => requestAnimationFrame(r));
   }
+  endCapture();
+  console.log('  ✅', name, n, 'frames');
 }
 
-// ── hold a still frame for dur seconds ──
+// ── hold a still for dur seconds ──
 async function holdShot(name, dur) {
+  beginCapture();
   const n = Math.round(dur * D.FPS);
   for (let i = 0; i < n; i++) {
     const sn = name + '_' + String(i).padStart(4, '0');
@@ -73,6 +88,7 @@ async function holdShot(name, dur) {
     if (window.__step) window.__step(1, 1 / D.FPS);
     await new Promise(r => requestAnimationFrame(r));
   }
+  endCapture();
 }
 
 function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
