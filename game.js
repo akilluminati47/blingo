@@ -4187,6 +4187,7 @@ function buildBlingoStatue(x, z) {
 
   const lipH = 0.22, lipBase = plinthBase + plinthH;
   const lip = box(5.0, lipH, 5.0, granite); lip.position.set(x, lipBase + lipH / 2, z); townGroup.add(lip);
+  townColliders.push(aabb(x, z, 2.5, 2.5, lipH, lipBase));
 
   const py = lipBase + lipH; // statue feet rest flush on the lip
   const statue = buildBlob({ color: granite });
