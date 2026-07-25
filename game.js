@@ -509,9 +509,11 @@ function drawSky(p, W) {
   if (starA > 0.05) {
     const srng = mulberry32(42);
     ctx.fillStyle = '#fff';
-    for (let i = 0; i < 170; i++) {
-      ctx.globalAlpha = (0.25 + srng() * 0.75) * starA;
-      ctx.fillRect(srng() * CW, H * (0.04 + srng() * 0.44), srng() < 0.12 ? 2 : 1, 1);
+    for (let i = 0; i < 280; i++) {
+      const sx = srng() * CW, sy = H * (0.02 + srng() * 0.46);
+      const twinkle = 0.5 + 0.5 * Math.sin(i * 7.3 + game.clock * 40);
+      ctx.globalAlpha = (0.3 + twinkle * 0.7) * starA;
+      ctx.fillRect(sx, sy, 1, 1);
     }
     ctx.globalAlpha = 1;
   }
@@ -646,18 +648,11 @@ const sunDiscTex = radialTex(128, [[0, 'rgba(255,255,246,1)'], [0.5, 'rgba(255,2
 // dissolve into the blue by day
 const moonDiscTex = (() => {
   const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
-  const x = c.getContext('2d'), R = mulberry32(51);
+  const x = c.getContext('2d');
   const g = x.createRadialGradient(S * 0.45, S * 0.43, S * 0.06, S / 2, S / 2, S / 2);
   g.addColorStop(0, 'rgba(249,252,255,1)'); g.addColorStop(0.6, 'rgba(228,237,253,0.98)');
   g.addColorStop(0.84, 'rgba(206,220,245,0.55)'); g.addColorStop(1, 'rgba(206,220,245,0)');
   x.fillStyle = g; x.beginPath(); x.arc(S / 2, S / 2, S / 2, 0, TAU); x.fill();
-  x.fillStyle = 'rgba(148,166,205,0.3)'; // the seas — a few soft grey blotches
-  for (let i = 0; i < 7; i++) {
-    const a = R() * TAU, d = R() * S * 0.26, r = (0.05 + R() * 0.11) * S;
-    x.beginPath();
-    x.ellipse(S / 2 + Math.cos(a) * d, S / 2 + Math.sin(a) * d, r, r * (0.7 + R() * 0.3), R() * TAU, 0, TAU);
-    x.fill();
-  }
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 })();
 const moonHaloTex = radialTex(256, [[0, 'rgba(210,226,255,0.85)'], [0.25, 'rgba(186,208,250,0.4)'],
