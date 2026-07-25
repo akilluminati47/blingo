@@ -4172,6 +4172,10 @@ function petrify(root) {
 function buildBlingoStatue(x, z) {
   const y0 = groundHeight(x, z);
   const granite = 0x8f939b, graniteDk = 0x6d7178;
+  // thin ground-level paved disc under the whole structure — decorative only, no collider
+  const pave = terrainDisc(6.4, 22, x, z, mat(0x9a948a), 0.02);
+  townGroup.add(pave);
+
   // stacked tier plinth — step at foot level, plinth rises to waist, lip caps it
   const stepH = 0.5, stepTop = y0 + stepH;
   const step = box(6.2, stepH, 6.2, 0xaaa49a); step.position.set(x, stepTop - stepH / 2, z); townGroup.add(step);
@@ -4179,13 +4183,13 @@ function buildBlingoStatue(x, z) {
 
   const plinthH = 0.86, plinthBase = stepTop;
   const plinth = box(4.6, plinthH, 4.6, graniteDk); plinth.position.set(x, plinthBase + plinthH / 2, z); townGroup.add(plinth);
-  townColliders.push(aabb(x, z, 2.3, 2.3, plinthH, plinthBase));
 
   const lipH = 0.22, lipBase = plinthBase + plinthH;
   const lip = box(5.0, lipH, 5.0, granite); lip.position.set(x, lipBase + lipH / 2, z); townGroup.add(lip);
-  townColliders.push(aabb(x, z, 2.5, 2.5, lipH, lipBase));
 
-  const py = lipBase + lipH; // statue feet sit directly on the lip
+  const py = lipBase + lipH;
+  // one solid block from plinth base through the statue — no hiding, no climbing past the step
+  townColliders.push(aabb(x, z, 2.3, 2.3, plinthH + lipH + 4.5, plinthBase)); // statue feet sit directly on the lip
   const statue = buildBlob({ color: granite });
   scene.remove(statue.shadow);
   petrify(statue.root);
@@ -4224,11 +4228,11 @@ function buildPark(rng) {
   makePicnicTable(cx - 8.5, cz + 5, 0.4);
   makePicnicTable(cx + 8.5, cz - 5.5, -0.7);
   makePicnicTable(cx + 10, cz + 4.5, 1.2);
-  // flower beds — the butterflies' whole world
-  makeFlowerBed(rng, cx - 9.5, cz - 4.5, 1.9, 11);
-  makeFlowerBed(rng, cx + 6.5, cz, 1.7, 10);
-  makeFlowerBed(rng, cx - 4.5, cz + 10.2, 1.8, 10);
-  makeFlowerBed(rng, cx + 2, cz - 9.5, 1.6, 9);
+  // flower beds — butterflies' whole world, kept off the paved circle
+  makeFlowerBed(rng, cx - 11, cz - 5.5, 1.9, 11);
+  makeFlowerBed(rng, cx + 8.5, cz - 1, 1.7, 10);
+  makeFlowerBed(rng, cx - 5.5, cz + 12, 1.8, 10);
+  makeFlowerBed(rng, cx + 3, cz - 11, 1.6, 9);
   // the man himself, centre of the lawn
   buildBlingoStatue(cx, cz);
   // two park lamps so the statue reads at dusk — set diagonal off the apron corners,
