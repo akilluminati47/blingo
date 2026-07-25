@@ -3612,6 +3612,7 @@ function buildChurchyard(rng) {
   const tower = box(2.6, 3.4, 2.6, 0x615f58);
   tower.position.set(cx, ridgeY + 0.9, steepleZ);
   townGroup.add(tower);
+  townColliders.push(aabb(cx, steepleZ, 1.3, 1.3, 3.4, ridgeY - 0.8)); // standable steeple
   for (const s of [-1, 1]) { // dark bell slats on the tower's road-facing (front/back) sides
     const slat = box(1.1, 1.1, 0.06, 0x14121a);
     slat.position.set(cx, ridgeY + 1.5, steepleZ + s * 1.31);
@@ -4173,10 +4174,12 @@ function buildBlingoStatue(x, z) {
   // paved apron + two-step plinth
   const pave = terrainDisc(6.4, 22, x, z, mat(0x9a948a), 0.05);
   townGroup.add(pave);
-  const step = box(6.2, 0.4, 6.2, 0xaaa49a); step.position.set(x, y0 + 0.2, z); townGroup.add(step);
-  const plinth = box(4.6, 1.3, 4.6, graniteDk); plinth.position.set(x, y0 + 1.05, z); townGroup.add(plinth);
-  const lip = box(5.0, 0.22, 5.0, granite); lip.position.set(x, y0 + 1.75, z); townGroup.add(lip);
-  const py = y0 + 1.86; // top of the pedestal — the blob stands here
+  const step = box(6.2, 0.4, 6.2, 0xaaa49a); step.position.set(x, y0 - 0.02, z); townGroup.add(step);
+  townColliders.push(aabb(x, z, 3.1, 3.1, 0.36, y0 - 0.2));
+  const plinth = box(4.6, 1.3, 4.6, graniteDk); plinth.position.set(x, y0 + 0.85, z); townGroup.add(plinth);
+  townColliders.push(aabb(x, z, 2.3, 2.3, 1.3, y0 + 0.2));
+  const lip = box(5.0, 0.22, 5.0, granite); lip.position.set(x, y0 + 1.55, z); townGroup.add(lip);
+  const py = y0 + 1.66; // top of the pedestal — the blob stands here
   const statue = buildBlob({ color: granite });
   scene.remove(statue.shadow); // stone casts its presence, not a gameplay shadow blob
   petrify(statue.root);
@@ -6485,9 +6488,9 @@ function trackedActors() {
     }
   }
   // Bank landmark: hidden until the last unrecruited cousin beacon sinks below the
-  // curved horizon — then fades in so it's never spammy. Once the Two Horned One aggros
-  // his own pillar and chevron take over, so the bank marker is no longer needed.
-  const bossAggro = bossState.spawned && bossState.beamFade;
+  // curved horizon — then fades in so it's never spammy. Once the boss wakes (checks
+  // both spawned state and active fight), the pillar and chevron take over.
+  const bossAggro = bossState.spawned && (bossState.beamFade || (bossState.boss && bossState.boss.state !== 'dormant'));
   if (!bossAggro && companions.length > 0) {
     let anyBeaconUp = false;
     const unrecruited = companions.filter(c => !c.recruited);
@@ -10596,9 +10599,9 @@ function spawnBoss4() {
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;
   z.state = 'chase';
-  // remove the beacon pillar — the boss is up, the chevron tracks him now
-  if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
-  bossState.beamFade = false;
+  // the beacon's pointing is done the moment he aggros — his chevron tracks him from
+  // here, so the pillar drains away instead of hanging over the fight
+  bossState.beamFade = true;
   dressBossBar(z);
   bossBarEl.classList.add('show');
   toast(z.isBoss4 ? 'THE ROTTEN ONE CRASHES THE PICNIC .ᐟ' : z.isBoss3 ? 'THE INFECTED ONE DISTURBS THE LOT .ᐟ' : z.isBoss2 ? 'THE CRIMSON ONE RISES AT THE CHURCH DOOR .ᐟ' : 'THE TWO HORNED ONE AWAKENS .ᐟ', true);
