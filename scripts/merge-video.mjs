@@ -13,7 +13,7 @@ const KEYFRAMES = join(ROOT, 'cutscene', 'keyframes');
 const OUTPUT = join(ROOT, 'cutscene', 'output');
 mkdirSync(OUTPUT, { recursive: true });
 
-const fps = parseInt(process.argv[2]) || 2;  // 2 fps = each still shows for 0.5s
+const fps = parseInt(process.argv[2]) || 24;  // matches film_animated.js D.FPS
 const outName = process.argv[3] || 'blingo_cutscene.mp4';
 const outPath = join(OUTPUT, outName);
 
