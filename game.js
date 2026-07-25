@@ -11574,10 +11574,10 @@ function buildCrow(x, y, z, roost) {
   const mkWing = sgn => {
     const piv = new THREE.Group(); piv.position.set(0.1 * sgn, 0.4, 0.02);
     const roll = new THREE.Group(); piv.add(roll);
-    const inner = new THREE.Mesh(SPHERE, mat(blk)); inner.scale.set(0.18, 0.025, 0.19); inner.position.x = 0.18 * sgn;
+    const inner = new THREE.Mesh(SPHERE, mat(blk)); inner.scale.set(0.28, 0.022, 0.18); inner.position.x = 0.28 * sgn;
     roll.add(inner);
-    const tip = new THREE.Group(); tip.position.set(0.27 * sgn, 0, 0);
-    const outer = new THREE.Mesh(SPHERE, mat(blk)); outer.scale.set(0.17, 0.02, 0.17); outer.position.set(0.16 * sgn, 0, -0.02);
+    const tip = new THREE.Group(); tip.position.set(0.35 * sgn, 0, 0);
+    const outer = new THREE.Mesh(SPHERE, mat(blk)); outer.scale.set(0.12, 0.016, 0.14); outer.position.set(0.10 * sgn, 0, -0.02);
     tip.add(outer);
     for (let f = 0; f < 3; f++) { // primary feather fingers on the trailing edge
       const fe = box(0.06, 0.035, 0.18, blk);
@@ -11632,8 +11632,8 @@ function crowPose(c, a, fold) {
   c.tipL.rotation.z = a * 0.55; c.tipR.rotation.z = -a * 0.55;
   c.tipL.rotation.y = fold * 0.45; c.tipR.rotation.y = -fold * 0.45;
   c.legL.rotation.x = (1 - fold) * 1.2; c.legR.rotation.x = (1 - fold) * 1.2;
-  const puff = 1 + fold * 0.45 + Math.sin(c.t * 2.2) * fold * 0.06; // slow breathing at rest
-  c.breast.scale.set(0.13 * puff, 0.11 * puff, 0.1 * (0.7 + fold * 0.55));
+  const puff = 1 + fold * 0.22 + Math.sin(c.t * 2.2) * fold * 0.04; // slow breathing at rest
+  c.breast.scale.set(0.13 * puff, 0.11 * puff, 0.1 * (0.82 + fold * 0.28));
 }
 // where a crow is standing, or the spot it has already committed to. A bird gliding down
 // owns its slot before it gets there, so two can't pick the same gap in the same breath.
