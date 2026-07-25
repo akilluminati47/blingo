@@ -481,35 +481,14 @@ const skyDome = new THREE.Mesh(
   new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true })
 );
 skyDome.renderOrder = -10;
-skyDome.material.defines = { NO_CURVE: 1 }; // rides the camera — bending it would dent the sky
-scene.add(skyDome);
-// ---------- the sky never snaps: every repaint crossfades in ----------
-// A repaint (1Hz tick, weather roll, debug setSky) used to land on the dome the
-// instant it painted — a visible jump. Now the fresh sky paints onto a second
-// dome and sweeps in over the settled one, then they trade places: colours
-// glide continuously instead of stepping once a second.
-const skyCanvas2 = document.createElement('canvas');
-skyCanvas2.width = 1024; skyCanvas2.height = 512;
-const skyTex2 = new THREE.CanvasTexture(skyCanvas2);
-skyTex2.colorSpace = THREE.SRGBColorSpace;
-skyTex2.flipY = true;
-const skyDome2 = new THREE.Mesh(
-  new THREE.SphereGeometry(239, 24, 16),
-  new THREE.MeshBasicMaterial({ map: skyTex2, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true, opacity: 0 })
-);
-skyDome2.renderOrder = -10;
-skyDome2.material.defines = { NO_CURVE: 1 };
-scene.add(skyDome2);
-const skyDomes = [skyDome, skyDome2], skyTexs = [skyTex, skyTex2], skyCvs = [skyCanvas, skyCanvas2];
-const SKY_FADE_S = 0.85; // a touch under the 1Hz repaint, so each sweep settles before the next lands
-let skyFront = 0, skyFadeT = 1, skyPrimed = false;
+
 const moonOff = new THREE.Vector3(-30, 50, -20); // key-light offset, follows the player
 const _skyMoodC = new THREE.Color('#9aa2b0'), _skyMoodR = new THREE.Color('#59606e');
 // p is a blended phase palette (see phaseMixAt) and W the live weather weights
 // { sunny, cloudy, rain } summing to 1 — mid-transition skies mix both moods.
-function paintSky(cv, p, W) {
-  const ctx = cv.getContext('2d');
-  const CW = cv.width, H = cv.height;
+function drawSky(p, W) {
+  const ctx = skyCanvas.getContext('2d');
+  const CW = skyCanvas.width, H = skyCanvas.height;
   // weather tints the palette itself (scaled by its blend weight) instead of
   // flat-washing the finished sky, so the gradient keeps its depth in any mood
   const tint = hex => '#' + new THREE.Color(hex)
@@ -517,13 +496,13 @@ function paintSky(cv, p, W) {
   // one clean sweep from zenith to horizon. The top stop is held flat for the first
   // stretch so the sphere's pole pinch lands inside a single tone — no more grey
   // circle stamped overhead — and no haze band muddying the horizon line.
-  const g = ctx.createLinearGradient(0, 0, 0, H * 0.54);
+  const g = ctx.createLinearGradient(0, 0, 0, H * 0.62);
   g.addColorStop(0, tint(p.top)); g.addColorStop(0.14, tint(p.top));
-  g.addColorStop(0.6, tint(p.mid)); g.addColorStop(1, tint(p.hor));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, H * 0.54);
+  g.addColorStop(0.5, tint(p.mid)); g.addColorStop(0.85, tint(p.hor)); g.addColorStop(1, tint(p.hor));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, CW, H * 0.62);
   // below the horizon a single quiet floor tone — terrain and fog own that half anyway
-  ctx.fillStyle = '#' + new THREE.Color(tint(p.hor)).multiplyScalar(0.34).getHexString();
-  ctx.fillRect(0, H * 0.53, CW, H * 0.47);
+  ctx.fillStyle = '#' + new THREE.Color(tint(p.hor)).multiplyScalar(0.22).getHexString();
+  ctx.fillRect(0, H * 0.60, CW, H * 0.40);
   const starA = (p.starA || 0) * W.sunny; // stars need clear night: fade with dawn AND cover
   if (starA > 0.05) {
     const srng = mulberry32(42);
@@ -534,47 +513,11 @@ function paintSky(cv, p, W) {
     }
     ctx.globalAlpha = 1;
   }
+  skyTex.needsUpdate = true;
   // no more moon stamp here — the moon is a 3D sprite pair now (disc + halo, see
   // updateCelestial), arcing the sky in real time just like the sun
 }
-// a repaint lands on the HIDDEN dome and sweeps in over the settled sky — the
-// only instant paint is the very first one (nobody wants a fade up from black)
-function drawSky(p, W) {
-  if (!skyPrimed) {
-    skyPrimed = true; skyFront = 0; skyFadeT = 1;
-    paintSky(skyCvs[0], p, W); skyTexs[0].needsUpdate = true;
-    return;
-  }
-  if (skyFadeT < 1) { skyFadeT = 1; skyDomes[skyFront].material.opacity = 1; } // settle an in-flight fade (frames a second apart are near-identical)
-  const into = 1 - skyFront;
-  paintSky(skyCvs[into], p, W); skyTexs[into].needsUpdate = true;
-  skyDomes[into].renderOrder = -9.5;          // the incoming sky paints OVER the settled one
-  skyDomes[1 - into].renderOrder = -10;
-  skyDomes[into].material.transparent = true;  // only the fading dome uses the transparent pipeline
-  skyDomes[into].visible = true;
-  skyDomes[into].material.opacity = 0;
-  skyFront = into; skyFadeT = 0;
-}
-// per-frame: ease the incoming sky across the fade, then park the hidden dome
-// so a settled sky costs one draw, not two. Only the active fading dome uses
-// the transparent pipeline — the settled dome stays opaque.
-function updateSkyFade(dt) {
-  if (skyFadeT >= 1) {
-    skyDomes[1 - skyFront].visible = false;
-    skyDomes[1 - skyFront].material.transparent = false;
-    skyDomes[skyFront].material.transparent = false;
-    skyDomes[skyFront].material.opacity = 1;
-    return;
-  }
-  skyFadeT = Math.min(1, skyFadeT + dt / SKY_FADE_S);
-  skyDomes[skyFront].material.opacity = skyFadeT * skyFadeT * (3 - 2 * skyFadeT);
-  if (skyFadeT >= 1) {
-    skyDomes[1 - skyFront].visible = false;
-    skyDomes[1 - skyFront].material.transparent = false;
-    skyDomes[skyFront].material.transparent = false;
-    skyDomes[skyFront].material.opacity = 1;
-  }
-}
+
 // ---------- cloud dome ----------
 // The cartoon puff-stamps are gone: this is the frutiger-gallery FBM cloud shader
 // (domain-warped value noise billowing across the dome) rehomed onto the game's
@@ -1113,7 +1056,6 @@ function updateDayNight(dt) {
   game.weather = wx.u < 0.5 ? wx.from : wx.to;
   skyRedrawT -= dt;
   applyEnvironment(skyRedrawT <= 0);
-  updateSkyFade(dt); // sweep any freshly repainted sky across — never a jump cut
   updateStorm(dt);
 }
 // the storm: lightning flashes ride the rainy weather — a bright bolt in the cloud
