@@ -121,6 +121,21 @@ jobs:
           node scripts/copy-web.mjs
           npx cap sync android
 
+      - name: Generate app icons from blingo.png
+        run: |
+          for d in android/app/src/main/res/mipmap-*; do
+            case $(basename $d) in
+              mipmap-mdpi)   s=48  fs=108 ;;
+              mipmap-hdpi)   s=72  fs=162 ;;
+              mipmap-xhdpi)  s=96  fs=216 ;;
+              mipmap-xxhdpi) s=144 fs=324 ;;
+              mipmap-xxxhdpi)s=192 fs=432 ;;
+            esac
+            convert blingo.png -resize ${s}x${s}   "$d/ic_launcher.png"
+            convert blingo.png -resize ${s}x${s}   "$d/ic_launcher_round.png"
+            convert blingo.png -resize ${fs}x${fs} "$d/ic_launcher_foreground.png"
+          done
+
       - name: Build APK
         working-directory: android
         run: bash gradlew assembleRelease --no-daemon
