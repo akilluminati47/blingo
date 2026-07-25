@@ -380,3 +380,48 @@ requestAnimationFrame(gpPoll);
 // deep link: landing on the page with #policies (e.g. forwarded from the old /policies/
 // route) opens the overlay straight away
 if(location.hash === '#policies') openPolicies();
+
+// fetch the latest GitHub release to populate the download section on the policies page
+(async function initDownloads() {
+  const verEl = document.getElementById('pdownver');
+  const btnExe = document.getElementById('pdown-exe');
+  const btnApk = document.getElementById('pdown-apk');
+  const badgeEl = document.getElementById('pdown-badge');
+  if (!verEl || !btnExe || !btnApk) return;
+  const CACHE_KEY = 'blingo_release', CACHE_TTL = 300000; // 5 min
+  const ua = navigator.userAgent || '';
+  const isWin = /Windows/i.test(ua), isAndroid = /Android/i.test(ua);
+  const isMac = /Mac/i.test(ua), isLinux = /Linux/i.test(ua) && !isAndroid;
+  let data = null;
+  try {
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if (cached) { const p = JSON.parse(cached); if (Date.now() - p.ts < CACHE_TTL) data = p.data; }
+  } catch (_) {}
+  if (!data) {
+    try {
+      const res = await fetch('https://api.github.com/repos/akilluminati47/blingo/releases/latest');
+      if (res.ok) data = await res.json();
+    } catch (_) {}
+    if (data) try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
+  }
+  if (!data) { verEl.textContent = 'Could not reach GitHub — check back later'; return; }
+  verEl.textContent = 'Latest: ' + (data.tag_name || data.name || '');
+  const assets = data.assets || [];
+  const setup = assets.find(a => /\.exe$/i.test(a.name) && /setup/i.test(a.name));
+  const portable = assets.find(a => /\.exe$/i.test(a.name) && !/setup/i.test(a.name));
+  const apk = assets.find(a => /\.apk$/i.test(a.name));
+  const exeAsset = setup || portable;
+  btnExe.classList.remove('pdown-loading');
+  btnApk.classList.remove('pdown-loading');
+  if (exeAsset) {
+    btnExe.href = exeAsset.browser_download_url;
+    if (isWin) btnExe.classList.add('recommended');
+  } else { btnExe.style.opacity = '0.5'; btnExe.title = 'No Windows build for this release'; }
+  if (apk) {
+    btnApk.href = apk.browser_download_url;
+    if (isAndroid) btnApk.classList.add('recommended');
+  } else { btnApk.style.opacity = '0.5'; btnApk.title = 'No Android build for this release'; }
+  const ghLink = document.getElementById('pdown-ghlink');
+  if (ghLink && data.html_url) ghLink.href = data.html_url;
+  if (data.tag_name) { badgeEl.hidden = false; badgeEl.textContent = data.tag_name; badgeEl.className = 'pdown-badge'; }
+})();
