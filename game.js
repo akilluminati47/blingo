@@ -4172,12 +4172,12 @@ function petrify(root) {
 function buildBlingoStatue(x, z) {
   const y0 = groundHeight(x, z);
   const granite = 0x8f939b, graniteDk = 0x6d7178;
-  // stacked plinth tiers — no ground pad, just the step → plinth → lip → statue
-  const stepH = 0.42, stepTop = y0 + stepH;
+  // stacked tier plinth — step at foot level, plinth rises to waist, lip caps it
+  const stepH = 0.5, stepTop = y0 + stepH;
   const step = box(6.2, stepH, 6.2, 0xaaa49a); step.position.set(x, stepTop - stepH / 2, z); townGroup.add(step);
   townColliders.push(aabb(x, z, 3.1, 3.1, stepH, y0));
 
-  const plinthH = 0.88, plinthBase = stepTop;
+  const plinthH = 0.86, plinthBase = stepTop;
   const plinth = box(4.6, plinthH, 4.6, graniteDk); plinth.position.set(x, plinthBase + plinthH / 2, z); townGroup.add(plinth);
   townColliders.push(aabb(x, z, 2.3, 2.3, plinthH, plinthBase));
 
@@ -4185,7 +4185,7 @@ function buildBlingoStatue(x, z) {
   const lip = box(5.0, lipH, 5.0, granite); lip.position.set(x, lipBase + lipH / 2, z); townGroup.add(lip);
   townColliders.push(aabb(x, z, 2.5, 2.5, lipH, lipBase));
 
-  const py = lipBase + lipH; // statue feet flush with lip top
+  const py = y0 + 1.86; // statue feet — this is where they've always stood visually
   const statue = buildBlob({ color: granite });
   scene.remove(statue.shadow);
   petrify(statue.root);
