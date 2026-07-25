@@ -1,6 +1,7 @@
 // film_storyboard.js — run in browser console with game loaded
 // Directs and captures the BLINGO advertisement cutscene in-engine.
 // Each shot auto-captures; press Space to advance to next shot.
+// Captures always at 1920×1080 regardless of viewport size.
 
 (function() {
 
@@ -12,14 +13,29 @@ const D = {
   recording: false,
   recordFrames: [],
   recordTimer: 0,
+  CAP_W: 1920,  // capture resolution
+  CAP_H: 1080,
 };
+const C = document.getElementById('c');
+let _origW, _origH;
 
-// ── Helpers ──
-function snap(name) {
+// force the renderer to HD for capture, then restore
+function snapHD(name) {
+  _origW = C.width; _origH = C.height;
+  renderer.setSize(D.CAP_W, D.CAP_H);
+  camera.aspect = D.CAP_W / D.CAP_H;
+  camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
   const a = document.createElement('a');
   a.download = (name || ('shot' + D.shot)) + '.png';
-  a.href = document.getElementById('c').toDataURL('image/png');
+  a.href = C.toDataURL('image/png');
   a.click();
+  // restore viewport size
+  renderer.setSize(_origW, _origH);
+  camera.aspect = _origW / _origH;
+  camera.updateProjectionMatrix();
+  D.captures.push(name);
+  console.log('📷', name, '(' + D.CAP_W + '×' + D.CAP_H + ')');
 }
 
 function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -87,11 +103,11 @@ const SHOTS = [
     // aerial pull-back
     player.pos.x = 20; player.pos.z = 50;
     cam(20, 35, 90, 20, 5, 50);
-    await pause(500); snap('shot01_establishing');
+    await pause(500); snapHD('shot01_establishing');
     cam(20, 50, 110, 20, 5, 50);
-    await pause(300); snap('shot01_wide');
+    await pause(300); snapHD('shot01_wide');
     cam(20, 70, 130, 20, 5, 50);
-    await pause(300); snap('shot01_pullback');
+    await pause(300); snapHD('shot01_pullback');
   },
 
   // SHOT 2 — Cousins Assemble (wideshot then individual portraits)
@@ -111,12 +127,12 @@ const SHOTS = [
     await pause(300);
     // group shot
     cam(0, 3, -30, 0, 1.5, -35);
-    await pause(400); snap('shot02_group');
+    await pause(400); snapHD('shot02_group');
     // individual portraits
     for (let i = 0; i < 6; i++) {
       const p = pos[i];
       cam(p[0], 2 + Math.random() * 0.5, p[1] + 4, p[0], 1, p[1]);
-      await pause(200); snap('shot02_' + ids[i]);
+      await pause(200); snapHD('shot02_' + ids[i]);
     }
   },
 
@@ -150,9 +166,9 @@ const SHOTS = [
       await pause(200);
       // capture from different angles
       cam(s.x + 4, 2, s.z + 5, s.x, 1.2, s.z + 1);
-      await pause(150); snap('shot03_melee_' + s.id);
+      await pause(150); snapHD('shot03_melee_' + s.id);
       cam(s.x - 2, 1.8, s.z + 6, s.x, 1, s.z + 1);
-      await pause(150); snap('shot03_melee_' + s.id + '_b');
+      await pause(150); snapHD('shot03_melee_' + s.id + '_b');
     }
   },
 
@@ -173,16 +189,16 @@ const SHOTS = [
     player.pos.x = 0; player.pos.z = -42;
     // wide shot
     cam(0, 4, -25, 0, 1.5, -40);
-    await pause(400); snap('shot04_gunfight_wide');
+    await pause(400); snapHD('shot04_gunfight_wide');
     // close on Blazo shotgun
     cam(6, 2.5, -27, 5, 1.2, -40);
-    await pause(200); snap('shot04_blazo_shotgun');
+    await pause(200); snapHD('shot04_blazo_shotgun');
     // close on Blondie sniper (from above/behind)
     cam(12, 4, -38, 10, 1.2, -42);
-    await pause(200); snap('shot04_blondie_sniper');
+    await pause(200); snapHD('shot04_blondie_sniper');
     // muzzle flash alley scene (dark, close)
     cam(-3, 2, -26, -3, 1, -40);
-    await pause(200); snap('shot04_alley');
+    await pause(200); snapHD('shot04_alley');
   },
 
   // SHOT 5 — The Rotten One Spawns (rain, night, lightning)
@@ -201,16 +217,16 @@ const SHOTS = [
     await pause(500);
     // wide establishing: boss + beam
     cam(138, 6, -28, 132, 2, -36);
-    await pause(400); snap('shot05_rotten_spawn');
+    await pause(400); snapHD('shot05_rotten_spawn');
     // closeup: chest heart
     cam(131, 3.5, -37, 132, 2.5, -36);
-    await pause(300); snap('shot05_heart_closeup');
+    await pause(300); snapHD('shot05_heart_closeup');
     // low angle hero shot
     cam(129, 1.5, -40, 132, 3.5, -36);
-    await pause(300); snap('shot05_hero_low');
+    await pause(300); snapHD('shot05_hero_low');
     // lightning flash: boost hemisphere light briefly
     hemi.intensity *= 2.2; moon.intensity *= 1.8;
-    await pause(100); snap('shot05_lightning');
+    await pause(100); snapHD('shot05_lightning');
     hemi.intensity /= 2.2; moon.intensity /= 1.8;
   },
 
@@ -234,16 +250,16 @@ const SHOTS = [
     player.pos.x = 132; player.pos.z = -36;
     // wide group charge
     cam(130, 5, -24, 132, 2, -36);
-    await pause(400); snap('shot06_charge');
+    await pause(400); snapHD('shot06_charge');
     // Blomba hammer strike (close on boss)
     cam(131, 3, -35, 132, 2.5, -36);
-    await pause(200); snap('shot06_blomba_strike');
+    await pause(200); snapHD('shot06_blomba_strike');
     // Blizzy slicing minions
     cam(127, 2.5, -33, 128, 1.2, -32);
-    await pause(200); snap('shot06_blizzy_slice');
+    await pause(200); snapHD('shot06_blizzy_slice');
     // full group in action, rain pouring
     cam(125, 6, -28, 132, 2, -36);
-    await pause(300); snap('shot06_wide_rain');
+    await pause(300); snapHD('shot06_wide_rain');
   },
 
   // SHOT 7 — Bluga at Grandma's
@@ -270,13 +286,13 @@ const SHOTS = [
     await pause(400);
     // reveal shot
     cam(124, 3, 188, 124, 1.5, 182);
-    await pause(400); snap('shot07_bluga_reveal');
+    await pause(400); snapHD('shot07_bluga_reveal');
     // closeup: jelly jar crush
     cam(123.5, 2.2, 183, 124, 1.5, 182);
-    await pause(300); snap('shot07_jar_crush');
+    await pause(300); snapHD('shot07_jar_crush');
     // low angle, cold blue beam
     cam(122, 1.5, 185, 124, 2, 182);
-    await pause(300); snap('shot07_cold_beam');
+    await pause(300); snapHD('shot07_cold_beam');
   },
 
   // SHOT 8 — Title Card (skip — handled in editing)
@@ -327,7 +343,7 @@ console.log('🎬 Director ready.');
 console.log('  dirNext()     — advance one shot (or press Space)');
 console.log('  dirRunAll()   — run all shots automatically');
 console.log('  clearAll()    — clear scene');
-console.log('  snap("name")  — manual capture');
+console.log('  snapHD("name")  — manual capture');
 console.log('');
 console.log('Press Space to begin.');
 

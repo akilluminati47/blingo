@@ -1,15 +1,25 @@
 // capture_refs.js — run in browser console with game loaded
 // Captures reference stills of every character, weapon, location, and prop.
-// Output: PNG files auto-downloaded to your browser.
+// Output: PNG files auto-downloaded at 1920×1080 regardless of viewport.
 
 (async function captureRefs() {
   const C = document.getElementById('c');
+  const CAP_W = 1920, CAP_H = 1080;
+  let _origW, _origH;
   function snap(name) {
+    _origW = C.width; _origH = C.height;
+    renderer.setSize(CAP_W, CAP_H);
+    camera.aspect = CAP_W / CAP_H;
+    camera.updateProjectionMatrix();
+    renderer.render(scene, camera);
     const a = document.createElement('a');
     a.download = name + '.png';
     a.href = C.toDataURL('image/png');
     a.click();
-    console.log('✓', name);
+    renderer.setSize(_origW, _origH);
+    camera.aspect = _origW / _origH;
+    camera.updateProjectionMatrix();
+    console.log('📷', name, '(' + CAP_W + '×' + CAP_H + ')');
   }
 
   function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
