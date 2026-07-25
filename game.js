@@ -7879,8 +7879,7 @@ function fireWeapon() {
     _to.y += curveDrop(_to.x, _to.z);
     if (!stopped && stopT < REACH) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
-      // bullet hole decal — size from weapon caliber
-      const bhSize = (w.dmg || 10) > 60 ? 0.32 : (w.dmg || 10) > 25 ? 0.22 : 0.14;
+      const bhSize = (w.id === 'magnum' || w.id === 'sniper') ? 0.36 : (w.id === 'shotgun' || w.id === 'rifle') ? 0.22 : 0.14;
       spawnBulletHole(_to.x, _to.y, _to.z, -rdx, -rdz, bhSize);
     }
   }
@@ -7893,13 +7892,14 @@ function fireWeapon() {
   // as Player 1; a client's go up to the host, who draws them and relays to the rest.
   if (net.role) {
     const pm = { t: 'pew', x: Math.round(_to.x * 10) / 10, y: Math.round(_to.y * 10) / 10, z: Math.round(_to.z * 10) / 10 };
+    if (!stopped && stopT < REACH) pm.h = bhSize;
     if (net.role === 'host') netBroadcast({ ...pm, p: 1 });
     else try { net.conns[0].send(pm); } catch (e) {}
   }
 }
 // draw another player's round: a tracer from their muzzle to where it ended, the bang
 // audible in 3d — the far half of fireWeapon's own tracer + shot sound
-function netRemotePew(blob, gunMeshR, weapon, ex, ey, ez) {
+function netRemotePew(blob, gunMeshR, weapon, ex, ey, ez, holeSize) {
   if (!blob) return;
   const from = new THREE.Vector3();
   if (gunMeshR && gunMeshR.userData.muzzle) gunMeshR.userData.muzzle.getWorldPosition(from);
@@ -7907,6 +7907,7 @@ function netRemotePew(blob, gunMeshR, weapon, ex, ey, ez) {
   spawnTracer(from, new THREE.Vector3(ex, ey, ez));
   if (weapon && !weapon.melee && Math.hypot(from.x - player.pos.x, from.z - player.pos.z) < 30)
     play3d(from.x, from.z, () => SFX.shoot(weapon));
+  if (holeSize) spawnBulletHole(ex, ey, ez, 0, 0, holeSize);
 }
 // death bookkeeping: kills counter, gore burst, optional head-pop, loot drop
 function killZombie(z, kx, kz, headPop) {
@@ -12791,11 +12792,11 @@ function wireHostConn(conn) {
       // zombies home on it like any gunshot), and relay it to everyone else's screen
       const c = cousinByConn(conn);
       if (c) {
-        netRemotePew(c.blob, c.gunMesh, c.weapon, m.x, m.y, m.z);
-        if (squadCmd.mode === 'lineup' && squadCmd.p === c.netP) squadCmd.mode = null; // their gunfire breaks their own trade line
+        netRemotePew(c.blob, c.gunMesh, c.weapon, m.x, m.y, m.z, m.h);
+        if (squadCmd.mode === 'lineup' && squadCmd.p === c.netP) squadCmd.mode = null;
         game.lastShot.set(c.pos.x, 0, c.pos.z); game.lastShotT = game.time;
-        scareCrows(m.x, m.z, 12); // a client's gunfire flushes the flock for EVERY screen
-        for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'pew', p: c.netP, x: m.x, y: m.y, z: m.z }); } catch (e) {} }
+        scareCrows(m.x, m.z, 12);
+        for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'pew', p: c.netP, x: m.x, y: m.y, z: m.z, h: m.h }); } catch (e) {} }
       }
     } else if (m.t === 'emote') {
       const c = cousinByConn(conn);
@@ -13232,7 +13233,7 @@ function netClientData(m, conn, peer, code) {
     // another player's round (the host's own, or a relayed client's): trace it from
     // their ghost's muzzle so the whole lobby sees who is shooting at what
     const g = net.actors.get('p' + m.p);
-    if (g) netRemotePew(g.blob, g.gunMesh, WEAPONS[g.wp], m.x, m.y, m.z);
+    if (g) netRemotePew(g.blob, g.gunMesh, WEAPONS[g.wp], m.x, m.y, m.z, m.h);
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
