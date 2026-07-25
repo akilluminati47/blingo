@@ -366,8 +366,13 @@ function applyNav(){
   const el = getFocusedEl();
   if (el) {
     el.classList.add('navfocus');
-    const block = navRow === 0 ? 'start' : navRow >= grid.length - 2 ? 'end' : 'nearest';
-    el.scrollIntoView({block, behavior:'instant'});
+    if (navRow === 0) {
+      screenEl.scrollTop = 0;
+    } else if (navRow >= grid.length - 2) {
+      screenEl.scrollTop = screenEl.scrollHeight;
+    } else {
+      el.scrollIntoView({block:'nearest', behavior:'instant'});
+    }
   }
 }
 function moveH(dir){
