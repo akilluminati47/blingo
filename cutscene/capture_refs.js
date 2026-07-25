@@ -3,6 +3,14 @@
 // Output: PNG files auto-downloaded at 1920×1080 regardless of viewport.
 
 (async function captureRefs() {
+  const $ = window.__dbg && window.__dbg.director;
+  if (!$) { console.error('window.__dbg.director not found — is the game loaded?'); return; }
+  const {
+    renderer, camera, scene, game, player, settings,
+    wxSet, applyEnvironment, COUSINS, buildBlob,
+    skyDome, cloudDome, groundHeight,
+  } = $;
+
   const C = document.getElementById('c');
   const CAP_W = 1920, CAP_H = 1080;
   let _origW, _origH;

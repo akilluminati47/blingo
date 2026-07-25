@@ -14016,6 +14016,32 @@ window.__dbg = {
   setClock: (h) => { game.clock = h % 24; applyEnvironment(); },
   recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateJelly(dt); updateCelebration(dt); updateFx(dt); },
+  // cutscene director tools
+  director: {
+    get renderer() { return renderer; },
+    get wxSet() { return wxSet; },
+    get COUSINS() { return COUSINS; },
+    get buildBlob() { return buildBlob; },
+    get spawnZombie() { return spawnZombie; },
+    get skyDome() { return skyDome; },
+    get skyDomes() { return skyDomes; },
+    get cloudDome() { return cloudDome; },
+    get hemi() { return hemi; },
+    get moon() { return moon; },
+    get addRotGore() { return addRotGore; },
+    get mat() { return mat; },
+    get SPHERE() { return SPHERE; },
+    get BOX() { return BOX; },
+    get bossState() { return bossState; },
+    get zombies() { return zombies; },
+    get scene() { return scene; },
+    get camera() { return camera; },
+    get player() { return player; },
+    get game() { return game; },
+    get settings() { return settings; },
+    get applyEnvironment() { return applyEnvironment; },
+    get groundHeight() { return groundHeight; },
+  },
 };
 
 // ---------- living tab: rotating cousin-face favicon + typewriter title (cycles forever) ----------

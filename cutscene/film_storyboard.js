@@ -16,6 +16,17 @@ const D = {
   CAP_W: 1920,  // capture resolution
   CAP_H: 1080,
 };
+
+// ── Grab game internals from the dev toolbox ──
+const $ = window.__dbg && window.__dbg.director;
+if (!$) { console.error('window.__dbg.director not found — is the game loaded?'); throw new Error('Missing __dbg.director'); }
+const {
+  renderer, camera, scene, game, player, settings,
+  wxSet, applyEnvironment, COUSINS, buildBlob, spawnZombie,
+  skyDome, cloudDome, hemi, moon, addRotGore,
+  groundHeight, bossState, zombies,
+} = $;
+
 const C = document.getElementById('c');
 let _origW, _origH;
 
