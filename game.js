@@ -4172,15 +4172,16 @@ function petrify(root) {
 function buildBlingoStatue(x, z) {
   const y0 = groundHeight(x, z);
   const granite = 0x8f939b, graniteDk = 0x6d7178;
-  // paved apron + two-step plinth
+  // paved apron + stepped plinth — every tier has a tight walkable collider
   const pave = terrainDisc(6.4, 22, x, z, mat(0x9a948a), 0.05);
   townGroup.add(pave);
-  const step = box(6.2, 0.4, 6.2, 0xaaa49a); step.position.set(x, y0 - 0.02, z); townGroup.add(step);
-  townColliders.push(aabb(x, z, 3.1, 3.1, 0.36, y0 - 0.2));
+  townColliders.push(aabb(x, z, 3.2, 3.2, 0.1, y0 - 0.02));
+  const step = box(6.2, 0.36, 6.2, 0xaaa49a); step.position.set(x, y0 + 0.18, z); townGroup.add(step);
+  townColliders.push(aabb(x, z, 3.1, 3.1, 0.36, y0));
   const plinth = box(4.6, 1.3, 4.6, graniteDk); plinth.position.set(x, y0 + 0.85, z); townGroup.add(plinth);
   townColliders.push(aabb(x, z, 2.3, 2.3, 1.3, y0 + 0.2));
   const lip = box(5.0, 0.22, 5.0, granite); lip.position.set(x, y0 + 1.55, z); townGroup.add(lip);
-  const py = y0 + 2.0; // top of the pedestal lip — flush with the statue's feet
+  const py = y0 + 1.66; // statue feet rest flush on the lip
   const statue = buildBlob({ color: granite });
   scene.remove(statue.shadow);
   petrify(statue.root);
@@ -4188,8 +4189,8 @@ function buildBlingoStatue(x, z) {
   statue.root.position.set(x, py, z);
   statue.root.rotation.y = -Math.PI / 2;
   townGroup.add(statue.root);
-  // solid statue: a narrow cylinder around the blob body so bullets and players bounce off
-  townColliders.push(aabb(x, z, 1.5, 1.5, 4.5, py - 0.4));
+  // solid statue body — tall narrow pillar so bullets and players bounce off
+  townColliders.push(aabb(x, z, 1.2, 1.2, 5.0, py));
   // the plaque sits ON the plinth itself, west face, BEST JELLY in the goopy face
   const plaque = textPlate('BEST JELLY', 1.9, 0.5, '#3c3428', '#e8d9a8');
   plaque.position.set(x - 2.32, y0 + 1.05, z);
