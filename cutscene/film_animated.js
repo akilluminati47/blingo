@@ -33,7 +33,6 @@ let _origEscape = null;
 function directorMode() {
   const dbg = window.__dbg;
   if (!dbg) return;
-  // Keep simulation running even if the user paused before filming
   if (dbg.game && dbg.game.state !== 'playing') {
     try { dbg.startRun(); } catch(_) {}
   }
@@ -47,8 +46,12 @@ function directorMode() {
   dbg.pauseGame = function() {};
   const pauseBtn = document.getElementById('btnPause');
   if (pauseBtn) pauseBtn.style.display = 'none';
-  //Ensure game is running for AI and updates
   if (dbg.game) dbg.game.state = 'playing';
+  // Move player far underground so zombies don't chase — they path and idle naturally
+  if (dbg.player) {
+    dbg._prevPlayerPos = { x: dbg.player.pos.x, y: dbg.player.pos.y, z: dbg.player.pos.z };
+    dbg.player.pos.set(9999, -50, 9999);
+  }
 }
 function endDirectorMode() {
   const dbg = window.__dbg;
@@ -59,6 +62,9 @@ function endDirectorMode() {
   if (dbg._oldPause) dbg.pauseGame = dbg._oldPause;
   const pauseBtn = document.getElementById('btnPause');
   if (pauseBtn) pauseBtn.style.display = '';
+  if (dbg.player && dbg._prevPlayerPos) {
+    dbg.player.pos.set(dbg._prevPlayerPos.x, dbg._prevPlayerPos.y, dbg._prevPlayerPos.z);
+  }
 }
 
 // ── Max out draw distance for shadows during capture ──
