@@ -10736,6 +10736,7 @@ function onBossDefeated(z) {
     // the true end of it: the last boss down, the block finally clean — and grandma's
     // porch light comes on way off past the church. The party waits at the Jelly House.
     bossState.defeated4 = true;
+    crowsGone = false; crowSpawnT = 4; // the rot is purged — the murder returns to the block
     if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
     bossBarEl.classList.remove('show');
     for (const zz of [...zombies]) if (zz !== z && !zz.netGhost && zz.state !== 'dying') killZombie(zz, 0, 0, false);
@@ -10779,12 +10780,12 @@ function onBossDefeated(z) {
     for (let k = 0; k < 48; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0xffd24a, 0xff3030, 0xfff3d0][k % 3], 1, 6, 1.2);
     rumble(600, 1, 1);
     spawnBoss3();
+    crowsLeave(); // the infected one stirs — every crow scatters off the block
     return;
   }
   bossState.defeated = true;
   if (bossState.beam) { scene.remove(bossState.beam); bossState.beam = null; }
   bossBarEl.classList.remove('show');
-  crowsLeave(); // the whole murder abandons the block once its master falls
   // cleanup phase: kills must reach the NEXT full hundred so it's always 100+ more —
   // at 299 kills the target is 400, never a one-kill cheese to 300
   game.cleanup = true;
