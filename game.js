@@ -1154,6 +1154,42 @@ function applyEnvironment(redraw = true) {
 
 // fake blob shadow
 // fake blob shadow geometry removed — using real sun shadows now
+
+// ═══ bullet hole decals ═══
+const _decalTex = canvasTex(32, 32, ctx => {
+  const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(14,12,10,0.9)'); g.addColorStop(0.25, 'rgba(18,15,12,0.7)');
+  g.addColorStop(0.55, 'rgba(24,20,16,0.3)'); g.addColorStop(1, 'rgba(28,24,18,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 32);
+});
+const _holeDecals = [];
+function spawnBulletHole(x, y, z, nx, nz, caliber) {
+  while (_holeDecals.length > 80) {
+    const old = _holeDecals.shift();
+    if (old.mesh) { old.mesh.removeFromParent(); old.mesh.material.dispose(); }
+  }
+  const mat = new THREE.SpriteMaterial({ map: _decalTex, transparent: true, depthWrite: false, blending: THREE.NormalBlending, rotation: Math.random() * Math.PI * 2 });
+  const s = new THREE.Sprite(mat);
+  const sz = (caliber || 0.18) * (0.65 + Math.random() * 0.7);
+  s.scale.setScalar(sz);
+  s.position.set(x + (nx || 0) * 0.03, y, z + (nz || 0) * 0.03);
+  s.renderOrder = 5;
+  scene.add(s);
+  _holeDecals.push({ mesh: s, life: 12 + Math.random() * 14 });
+}
+function updateBulletHoles(dt) {
+  for (let i = _holeDecals.length - 1; i >= 0; i--) {
+    const d = _holeDecals[i];
+    d.life -= dt;
+    if (d.life <= 0) {
+      d.mesh.removeFromParent(); d.mesh.material.dispose();
+      _holeDecals.splice(i, 1);
+    } else {
+      d.mesh.material.opacity = clamp(d.life / 3, 0, 0.8);
+    }
+  }
+}
+
 // ---------- settings (5-notch bars in the pause menu, persisted) ----------
 // coarse-pointer touch device? decided once, up here, because the default draw distance
 // leans on it (phones start at the lightest notch) — the input code reuses it as isTouch
@@ -7896,6 +7932,9 @@ function fireWeapon() {
     _to.y += curveDrop(_to.x, _to.z);
     if (!stopped && stopT < REACH) {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
+      // bullet hole decal — size from weapon caliber
+      const bhSize = (w.dmg || 10) > 60 ? 0.32 : (w.dmg || 10) > 25 ? 0.22 : 0.14;
+      spawnBulletHole(_to.x, _to.y, _to.z, -rdx, -rdz, bhSize);
     }
   }
   // the bang flushes crows near the muzzle, and near where the shot landed
@@ -8841,6 +8880,7 @@ function stepFrame(dt) {
   updateCompanionPeek(dt);
   updatePlayerTags(dt);
   updateFx(dt);
+  updateBulletHoles(dt);
   updateDamageNumbers(dt);
   updateEmoteFx(dt);
   updateRain(dt);
