@@ -27,6 +27,36 @@ const D = { shot: 0, frames: 0, CAP_W: 1920, CAP_H: 1080, FPS: 24 };
 const SAVE = 'http://localhost:3000/save';
 let _saveQ = Promise.resolve(), cleanup = [];
 let _prevDrawDist = 2;
+let _origEscape = null;
+
+// ── Director mode: override pause menu so capture never gets interrupted ──
+function directorMode() {
+  const dbg = window.__dbg;
+  if (!dbg) return;
+  // Prevent boss spawns during filming — we want the cousins at the fountain shot clean
+  if (dbg.bossState) {
+    dbg.bossState._wasSpawned = dbg.bossState.spawned;
+    dbg.bossState.spawned = true; // mark as spawned so nothing tries to spawn
+  }
+  // Override the pause toggle so neither Escape nor pause button interrupts capture
+  _origEscape = window.onkeydown;
+  const oldPause = dbg.pauseGame;
+  dbg._oldPause = oldPause;
+  dbg.pauseGame = function() {}; // no-op the pause function
+  // Suppress the pause button visually
+  const pauseBtn = document.getElementById('btnPause');
+  if (pauseBtn) pauseBtn.style.display = 'none';
+}
+function endDirectorMode() {
+  const dbg = window.__dbg;
+  if (!dbg) return;
+  if (dbg.bossState && dbg.bossState._wasSpawned !== undefined) {
+    dbg.bossState.spawned = dbg.bossState._wasSpawned;
+  }
+  if (dbg._oldPause) dbg.pauseGame = dbg._oldPause;
+  const pauseBtn = document.getElementById('btnPause');
+  if (pauseBtn) pauseBtn.style.display = '';
+}
 
 // ── Max out draw distance for shadows during capture ──
 function maxSettings() {
@@ -273,14 +303,17 @@ window.dirNext = async function() {
     document.getElementById('dirStat').textContent = `✅ DONE — ${D.frames} frames`;
     return;
   }
+  directorMode();
   document.getElementById('dirStat').textContent = `Shot ${D.shot+1}/${SHOTS.length} ...`;
   await SHOTS[D.shot]();
   D.shot++;
+  endDirectorMode();
   document.getElementById('dirStat').textContent = D.shot < SHOTS.length
     ? `Waiting (Space) | ${D.frames} frames` : `✅ All ${SHOTS.length} done | ${D.frames} frames`;
 };
 
 window.dirRunAll = async function() {
+  directorMode();
   for (let i = 0; i < SHOTS.length; i++) {
     D.shot = i;
     document.getElementById('dirStat').textContent = `🎬 Shot ${i+1}/${SHOTS.length} ...`;
@@ -288,6 +321,7 @@ window.dirRunAll = async function() {
     await pause(300);
   }
   D.shot = SHOTS.length;
+  endDirectorMode();
   document.getElementById('dirStat').textContent = `✅ ${D.frames} frames in keyframes/ — run: npm run merge`;
   console.log(`✅ ${D.frames} frames captured. Run: npm run merge`);
 };
