@@ -47,10 +47,14 @@ function directorMode() {
   const pauseBtn = document.getElementById('btnPause');
   if (pauseBtn) pauseBtn.style.display = 'none';
   if (dbg.game) dbg.game.state = 'playing';
-  // Move player far underground so zombies don't chase — they path and idle naturally
+  // Remove player entirely — no body, no chase target
   if (dbg.player) {
-    dbg._prevPlayerPos = { x: dbg.player.pos.x, y: dbg.player.pos.y, z: dbg.player.pos.z };
+    dbg.player.dead = true;
     dbg.player.pos.set(9999, -50, 9999);
+    if (dbg.playerBlob) {
+      dbg._prevBlobVisible = dbg.playerBlob.root.visible;
+      dbg.playerBlob.root.visible = false;
+    }
   }
 }
 function endDirectorMode() {
@@ -62,8 +66,9 @@ function endDirectorMode() {
   if (dbg._oldPause) dbg.pauseGame = dbg._oldPause;
   const pauseBtn = document.getElementById('btnPause');
   if (pauseBtn) pauseBtn.style.display = '';
-  if (dbg.player && dbg._prevPlayerPos) {
-    dbg.player.pos.set(dbg._prevPlayerPos.x, dbg._prevPlayerPos.y, dbg._prevPlayerPos.z);
+  if (dbg.player) {
+    dbg.player.dead = false;
+    if (dbg.playerBlob) dbg.playerBlob.root.visible = true;
   }
 }
 
