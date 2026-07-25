@@ -335,11 +335,7 @@ addEventListener('hashchange', ()=>{ if(location.hash==='#policies' && !isOpen()
 function navGrid(){
   const ptiles = [...document.querySelectorAll('.ptile')];
   const ppips = [...document.querySelectorAll('.ppip')];
-  const pdownBtns = [...document.querySelectorAll('.pdown-btn')].filter(el => {
-    if (el.classList.contains('pdown-loading')) return true;
-    const u = el.getAttribute('href');
-    return u && u !== '#' && !u.endsWith('#');
-  });
+  const pdownBtns = [...document.querySelectorAll('.pdown-btn')];
   const ghbadge = document.querySelector('.pdown-ghbadge');
   const ptoblock = document.getElementById('ptoblock');
   const pcredit = document.getElementById('pcreditlink');
@@ -422,7 +418,7 @@ function gpPoll(){
       if((now.dLeft&&!gpPrev.dLeft)||(now.lb&&!gpPrev.lb)||(now.lx<-0.55&&gpPrev.lx>=-0.55)) moveH(-1);
       if((now.dDown&&!gpPrev.dDown)||(now.ly>0.55&&gpPrev.ly<=0.55)) moveV(1);
       if((now.dUp&&!gpPrev.dUp)||(now.ly<-0.55&&gpPrev.ly>=-0.55)) moveV(-1);
-      if(now.a&&!gpPrev.a){ const el=getFocusedEl(); if(el && !el.classList.contains('pdown-loading')) el.click(); }
+      if(now.a&&!gpPrev.a){ const el=getFocusedEl(); if(el && !el.classList.contains('pdown-loading')) { if (el.classList.contains('pdown-btn')) { const h = el.getAttribute('href'); if (h && h !== '#' && !h.endsWith('#')) el.click(); } else { el.click(); } } }
       if(now.b&&!gpPrev.b) closePolicies();
       // R-stick vertical = scroll
       if(Math.abs(now.ry)>0.15) screenEl.scrollTop += now.ry * 12;
