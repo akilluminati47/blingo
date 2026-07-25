@@ -14030,7 +14030,7 @@ let tabCousin = 0; // which cousin the tab is currently spelling — the splash 
 // one; quitting to the menu lets go and resumes the full cycle. lock === null is "cycling".
 tabTitle = (function livingTab() {
   const link = document.createElement('link');
-  link.rel = 'icon'; link.type = 'image/png';
+  link.rel = 'icon'; link.type = 'image/png'; link.sizes = '32x32';
   document.head.appendChild(link);
   let ci = 0, li = 0, lock = null, timer = null;
   function tick() {
