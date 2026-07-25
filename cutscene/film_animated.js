@@ -1,6 +1,5 @@
 // film_animated.js — run in browser console with game loaded via npm run dev
 // Captures in-engine cutscene footage frame-by-frame for smooth video.
-// Each shot animates characters/camera, saves every frame to cutscene/keyframes/
 // Press Space to advance shots, or run dirRunAll() for the full sequence.
 
 (function() {
@@ -15,39 +14,30 @@ const {
   groundHeight, bossState, zombies, THREE,
 } = $;
 
-// Hardcoded fallback — the script NEVER depends on __dbg for data
 const COUSINS = [
-  { id: 'blingo',  color: 0xff8c42, weapon: 'bat'     },
-  { id: 'blazo',   color: 0xff4f42, weapon: 'shotgun'  },
-  { id: 'blizzy',  color: 0x6fd8ff, weapon: 'katana'   },
-  { id: 'blomba',  color: 0xb06fff, weapon: 'sledge'   },
-  { id: 'bloopy',  color: 0x3fd8b0, weapon: 'pistol'   },
-  { id: 'blondie', color: 0xffd84a, weapon: 'sniper'   },
+  { id: 'blingo',  color: 0xff8c42 },
+  { id: 'blazo',   color: 0xff4f42 },
+  { id: 'blizzy',  color: 0x6fd8ff },
+  { id: 'blomba',  color: 0xb06fff },
+  { id: 'bloopy',  color: 0x3fd8b0 },
+  { id: 'blondie', color: 0xffd84a },
 ];
 
 const D = { shot: 0, frames: 0, CAP_W: 1920, CAP_H: 1080, FPS: 24 };
 const SAVE = 'http://localhost:3000/save';
 let _saveQ = Promise.resolve(), cleanup = [];
-let _origW = 0, _origH = 0;
 
-// ── enter HD capture mode (call once before shot sequence) ──
 function beginCapture() {
-  _origW = C.width || window.innerWidth;
-  _origH = C.height || window.innerHeight;
-  if (_origW < 100 || _origH < 100) { _origW = 1920; _origH = 1080; }
+  const w = C.width || window.innerWidth, h = C.height || window.innerHeight;
   renderer.setSize(D.CAP_W, D.CAP_H);
   camera.aspect = D.CAP_W / D.CAP_H;
   camera.updateProjectionMatrix();
 }
-
-// ── restore viewport (call once after shot sequence) ──
 function endCapture() {
-  renderer.setSize(_origW, _origH);
-  camera.aspect = _origW / _origH;
+  renderer.setSize(C.width || innerWidth, C.height || innerHeight);
+  camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
 }
-
-// ── capture one HD frame and POST to local server ──
 function snap(name) {
   renderer.render(scene, camera);
   const dataUrl = C.toDataURL('image/png');
@@ -59,32 +49,27 @@ function snap(name) {
   );
 }
 
-// ── capture N frames over duration seconds, moving camera from A to B ──
 async function panShot(name, dur, camA, camB, lookAt) {
   beginCapture();
-  const n = Math.round(dur * D.FPS);
+  const n = Math.max(1, Math.round(dur * D.FPS));
   for (let i = 0; i < n; i++) {
     const t = i / Math.max(n - 1, 1);
     camera.position.lerpVectors(camA, camB, t);
     camera.lookAt(lookAt);
     skyDome.position.copy(camera.position);
     cloudDome.position.copy(camera.position);
-    const sn = name + '_' + String(i).padStart(4, '0');
-    snap(sn);
+    snap(name + '_' + String(i).padStart(4, '0'));
     if (window.__step) window.__step(1, 1 / D.FPS);
     await new Promise(r => requestAnimationFrame(r));
   }
   endCapture();
-  console.log('  ✅', name, n, 'frames');
 }
 
-// ── hold a still for dur seconds ──
 async function holdShot(name, dur) {
   beginCapture();
   const n = Math.round(dur * D.FPS);
   for (let i = 0; i < n; i++) {
-    const sn = name + '_' + String(i).padStart(4, '0');
-    snap(sn);
+    snap(name + '_' + String(i).padStart(4, '0'));
     if (window.__step) window.__step(1, 1 / D.FPS);
     await new Promise(r => requestAnimationFrame(r));
   }
@@ -95,24 +80,22 @@ function pause(ms) { return new Promise(r => setTimeout(r, ms)); }
 function setClock(h) { game.clock = h; applyEnvironment(true); }
 function setWeather(k) { wxSet(k); applyEnvironment(true); }
 function setFog(near, far) { settings.fogFar = far; applyEnvironment(true); }
-
-function vec3(x, y, z) { return new THREE.Vector3(x, y, z); }
+function v3(x,y,z) { return new THREE.Vector3(x,y,z); }
 
 function spawnCousin(id, x, z, rot) {
   const c = COUSINS.find(c => c.id === id);
   const blob = buildBlob({ color: c.color, scale: 1 });
-  blob.root.position.set(x, groundHeight(x, z), z);
+  const y = groundHeight(x, z);
+  blob.root.position.set(x, y, z);
   blob.root.rotation.y = rot || 0;
   scene.add(blob.root); cleanup.push(blob.root);
   return blob;
 }
-
 function spawnZ(x, z, opts) {
   const zz = spawnZombie(x, z, 1, opts || {});
   if (zz != null) cleanup.push(zz);
   return zz;
 }
-
 function clearAll() {
   for (const o of cleanup) {
     if (o.parent) o.parent.remove(o);
@@ -121,153 +104,136 @@ function clearAll() {
   cleanup = [];
 }
 
-// ═══════════════════════════════════════════════════════════════
-// SHOT SEQUENCES — each returns a promise that captures frames
-// ═══════════════════════════════════════════════════════════════
-
 const SHOTS = [
 
-  // SHOT 1 — Aerial block pull-back (6s)
+  // SHOT 1 — The Block (6s aerial pull-back)
   async function() {
-    console.log('🎬 SHOT 1: The Block');
+    console.log('🎬 S1: The Block');
     setClock(18.5); setWeather('sunny'); setFog(30, 110);
     clearAll();
     player.pos.set(20, groundHeight(20, 50), 50);
-    const camA = vec3(20, 35, 90), camB = vec3(20, 75, 140);
-    const look = vec3(20, 5, 50);
-    await panShot('s01', 6, camA, camB, look);
+    await panShot('s01', 6, v3(20, 35, 90), v3(20, 75, 140), v3(20, 5, 50));
   },
 
-  // SHOT 2 — Cousins on bank steps (8s: slow pan across lineup)
+  // SHOT 2 — Cousins on bank steps facing the fountain (10s slow pan)
   async function() {
-    console.log('🎬 SHOT 2: Cousins Assemble');
+    console.log('🎬 S2: Cousins Assemble');
     setClock(18); setWeather('sunny'); setFog(30, 105);
     clearAll();
     player.pos.set(0, groundHeight(0, -37), -37);
     const ids = COUSINS.map(c => c.id);
-    const positions = [[-3,-35],[-1.2,-35],[0.6,-35],[2.4,-35],[-2.1,-33],[1.5,-33]];
-    for (let i = 0; i < 6; i++) spawnCousin(ids[i], positions[i][0], positions[i][1], 1.6 + i * 0.03);
-    await pause(500);
-    // slow pan across the lineup
-    const camA = vec3(-5, 2.5, -30), camB = vec3(5, 2.2, -30);
-    const look = vec3(0, 1.5, -35);
-    await panShot('s02', 8, camA, camB, look);
+    // spread across bank steps, facing south toward the fountain
+    const positions = [[-3.5,-35],[-2,-35],[-0.5,-35],[1,-35],[2.5,-35],[4,-35]];
+    for (let i = 0; i < 6; i++) spawnCousin(ids[i], positions[i][0], positions[i][1], Math.PI);
+    await pause(600);
+    await panShot('s02', 10, v3(-5, 3, -30), v3(6, 2.5, -30), v3(0, 1.5, -35));
   },
 
-  // SHOT 3 — Melee combat (10s: rapid cuts with zombies)
+  // SHOT 3 — Melee combat closeups (12s)
   async function() {
-    console.log('🎬 SHOT 3: Melee Montage');
+    console.log('🎬 S3: Melee Montage');
     setClock(19); setWeather('cloudy'); setFog(28, 95);
     const cuts = [
-      { id: 'blingo',  x: 2, z: -32, cx: 7, cz: -28, look: vec3(2, 1, -30) },
-      { id: 'blazo',   x: 5, z: -30, cx: 10, cz: -26, look: vec3(5, 1, -28) },
-      { id: 'blizzy',  x: 0, z: -28, cx: -4, cz: -24, look: vec3(0, 1, -28) },
-      { id: 'blomba',  x: -3, z: -34, cx: -8, cz: -30, look: vec3(-3, 1, -32) },
-      { id: 'bloopy',  x: 7, z: -35, cx: 12, cz: -30, look: vec3(7, 1, -33) },
-      { id: 'blondie', x: -6, z: -36, cx: -11, cz: -32, look: vec3(-6, 1, -34) },
+      { id: 'blingo',  x: 4, z: -30 },
+      { id: 'blazo',   x: 8, z: -28 },
+      { id: 'blizzy',  x: 2, z: -26 },
+      { id: 'blomba',  x: -2, z: -32 },
+      { id: 'bloopy',  x: 10, z: -32 },
+      { id: 'blondie', x: -5, z: -34 },
     ];
     for (const cut of cuts) {
       clearAll();
       spawnCousin(cut.id, cut.x, cut.z, 0);
-      spawnZ(cut.x + 1.5, cut.z + 2.5, {});
-      spawnZ(cut.x - 1.2, cut.z + 2, { droopy: true });
+      spawnZ(cut.x + 2, cut.z + 3, {});
+      spawnZ(cut.x - 1.5, cut.z + 2.5, { droopy: true });
       player.pos.set(cut.x, groundHeight(cut.x, cut.z), cut.z);
-      const camA = vec3(cut.cx, 2.5, cut.cz);
-      const dur = 1.4 + Math.random() * 0.4;
-      await panShot('s03_' + cut.id, dur, camA, camA, cut.look);
+      const cx = cut.x + (cut.x > 0 ? 5 : -5);
+      const cz = cut.z + 4;
+      const look = v3(cut.x, 1, cut.z + 1);
+      await panShot('s03_' + cut.id, 2, v3(cx, 2.5, cz), v3(cx, 2.3, cz), look);
     }
   },
 
-  // SHOT 4 — Gunfight (10s)
+  // SHOT 4 — Gunfight on main street (10s)
   async function() {
-    console.log('🎬 SHOT 4: Gunfight');
+    console.log('🎬 S4: Gunfight');
     setClock(20); setWeather('cloudy'); setFog(25, 85);
     clearAll();
-    for (let i = 0; i < 6; i++) spawnCousin(COUSINS[i].id, i * 2 - 5, -42, 1.57);
-    for (let i = 0; i < 12; i++) spawnZ(-2 + i * 1.2, -28 + Math.random() * 3, {});
-    player.pos.set(0, groundHeight(0, -42), -42);
-
-    // wide pan
-    const camA1 = vec3(-6, 3, -26), camB1 = vec3(6, 4, -26);
-    await panShot('s04_wide', 5, camA1, camB1, vec3(0, 1.5, -40));
-
-    // tight on Blazo shotgun
-    const camA2 = vec3(6, 2.5, -28);
-    await panShot('s04_blazo', 2.5, camA2, camA2, vec3(5, 1.2, -40));
-
-    // tight on Blondie scope
-    const camA3 = vec3(12, 4, -38);
-    await panShot('s04_blondie', 2.5, camA3, camA3, vec3(10, 1.2, -42));
+    for (let i = 0; i < 6; i++) spawnCousin(COUSINS[i].id, i * 2.5 - 6, -44, Math.PI / 2);
+    for (let i = 0; i < 15; i++) spawnZ(-4 + i * 1.3, -30 + Math.random() * 4, {});
+    player.pos.set(0, groundHeight(0, -44), -44);
+    await panShot('s04_wide', 5, v3(-7, 3.5, -26), v3(7, 4, -26), v3(0, 1.5, -42));
+    const cx = 6, cz = -28;
+    await panShot('s04_blazo', 2.5, v3(cx, 2.5, cz), v3(cx, 2.5, cz), v3(5, 1.2, -40));
+    const cx2 = -7, cz2 = -36;
+    await panShot('s04_blondie', 2.5, v3(cx2, 4, cz2), v3(cx2, 4, cz2), v3(-5, 1.2, -42));
   },
 
-  // SHOT 5 — Rotten One spawns (8s, rain + lightning)
+  // SHOT 5 — Rotten One closeup (10s, storm + lightning)
   async function() {
-    console.log('🎬 SHOT 5: Rotten One');
+    console.log('🎬 S5: Rotten One');
     setClock(23); setWeather('rain'); setFog(18, 65);
     clearAll();
-    const bx = 132, bz = -36;
-    player.pos.set(bx, groundHeight(bx, bz), bz);
+    const bx = 132, bz = -36, gy = groundHeight(bx, bz);
+    player.pos.set(bx, gy, bz);
     bossState.spawned4 = true;
     const boss = buildBlob({ color: 0x77a12c, zombie: true, scale: 3.1, hands: 0x3f5a14 });
     if (addRotGore) addRotGore(boss, { hangEye: true, chestHole: true });
-    boss.root.position.set(bx, groundHeight(bx, bz), bz);
+    boss.root.position.set(bx, gy, bz);
     scene.add(boss.root); cleanup.push(boss.root);
     for (let i = 0; i < 8; i++) {
-      const a = Math.random() * Math.PI * 2, d = 4 + Math.random() * 4;
+      const a = Math.random() * Math.PI * 2, d = 5 + Math.random() * 4;
       spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true, shield: true });
     }
     await pause(300);
-
-    // slow orbit around the boss
-    const camA = vec3(138, 5, -28), camB = vec3(127, 4, -40);
-    await panShot('s05_orbit', 5, camA, camB, vec3(bx, 2.5, bz));
-
-    // close on heart, then pull back
-    const camC = vec3(131, 3, -37);
-    await panShot('s05_heart', 3, camC, camC, vec3(bx, 2.5, bz));
+    // wide orbit
+    await panShot('s05_orbit', 5, v3(138, 5, -28), v3(127, 4, -40), v3(bx, 3, bz));
+    // close on exposed chest + dangling eye
+    await panShot('s05_close', 4, v3(bx + 1.5, 4, bz - 2), v3(bx - 1, 3.5, bz - 1.5), v3(bx, 3, bz));
   },
 
-  // SHOT 6 — Family fights Rotten One (8s)
+  // SHOT 6 — Family charges the Rotten One (10s)
   async function() {
-    console.log('🎬 SHOT 6: Family Charge');
+    console.log('🎬 S6: Family Charge');
     setClock(23.2); setWeather('rain'); setFog(18, 65);
     clearAll();
-    const bx = 132, bz = -36;
+    const bx = 132, bz = -36, gy = groundHeight(bx, bz);
     const boss = buildBlob({ color: 0x77a12c, zombie: true, scale: 3.1, hands: 0x3f5a14 });
     if (addRotGore) addRotGore(boss, { hangEye: true, chestHole: true });
-    boss.root.position.set(bx, groundHeight(bx, bz), bz);
+    boss.root.position.set(bx, gy, bz);
     scene.add(boss.root); cleanup.push(boss.root);
-    for (let i = 0; i < 6; i++) {
-      const a = Math.random() * Math.PI * 2, d = 3 + Math.random() * 3;
+    for (let i = 0; i < 8; i++) {
+      const a = Math.random() * Math.PI * 2, d = 4 + Math.random() * 3;
       spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true });
     }
-    for (let i = 0; i < 6; i++) spawnCousin(COUSINS[i].id, 127 + i * 1.5 - 3.5, -30, -0.5);
-    player.pos.set(bx, groundHeight(bx, bz), bz);
-
-    const camA = vec3(130, 6, -24), camB = vec3(125, 6, -30);
-    await panShot('s06_charge', 8, camA, camB, vec3(bx, 2, bz));
+    // cousins charge from the park edge
+    for (let i = 0; i < 6; i++) spawnCousin(COUSINS[i].id, 126 + i * 1.5, -30, -0.4);
+    player.pos.set(bx, gy, bz);
+    await panShot('s06_charge', 10, v3(130, 7, -22), v3(124, 6, -32), v3(bx, 2.5, bz));
   },
 
-  // SHOT 7 — Bluga at Jelly House (6s)
+  // SHOT 7 — Bluga at Jelly House (8s, cold night)
   async function() {
-    console.log('🎬 SHOT 7: Bluga');
+    console.log('🎬 S7: Bluga');
     setClock(23.5); setWeather('rain'); setFog(20, 70);
     clearAll();
-    player.pos.set(124, groundHeight(124, 182), 182);
+    const jx = 124, jz = 182, jy = groundHeight(jx, jz);
+    player.pos.set(jx, jy, jz);
     const bluga = buildBlob({ color: 0x141519, scale: 1, hands: 0x141519 });
-    bluga.root.position.set(124, groundHeight(124, 182) + 0.3, 182);
+    bluga.root.position.set(jx, jy + 0.3, jz);
     bluga.root.rotation.y = Math.PI;
     scene.add(bluga.root); cleanup.push(bluga.root);
+    // guards in a semi-circle in front
     for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2, d = 5;
+      const a = -Math.PI/2 + (i * Math.PI / 5);
+      const d = 6;
+      const gx = jx + Math.cos(a) * d, gz = jz + Math.sin(a) * d;
       const g = buildBlob({ color: 0x141519, scale: 0.8 });
-      g.root.position.set(124 + Math.sin(a) * d, groundHeight(124 + Math.sin(a) * d, 182 + Math.cos(a) * d), 182 + Math.cos(a) * d);
+      g.root.position.set(gx, groundHeight(gx, gz), gz);
       scene.add(g.root); cleanup.push(g.root);
     }
-    await pause(300);
-
-    const camA = vec3(128, 3, 188), camB = vec3(122, 2, 184);
-    await panShot('s07_reveal', 6, camA, camB, vec3(124, 1.5, 182));
+    await pause(400);
+    await panShot('s07_reveal', 8, v3(jx + 8, 2.5, jz + 6), v3(jx - 4, 2, jz + 4), v3(jx, 1.5, jz));
   },
 ];
 
@@ -308,7 +274,6 @@ window.addEventListener('keydown', e => {
 console.log('🎬 Animated Director ready.');
 console.log('  dirNext()     — advance one shot (Space)');
 console.log('  dirRunAll()   — run all shots');
-console.log(`  Frames save to: ${SAVE}`);
 console.log('  npm run merge — compile into MP4');
 
 })();
