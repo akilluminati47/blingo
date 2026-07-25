@@ -12119,7 +12119,8 @@ function updateCrates(dt) {
     const cr = allCrates[i];
     cr.t += dt;
     if (!cr.opened) {
-      cr.trim.material.emissiveIntensity = 0.4 + Math.sin(cr.t * 3) * 0.3;
+      const p = Math.sin(cr.t * 3);
+      cr.trim.material.emissiveIntensity = 0.32 + p * 0.22;
       animateLootGlow(cr.glow, cr.t);
       continue;
     }
