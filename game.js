@@ -594,6 +594,7 @@ const cloudDome = new THREE.Mesh(
       varying vec3 vP;
       void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: /* glsl */`
+      precision highp float;
       varying vec3 vP;
       uniform float uTime, uCover, uCirrus;
       uniform vec3 uFill, uBelly, uSunCol, uMoonCol, uSunDir, uMoonDir;
@@ -778,6 +779,7 @@ const airMotes = (() => {
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */`
+      precision highp float;
       uniform vec3 uTint; uniform float uAmt;
       varying float vA;
       void main(){
