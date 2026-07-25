@@ -123,6 +123,7 @@ jobs:
 
       - name: Generate app icons from blingo.png
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick
           for d in android/app/src/main/res/mipmap-*; do
             case $(basename $d) in
               mipmap-mdpi)   s=48  fs=108 ;;
