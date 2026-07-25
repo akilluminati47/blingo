@@ -372,8 +372,8 @@ function gpPoll(){
       dUp:pressed(12), dDown:pressed(13), dLeft:pressed(14), dRight:pressed(15),
       lx:ax[0]||0, ly:ax[1]||0, rx:ax[2]||0, ry:ax[3]||0,
     };
-    const moveDir = now.dRight||now.dDown||now.lx>0.55||now.ly>0.55 ? 1
-                  : now.dLeft||now.dUp||now.lx<-0.55||now.ly<-0.55 ? -1 : 0;
+    const moveDir = now.dRight||now.dDown||now.lx>0.55||now.ly>0.55||now.rb ? 1
+                  : now.dLeft||now.dUp||now.lx<-0.55||now.ly<-0.55||now.lb ? -1 : 0;
     if(isOpen()){
       if(moveDir && !gpPrev._moveDir) move(moveDir);
       if(now.a&&!gpPrev.a){ const el=navItems()[navIdx]; if(el) el.click(); }
