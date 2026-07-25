@@ -8808,6 +8808,7 @@ function stepFrame(dt) {
   }
   updateCamera(dt);
   updateHousePeek(dt); // after the camera: the sightline test needs its settled position
+  updateCompanionPeek(dt);
   updatePlayerTags(dt);
   updateFx(dt);
   updateDamageNumbers(dt);
@@ -12345,6 +12346,51 @@ function updateHousePeek(dt) {
       m.opacity = s.op;
     }
     if (solid) peeking.delete(s); // settled solid, stop tracking it
+  }
+}
+
+// Companion peek: fade a cousin when they walk between the camera and the player.
+// Same fade engine as buildings, but never touches zombies / bosses / crows.
+function updateCompanionPeek(dt) {
+  if (game.state !== 'playing') return;
+  const cp = camera.position, pp = player.pos;
+  const px = pp.x, py = pp.y + 1.15, pz = pp.z;
+  const dx = px - cp.x, dy = py - cp.y, dz = pz - cp.z;
+  const camDist = Math.hypot(dx, dy, dz);
+  if (camDist < 0.05) return;
+  const k = 1 - Math.exp(-11 * dt);
+  for (const c of companions) {
+    if (!c.recruited || c.downed) continue;
+    if (c.peekOp === undefined) c.peekOp = 1;
+    if (c.peekMats === undefined) {
+      c.peekMats = [];
+      c.blob && c.blob.root && c.blob.root.traverse(o => {
+        if (o.isMesh && !o.material.userData.peekClone) {
+          const clone = o.material.clone();
+          clone.userData.peekClone = true;
+          o.material = clone;
+          c.peekMats.push(clone);
+        }
+      });
+    }
+    const bx = c.pos.x, by = c.pos.y + 0.9, bz = c.pos.z;
+    const cx = bx - cp.x, cy = by - cp.y, cz = bz - cp.z;
+    // project companion centre onto the sightline
+    const dot = (cx * dx + cy * dy + cz * dz) / (camDist * camDist);
+    const t = clamp(dot, 0, 1);
+    const nearX = cp.x + dx * t, nearY = cp.y + dy * t, nearZ = cp.z + dz * t;
+    const dist = Math.hypot(bx - nearX, by - nearY, bz - nearZ);
+    const cw = 1; // companion is basically a unit cylinder — any closer than 1u is blocking
+    c.peekWant = dist < cw ? PEEK_OP : 1;
+
+    c.peekOp = lerp(c.peekOp, c.peekWant, k);
+    const solid = c.peekWant === 1 && c.peekOp > 0.995;
+    if (solid) c.peekOp = 1;
+    const clear = c.peekOp < 1;
+    for (const m of c.peekMats) {
+      if (m.transparent !== clear) { m.transparent = clear; m.depthWrite = !clear; m.needsUpdate = true; }
+      m.opacity = c.peekOp;
+    }
   }
 }
 
