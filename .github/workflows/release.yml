@@ -190,6 +190,18 @@ jobs:
           npx cap add ios
           npx cap sync ios
 
+      - name: Disable code signing in Xcode project
+        run: |
+          cd ios/App
+          # Force-disable signing at the project level
+          /usr/libexec/PlistBuddy -c "Set :objects:$(grep -o '[A-F0-9]\{24\}' App.xcodeproj/project.pbxproj | head -1):buildSettings:CODE_SIGN_IDENTITY ''" App.xcodeproj/project.pbxproj 2>/dev/null || true
+          # Use sed to nuke all signing settings in one pass
+          sed -i '' 's/CODE_SIGN_IDENTITY = "[^"]*"/CODE_SIGN_IDENTITY = ""/g' App.xcodeproj/project.pbxproj
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' App.xcodeproj/project.pbxproj
+          sed -i '' 's/DEVELOPMENT_TEAM = [A-Za-z0-9]*/DEVELOPMENT_TEAM = ""/g' App.xcodeproj/project.pbxproj
+          sed -i '' 's/PROVISIONING_PROFILE_SPECIFIER = "[^"]*"/PROVISIONING_PROFILE_SPECIFIER = ""/g' App.xcodeproj/project.pbxproj
+          echo "Signing disabled in project"
+
       - name: Build iOS IPA (unsigned)
         env:
           V: ${{ needs.bump.outputs.version }}
