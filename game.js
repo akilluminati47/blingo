@@ -1132,7 +1132,17 @@ function updateBulletHoles(dt) {
       d.mesh.removeFromParent(); d.mesh.material.dispose();
       _holeDecals.splice(i, 1);
     } else {
-      d.mesh.material.opacity = clamp(d.life / 3, 0, 0.8);
+      let op = clamp(d.life / 3, 0, 0.8);
+      // Peek fade: if the hole sits on a wall that's being peeked through, fade with it
+      const p = d.mesh.position;
+      for (const s of peeking) {
+        if (p.x > s.box.x - s.box.hw && p.x < s.box.x + s.box.hw &&
+            p.z > s.box.z - s.box.hd && p.z < s.box.z + s.box.hd &&
+            p.y > s.box.y0 && p.y < s.box.y1) {
+          op *= s.op; break;
+        }
+      }
+      d.mesh.material.opacity = op;
     }
   }
 }
