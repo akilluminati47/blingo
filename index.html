@@ -1046,58 +1046,73 @@
 <script type="module" src="policies.js"></script>
 <script>
 (function() {
-  const GOLD = [
+  var GOLD = [
     "When the horde came, every blob turned . .",
     "except six cousins.",
     "The bites never took.",
     "Now the immune cousins are clearing the wasteland, block by block,",
     "so the rest of blob-kind can finally move back home."
   ];
-  const WHITE = [
+  var WHITE = [
     "Pick your cousin.",
     "The other five are out there somewhere, find them, recruit them, fight together.",
-    "Loot the glowing crates for guns & ammo."
+    "Loot the glowing crates for guns & ammo.",
+    "Good Luck!"
   ];
-  const LUCK  = "Good Luck!";
 
-  const gEl = document.querySelector('#typelore .gold');
-  const wEl = document.querySelector('#typelore .white');
+  var gEl = document.querySelector('#typelore .gold');
+  var wEl = document.querySelector('#typelore .white');
   if (!gEl || !wEl) return;
 
-  const TYPE = 42, WIPE = 4, HOLD = 7600, BLANK = 900, LUCK_TYPE = 120;
-  const gText = GOLD.join('\n'), wText = WHITE.join('\n');
+  var TYPE = 42, WIPE = 14, HOLD = 7600, BLANK = 900;
+  var gText = GOLD.join('\n'), wText = WHITE.join('\n');
 
-  function type(el, text, speed, i, cb) {
+  // Pre-render everything in grey so the page never jumps
+  gEl.innerHTML = gText.replace(/\n/g, '<br>');
+  wEl.innerHTML = wText.replace(/\n/g, '<br>');
+  gEl.style.color = '#5a5a64';
+  wEl.style.color = '#5a5a64';
+
+  function render(el, text, pos, color) {
+    var h = '';
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i] === '\n' ? '<br>' : text[i];
+      h += '<span style="color:' + (i < pos ? color : '#5a5a64') + '">' + c + '</span>';
+    }
+    el.innerHTML = h;
+  }
+
+  function fill(el, text, color, speed, i, cb) {
     i = i || 0;
     if (i > text.length) { cb(); return; }
-    el.textContent = text.slice(0, i);
-    setTimeout(function() { type(el, text, speed, i + 1, cb); }, speed);
+    render(el, text, i, color);
+    setTimeout(function() { fill(el, text, color, speed, i + 1, cb); }, speed);
   }
-  function wipe(el, len, cb) {
-    if (len <= 0) { el.textContent = ''; cb(); return; }
-    el.textContent = String(el.textContent || '').slice(0, -1);
-    setTimeout(function() { wipe(el, len - 1, cb); }, WIPE);
+
+  function uncolor(el, text, speed, pos, cb) {
+    if (pos < 0) { el.style.color = '#5a5a64'; cb(); return; }
+    render(el, text, pos, pos <= 0 ? '#5a5a64' : 'inherit');
+    setTimeout(function() { uncolor(el, text, speed, pos - 1, cb); }, speed);
   }
+
   function pause(ms, cb) { setTimeout(cb, ms); }
 
+  function reset() {
+    gEl.innerHTML = gText.replace(/\n/g, '<br>');
+    wEl.innerHTML = wText.replace(/\n/g, '<br>');
+    gEl.style.color = '#5a5a64';
+    wEl.style.color = '#5a5a64';
+  }
+
   function cycle() {
-    gEl.textContent = ''; wEl.textContent = '';
-    type(gEl, gText, TYPE, 0, function() {
-      pause(400, function() {
-        type(wEl, wText, TYPE, 0, function() {
+    reset();
+    fill(gEl, gText, '#ffd9a8', TYPE, 0, function() {
+      pause(200, function() {
+        fill(wEl, wText, '#eef1f5', TYPE, 0, function() {
           pause(HOLD, function() {
-            wipe(wEl, wText.length, function() {
-              wipe(gEl, gText.length, function() {
-                // type Good Luck! as gold, larger, slower
-                gEl.style.fontSize = '20px';
-                type(gEl, LUCK, LUCK_TYPE, 0, function() {
-                  pause(HOLD, function() {
-                    wipe(gEl, LUCK.length, function() {
-                      gEl.style.fontSize = '';
-                      pause(BLANK, cycle);
-                    });
-                  });
-                });
+            uncolor(wEl, wText, WIPE, wText.length - 1, function() {
+              uncolor(gEl, gText, WIPE, gText.length - 1, function() {
+                pause(BLANK, cycle);
               });
             });
           });
