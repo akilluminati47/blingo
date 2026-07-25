@@ -550,17 +550,28 @@ function drawSky(p, W) {
   paintSky(skyCvs[into], p, W); skyTexs[into].needsUpdate = true;
   skyDomes[into].renderOrder = -9.5;          // the incoming sky paints OVER the settled one
   skyDomes[1 - into].renderOrder = -10;
+  skyDomes[into].material.transparent = true;  // only the fading dome uses the transparent pipeline
   skyDomes[into].visible = true;
   skyDomes[into].material.opacity = 0;
   skyFront = into; skyFadeT = 0;
 }
 // per-frame: ease the incoming sky across the fade, then park the hidden dome
-// so a settled sky costs one draw, not two
+// so a settled sky costs one draw, not two. Only the active fading dome uses
+// the transparent pipeline — the settled dome stays opaque.
 function updateSkyFade(dt) {
-  if (skyFadeT >= 1) { skyDomes[1 - skyFront].visible = false; return; }
+  if (skyFadeT >= 1) {
+    skyDomes[1 - skyFront].visible = false;
+    skyDomes[1 - skyFront].material.transparent = false;
+    return;
+  }
   skyFadeT = Math.min(1, skyFadeT + dt / SKY_FADE_S);
-  skyDomes[skyFront].material.opacity = skyFadeT * skyFadeT * (3 - 2 * skyFadeT); // smoothstep sweep
-  if (skyFadeT >= 1) skyDomes[1 - skyFront].visible = false;
+  skyDomes[skyFront].material.opacity = skyFadeT * skyFadeT * (3 - 2 * skyFadeT);
+  if (skyFadeT >= 1) {
+    skyDomes[1 - skyFront].visible = false;
+    skyDomes[1 - skyFront].material.transparent = false;
+    skyDomes[skyFront].material.transparent = false;
+    skyDomes[skyFront].material.opacity = 1;
+  }
 }
 // ---------- cloud dome ----------
 // The cartoon puff-stamps are gone: this is the frutiger-gallery FBM cloud shader
