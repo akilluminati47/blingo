@@ -1862,17 +1862,14 @@ function buildMeleeMesh(g, id, c) {
     const knob = cyl(0.06, 0.06, 0.04, 0x2a2a2a); knob.rotation.x = Math.PI / 2; knob.position.set(0, 0, 0.07); g.add(knob);
     g.add(shaftZ(0.22, 0.046, 0.046, 0x2a2a2a, 0.06));
   } else if (id === 'machete') {
-    const blade = box(0.03, 0.16, 0.74, c); blade.position.set(0, 0.02, -0.47); g.add(blade);
-    const spine = box(0.034, 0.03, 0.72, 0x8a9097); spine.position.set(0, 0.1, -0.46); g.add(spine);
-    const edge = box(0.012, 0.025, 0.72, 0xe8edf2); edge.position.set(0, -0.06, -0.46); g.add(edge);
-    const guard = box(0.18, 0.07, 0.08, 0x2a2c30); guard.position.set(0, 0, -0.06); g.add(guard);
-    const hilt = cyl(0.04, 0.05, 0.2, 0x3a2a1a, 8);
+    const blade = box(0.04, 0.18, 0.68, c); blade.position.set(0, 0.04, -0.46); g.add(blade);
+    const spine = box(0.044, 0.04, 0.66, 0x6a6e74); spine.position.set(0, 0.14, -0.45); g.add(spine);
+    const edge = box(0.01, 0.022, 0.66, 0xe8edf2); edge.position.set(0, -0.06, -0.45); g.add(edge);
+    const guard = box(0.16, 0.06, 0.06, 0x2a2c30); guard.position.set(0, -0.01, -0.1); g.add(guard);
+    const hilt = cyl(0.042, 0.052, 0.2, 0x3a2a1a, 8);
     hilt.rotation.x = Math.PI / 2;
-    hilt.position.set(0, 0.08, 0.08);
+    hilt.position.set(0, 0.07, 0.03);
     g.add(hilt);
-    for (const gy2 of [0.05, -0.02]) {
-      const rivet = ball(0.018, 0xc8a44a); rivet.position.set(0.05, gy2 + 0.08, 0.08); g.add(rivet);
-    }
   } else if (id === 'katana') {
     const blade = box(0.022, 0.12, 1.0, c); blade.position.set(0, 0.02, -0.56); g.add(blade);
     const edge = box(0.01, 0.03, 0.98, 0xf2f6fa); edge.position.set(0, -0.045, -0.55); g.add(edge);
