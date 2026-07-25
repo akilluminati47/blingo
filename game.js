@@ -12307,7 +12307,9 @@ function updateCamera(dt) {
   cloudDome.position.copy(camera.position); // drift lives in the shader's uTime, wind-paced
   updateCelestial(dt); // arc the sun + moon, dress the clouds' uniforms, drift the motes
   updateSunGlare();    // lens flare from the sun — warm glare + ghost rings
-  sunLight.position.set(player.pos.x + moonOff.x, moonOff.y, player.pos.z + moonOff.z);
+  // shadow-casting light follows the actual sun in the sky
+  const sd = _sunDir;
+  sunLight.position.set(player.pos.x + sd.x * 80, player.pos.y + sd.y * 80, player.pos.z + sd.z * 80);
   sunLight.target.position.copy(player.pos);
   sunLight.target.updateMatrixWorld();
 }
