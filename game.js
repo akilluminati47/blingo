@@ -9195,7 +9195,7 @@ function updatePlayer(dt) {
   const aimAmt = player.aimT;
   if (w.melee) {
     // swingT drives a real arc rather than snapping the arm to a pose: -1 when idle
-    const sw = player.swingT > 0 ? 1 - player.swingT / player.swingDur : -1;
+    const sw = player.swingT > 0 && player.swingDur > 0 ? 1 - player.swingT / player.swingDur : -1;
     if (w.id === 'fists') {
       // fists: the chain alternates which arm throws, so the swing plays on meleeArm
       b.arms[0].rotation.x = -swing * 0.8;
