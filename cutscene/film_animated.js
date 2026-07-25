@@ -228,7 +228,7 @@ const SHOTS = [
       spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true, shield: true });
     }
     await pause(300);
-    await panShot('s05', 6, v3(bx + 10, 5, bz + 8), v3(bx - 6, 4, bz + 6), v3(bx, 3, bz));
+    await panShot('s05', 6, v3(bx + 10, 5, bz + 8), v3(bx, 4, bz + 6), v3(bx, 3, bz)); // orbit to head-on
   },
 ];
 
