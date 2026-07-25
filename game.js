@@ -1133,13 +1133,13 @@ function updateBulletHoles(dt) {
       _holeDecals.splice(i, 1);
     } else {
       let op = clamp(d.life / 3, 0, 0.8);
-      // Peek fade: if the hole sits on a wall that's being peeked through, fade with it
-      const p = d.mesh.position;
+      // Peek fade: check every actively-fading slab (houses + town buildings)
+      const px = d.mesh.position.x, py = d.mesh.position.y, pz = d.mesh.position.z;
       for (const s of peeking) {
-        if (!s.box || !s.box.hw) continue;
-        if (p.x > s.box.x - s.box.hw - 0.3 && p.x < s.box.x + s.box.hw + 0.3 &&
-            p.z > s.box.z - s.box.hd - 0.3 && p.z < s.box.z + s.box.hd + 0.3 &&
-            p.y > s.box.y0 - 0.3 && p.y < s.box.y1 + 0.3) {
+        const b = s.box; if (!b || !b.hw) continue;
+        if (px > b.x - b.hw - 0.4 && px < b.x + b.hw + 0.4 &&
+            pz > b.z - b.hd - 0.4 && pz < b.z + b.hd + 0.4 &&
+            py > b.y0 - 0.6 && py < b.y1 + 0.6) {
           op *= s.op; break;
         }
       }
