@@ -149,7 +149,7 @@ const SHOTS = [
     const ids = COUSINS.map(c => c.id);
     // spread across bank steps, facing south toward the fountain
     const positions = [[-3.5,-35],[-2,-35],[-0.5,-35],[1,-35],[2.5,-35],[4,-35]];
-    for (let i = 0; i < 6; i++) spawnCousin(ids[i], positions[i][0], positions[i][1], Math.PI);
+    for (let i = 0; i < 6; i++) spawnCousin(ids[i], positions[i][0], positions[i][1], 0);
     await pause(600);
     await panShot('s02', 10, v3(-5, 3, -30), v3(6, 2.5, -30), v3(0, 1.5, -35));
   },
