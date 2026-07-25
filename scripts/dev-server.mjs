@@ -31,10 +31,11 @@ const server = createServer((req, res) => {
 
   // Screenshot save endpoint
   if (req.method === 'POST' && req.url === '/save') {
-    let body = '';
-    req.on('data', d => body += d);
+    const chunks = [];
+    req.on('data', d => chunks.push(d));
     req.on('end', () => {
       try {
+        const body = Buffer.concat(chunks).toString('utf8');
         const { name, data } = JSON.parse(body);
         const b64 = data.replace(/^data:image\/png;base64,/, '');
         const file = join(OUT, name.replace(/[^a-zA-Z0-9_\-]/g, '_') + '.png');
