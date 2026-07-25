@@ -478,9 +478,11 @@ skyTex.colorSpace = THREE.SRGBColorSpace;
 skyTex.flipY = true;
 const skyDome = new THREE.Mesh(
   new THREE.SphereGeometry(240, 24, 16),
-  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false, transparent: true })
+  new THREE.MeshBasicMaterial({ map: skyTex, side: THREE.BackSide, fog: false, depthWrite: false })
 );
 skyDome.renderOrder = -10;
+skyDome.material.defines = { NO_CURVE: 1 };
+scene.add(skyDome);
 
 const moonOff = new THREE.Vector3(-30, 50, -20); // key-light offset, follows the player
 const _skyMoodC = new THREE.Color('#9aa2b0'), _skyMoodR = new THREE.Color('#59606e');
