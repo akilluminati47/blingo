@@ -1093,15 +1093,17 @@
   function pause(ms, cb) { setTimeout(cb, ms); }
 
   function cycle() {
-    gEl.innerHTML = gFull.replace(/\n/g, '<br>');
+    gEl.innerHTML = gText.replace(/\n/g, '<br>');
     wEl.innerHTML = wText.replace(/\n/g, '<br>');
     gEl.style.color = '#5a5a64';
     wEl.style.color = '#5a5a64';
 
-    fill(gEl, gText, gFull, '#ffd9a8', 0, function() {
-      render(gEl, gFull, gFull.length, '#ffd9a8');
+    fill(gEl, gText, gText, '#ffd9a8', 0, function() {
       pause(200, function() {
         fill(wEl, wText, wText, '#eef1f5', 0, function() {
+          // Luck line appears last, in gold
+          gEl.innerHTML = gFull.replace(/\n/g, '<br>');
+          render(gEl, gFull, gFull.length, '#ffd9a8');
           pause(HOLD, function() {
             wipe(wEl, wText, wText.length - 1, '#eef1f5', function() {
               wipe(gEl, gFull, gFull.length - 1, '#ffd9a8', function() {
