@@ -1866,10 +1866,14 @@ function buildMeleeMesh(g, id, c) {
     const spine = box(0.034, 0.03, 0.72, 0x8a9097); spine.position.set(0, 0.1, -0.46); g.add(spine);
     const edge = box(0.012, 0.025, 0.72, 0xe8edf2); edge.position.set(0, -0.06, -0.46); g.add(edge);
     const guard = box(0.16, 0.06, 0.06, 0x2a2c30); guard.position.set(0, 0, 0.02); g.add(guard);
-    for (const gy2 of [0.03, -0.03]) {
-      const rivet = ball(0.018, 0xc8a44a); rivet.position.set(0.05, gy2, 0.12); g.add(rivet);
+    // handle rides the spine side — connects at the guard and extends back
+    const hilt = cyl(0.042, 0.052, 0.2, 0x3a2a1a, 8);
+    hilt.rotation.x = Math.PI / 2;
+    hilt.position.set(0, 0.07, 0.13);
+    g.add(hilt);
+    for (const gy2 of [0.04, -0.02]) {
+      const rivet = ball(0.018, 0xc8a44a); rivet.position.set(0.05, gy2 + 0.07, 0.13); g.add(rivet);
     }
-    g.add(shaftZ(0.22, 0.048, 0.052, 0x3a2a1a, 0.16));
   } else if (id === 'katana') {
     const blade = box(0.022, 0.12, 1.0, c); blade.position.set(0, 0.02, -0.56); g.add(blade);
     const edge = box(0.01, 0.03, 0.98, 0xf2f6fa); edge.position.set(0, -0.045, -0.55); g.add(edge);
