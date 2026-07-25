@@ -463,8 +463,8 @@
     font-size:17px; line-height:1.6; max-width:780px; }
   .screen p.lore { color:#ffd9a8; font-style:italic; }
   #typelore { min-height:5.2em; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:16px; line-height:1.7; margin:10px auto 14px; max-width:54ch; white-space:pre-line; }
-  #typelore .gold { color:#ffd9a8; font-style:italic; }
-  #typelore .white { color:#eef1f5; font-style:normal; }
+  #typelore .gold { display:block; color:#ffd9a8; font-style:italic; }
+  #typelore .white { display:block; color:#eef1f5; font-style:normal; }
 
   /* ---------- reconnect soft-pause banner (world stays visible behind it) ---------- */
   #reconnecting { position:fixed; inset:0; z-index:34; display:flex; align-items:center; justify-content:center;
@@ -1047,23 +1047,16 @@
 <script>
 (function() {
   const GOLD = [
-    "When the horde came,",
-    "every blob turned . .",
+    "When the horde came, every blob turned . .",
     "except six cousins.",
     "The bites never took.",
-    "Now the immune cousins are clearing the wasteland,",
-    "block by block,",
-    "so the rest of blob-kind",
-    "can finally move back home."
+    "Now the immune cousins are clearing the wasteland, block by block,",
+    "so the rest of blob-kind can finally move back home."
   ];
   const WHITE = [
     "Pick your cousin.",
-    "The other five are out there somewhere,",
-    "find them,",
-    "recruit them,",
-    "fight together.",
-    "Loot the glowing crates",
-    "for guns & ammo."
+    "The other five are out there somewhere, find them, recruit them, fight together.",
+    "Loot the glowing crates for guns & ammo."
   ];
   const LUCK  = "Good Luck!";
 
