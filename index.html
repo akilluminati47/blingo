@@ -1062,7 +1062,7 @@
   var wEl = document.querySelector('#typelore .white');
   if (!gEl || !wEl) return;
 
-  var TYPE = 42, WIPE = 14, LUCK_WIPE = 4, HOLD = 4200, BLANK = 900;
+  var TYPE = 42, WIPE = 4, HOLD = 4200, BLANK = 900;
   var gText = GOLD.join('\n'), wText = WHITE.join('\n');
 
   // Pre-render everything in grey
@@ -1087,19 +1087,6 @@
     setTimeout(function() { fill(el, text, color, speed, i + 1, cb); }, speed);
   }
 
-  function uncolor(el, text, speed, pos, cb) {
-    if (pos < 0) { el.style.color = '#5a5a64'; el.innerHTML = text.replace(/\n/g, '<br>'); cb(); return; }
-    render(el, text, pos, pos <= 0 ? '#5a5a64' : 'inherit');
-    setTimeout(function() { uncolor(el, text, speed, pos - 1, cb); }, speed);
-  }
-
-  function uncolorFromEnd(el, text, speed, pos, cb) {
-    // Uncolor right-to-left: pos counts down from text.length-1
-    if (pos < 0) { cb(); return; }
-    render(el, text, pos + 1, 'inherit');
-    setTimeout(function() { uncolorFromEnd(el, text, speed, pos - 1, cb); }, speed);
-  }
-
   function pause(ms, cb) { setTimeout(cb, ms); }
 
   function cycle() {
@@ -1114,27 +1101,29 @@
 
     fill(gEl, gText, '#ffd9a8', TYPE, 0, function() {
       pause(200, function() {
-        // Fill white main text, then flash-fill the luck line
         fill(wEl, wFull, '#eef1f5', TYPE, 0, function() {
-          // All filled — hold 4.20s
           pause(HOLD, function() {
-            // Wipe the luck line from bottom (4ms per char)
-            var luckStart = wText.length + 1; // +1 for the \n
-            var luckLen = LUCK.length;
-            // Step: uncolor the luck line character by character from the end
-            (function wipeLuck(i) {
-              if (i < luckStart) {
-                // Now uncolor the main white text at normal speed
-                uncolor(wEl, wFull, WIPE, wFull.length - 1, function() {
-                  uncolor(gEl, gText, WIPE, gText.length - 1, function() {
-                    pause(BLANK, cycle);
-                  });
-                });
-                return;
+            // Wipe everything right-to-left at WIPE speed
+            var total = gText.length + 1 + wFull.length;
+            var combined = gText + '\n' + wFull;
+            (function wipeAll(i) {
+              if (i < 0) { pause(BLANK, cycle); return; }
+              // Colour up to i in gold, then up to gText.length in gold, then rest in white
+              var gEnd = gText.length;
+              var gHtml = '', wHtml = '';
+              for (var j = 0; j < gText.length; j++) {
+                var c = gText[j] === '\n' ? '<br>' : gText[j];
+                gHtml += '<span style="color:' + (j < i ? '#ffd9a8' : '#5a5a64') + '">' + c + '</span>';
               }
-              render(wEl, wFull, i, '#eef1f5');
-              setTimeout(function() { wipeLuck(i - 1); }, LUCK_WIPE);
-            })(wFull.length);
+              for (var k = 0; k < wFull.length; k++) {
+                var d = wFull[k] === '\n' ? '<br>' : wFull[k];
+                var gIdx = gText.length + 1 + k;
+                wHtml += '<span style="color:' + (gIdx < i ? '#eef1f5' : '#5a5a64') + '">' + d + '</span>';
+              }
+              gEl.innerHTML = gHtml;
+              wEl.innerHTML = wHtml;
+              setTimeout(function() { wipeAll(i - 1); }, WIPE);
+            })(total);
           });
         });
       });
