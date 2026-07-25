@@ -2493,6 +2493,13 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
   }
   if (!colliders) return null;
   roofSlope(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
+  // Gable end colliders — bullet-stopping triangles at each end of the roof
+  for (const s of [-1, 1]) {
+    const gx = bx + s * (w / 2 + gdepth / 2);
+    const c = aabb(gx, bz, gdepth / 2 + 0.05, d / 2, rh, by);
+    c.slope = { gx: 0, gz: s * rh / (w / 2), rh };
+    colliders.push(c);
+  }
   // the slabs are pitched, but their collider's bounding box is a fine blocker to test
   // against — it errs a touch large, which only means the roof clears a shade early
   return { mats: [roofMat, gmat], box: colliders[colliders.length - 1], op: 1, want: 1 };
