@@ -2156,12 +2156,16 @@ function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly 
   for (const m of rotFlash) blob.skinList.push({ mesh: m, mat: m.material });
 }
 // keep a blob's shadow pinned flat under its centre, projected onto whatever surface
-// is below (terrain, car roofs, crates...) — it follows you up and slices onto lower tops
+// is below (terrain, car roofs, crates...). Shadow shrinks with height (jumps, leaps)
+// and swells when grounded (slides, giant mode).
 function placeShadow(blob, x, z, y) {
   if (!blob.shadow) return;
   const sy = supportTop(x, z, y === undefined ? groundHeight(x, z) : y, 0.1);
-  // lifted enough to sit on road (+0.04) and parking (+0.05) surfaces too, not just grass
-  blob.shadow.position.set(x, sy + 0.08, z);
+  const above = y !== undefined ? Math.max(0, y - sy) : 0;
+  const baseScale = blob.root ? blob.root.scale.x : 1;
+  const heightScale = 1 - clamp(above / 8, 0, 0.65); // shrinks with altitude
+  blob.shadow.scale.setScalar(baseScale * heightScale);
+  blob.shadow.position.set(x, sy + 0.015, z);
 }
 // fold a mesh added AFTER buildBlob's skinList sweep (horns, blood stains, boss dressing)
 // into the flash list, so every feature flashes with the body when the blob is shot
