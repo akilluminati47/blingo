@@ -3206,6 +3206,8 @@ function nearbyColliders(x, z) {
 function resolveCollision(x, z, r, y) {
   for (const c of nearbyColliders(x, z)) {
     if (y !== undefined) {
+      // cylinder vs AABB floor check: only collide if the cylinder centre is within the
+      // slab's vertical band — so a floating ghost never clips a wall it isn't straddling
       // standing on top of it (roofs: on the local shingle surface, so the box never
       // shoves us sideways while we're walking the pitch)
       if (y >= colTop(c, x, z) - 0.25) continue;
@@ -3401,9 +3403,11 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   const fz = z + faceDir * d / 2; // facade plane, turned toward the road
   // full-height columns whose capitals meet the portico slab above
   for (let i = 0; i < 4; i++) {
+    const colx = x - w / 4 + i * (w / 6);
     const col = cyl(0.28, 0.32, h, 0xd8d2c4, 10);
-    col.position.set(x - w / 4 + i * (w / 6), y0 + h / 2, fz + faceDir * 1);
+    col.position.set(colx, y0 + h / 2, fz + faceDir * 1);
     townGroup.add(col); peekKit.push(col);
+    townColliders.push(aabb(colx, fz + faceDir * 1, 0.3, 0.3, h, y0)); // tight pillar hitbox
   }
   // portico roof: underside rests on the column tops; standable, feet on the slab top
   const roofSlab = box(w + 1, 0.3, d + 2.6, 0x8b8577);
@@ -3423,6 +3427,7 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
     const step = box(w * 0.55, 0.22, depth, 0xbab4a6);
     step.position.set(x, y0 + yc, fz + faceDir * zd);
     townGroup.add(step);
+    townColliders.push(aabb(x, fz + faceDir * zd, w * 0.275, depth / 2, 0.22, y0 + yc - 0.11));
   }
   // name plate mounted flat on the wall face, behind the columns
   const plate = textPlate(label, Math.min(w * 0.45, 9), Math.min(w * 0.11, 2.2));
@@ -3641,6 +3646,7 @@ function buildChurchyard(rng) {
     const step = box(3, sh, 0.72, 0x55524a);
     step.position.set(cx, y0 + sh / 2, northZ + so);
     townGroup.add(step);
+    townColliders.push(aabb(cx, northZ + so, 1.5, 0.36, sh, y0));
   }
   const plate = textPlate('CHAPEL', 3.6, 0.9, '#2a2422', '#9a8f7a'); // faded sign over the door
   plate.position.set(cx, y0 + h - 0.7, northZ + 0.06);
@@ -3655,6 +3661,7 @@ function buildChurchyard(rng) {
     const step = box(0.72, sh, 2.4, 0x55524a);
     step.position.set(eastX + so, y0 + sh / 2, cz);
     townGroup.add(step);
+    townColliders.push(aabb(eastX + so, cz, 0.36, 1.2, sh, y0));
   }
 
   // --- the graveyard: dirt floor, spiked iron fence, slabs + fresh mounds ---
