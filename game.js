@@ -4175,9 +4175,9 @@ function buildBlingoStatue(x, z) {
   // paved apron + stepped plinth — every tier has a tight walkable collider
   const pave = terrainDisc(6.4, 22, x, z, mat(0x9a948a), 0.05);
   townGroup.add(pave);
-  townColliders.push(aabb(x, z, 3.2, 3.2, 0.1, y0 - 0.02));
-  const step = box(6.2, 0.36, 6.2, 0xaaa49a); step.position.set(x, y0 + 0.18, z); townGroup.add(step);
-  townColliders.push(aabb(x, z, 3.1, 3.1, 0.36, y0));
+  townColliders.push(aabb(x, z, 3.2, 3.2, 0.12, y0));
+  const step = box(6.2, 0.44, 6.2, 0xaaa49a); step.position.set(x, y0 + 0.24, z); townGroup.add(step);
+  townColliders.push(aabb(x, z, 3.1, 3.1, 0.44, y0 + 0.02));
   const plinth = box(4.6, 1.3, 4.6, graniteDk); plinth.position.set(x, y0 + 0.85, z); townGroup.add(plinth);
   townColliders.push(aabb(x, z, 2.3, 2.3, 1.3, y0 + 0.2));
   const lip = box(5.0, 0.22, 5.0, granite); lip.position.set(x, y0 + 1.55, z); townGroup.add(lip);
