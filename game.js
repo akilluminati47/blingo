@@ -4185,7 +4185,7 @@ function buildBlingoStatue(x, z) {
   const lip = box(5.0, lipH, 5.0, granite); lip.position.set(x, lipBase + lipH / 2, z); townGroup.add(lip);
   townColliders.push(aabb(x, z, 2.5, 2.5, lipH, lipBase));
 
-  const py = y0 + 1.86; // statue feet — this is where they've always stood visually
+  const py = lipBase + lipH; // statue feet sit directly on the lip
   const statue = buildBlob({ color: granite });
   scene.remove(statue.shadow);
   petrify(statue.root);
@@ -4193,8 +4193,8 @@ function buildBlingoStatue(x, z) {
   statue.root.position.set(x, py, z);
   statue.root.rotation.y = -Math.PI / 2;
   townGroup.add(statue.root);
-  // solid statue body — tall narrow pillar so bullets and players bounce off
-  townColliders.push(aabb(x, z, 1.2, 1.2, 5.0, py));
+  // narrow collider so the player can stand beside the statue on the lip
+  townColliders.push(aabb(x, z, 0.7, 0.7, 4.5, py));
   // the plaque sits ON the plinth itself, west face, BEST JELLY in the goopy face
   const plaque = textPlate('BEST JELLY', 1.9, 0.5, '#3c3428', '#e8d9a8');
   plaque.position.set(x - 2.32, y0 + 1.05, z);
