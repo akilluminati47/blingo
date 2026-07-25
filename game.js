@@ -430,7 +430,7 @@ function animateLootGlow(g, t) {
 // inherits it from the host, since the host's world is the one doing the spawning. It lights
 // the settings notches (see updateGoreHordeUI) and swells the spawner — the in-world zombies
 // themselves stay unlit, the glow is a menu-only tell.
-function goreHordeLocal() { return notches.extraGore >= 5; }
+function goreHordeLocal() { return notches.zombieSpawn >= 5; }
 // ---------- shop + civic signage ----------
 // The town's signs are the blob font in caps, same face the blobs' own menus wear, on a
 // clean plate: one hairline rule inset off the edge instead of the old heavy frame, and the
@@ -7189,17 +7189,13 @@ function setNotch(key, n, silent) {
   // in a joined lobby the spawn dials belong to the HOST — a client's copies are read-only
   if (net.role === 'client' && HOST_NOTCH_KEYS.includes(key)) return;
   n = clamp(Math.round(n), 0, 5);
-  // "extra" means more than full: dialing up Extra Gore quietly fills the Gore bar first
-  if (key === 'extraGore' && n > 0 && notches.gore < 5) setNotch('gore', 5, true);
-  if (key === 'gore' && n < 5 && notches.extraGore > 0) { notches.extraGore = 0; refreshRow('extraGore'); }
   if (n === notches[key]) return;
   notches[key] = n;
   syncDerived();
   applyAudioSettings();
   saveNotches();
   refreshRow(key);
-  if (key === 'gore') refreshRow('extraGore');
-  if (key === 'extraGore' || key === 'zombieSpawn' || key === 'drawDist') updateGoreHordeUI();
+  if (key === 'zombieSpawn' || key === 'drawDist') updateGoreHordeUI();
   if (!silent) notchClickSfx(n);
   // the host turning a spawn dial updates every client's greyed copy live — even from
   // the pause menu, where the periodic snapshot isn't flowing
@@ -7235,27 +7231,24 @@ function refreshRow(key) {
     if (on && !p.classList.contains('on')) { p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop'); }
     p.classList.toggle('on', on);
   });
-  if (key === 'extraGore') row.classList.toggle('live', notches.extraGore >= 5);
   if (key === 'drawDist') row.classList.toggle('live', notches.drawDist >= 5);
 }
 function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); updateGoreHordeUI(); }
-// light the Extra Gore + Zombies pips while the gore horde is on. The owner (single player,
-// or whoever maxed their own slider) gets the hero-coloured throb; a client only mirroring
-// the host's forced horde gets it grey — they see the horde, but it isn't their setting.
+// light the Zombies pips when the gore horde is on (zombieSpawn maxed). The owner gets the
+// hero-coloured throb; a mirroring client gets grey — they see the horde, but it isn't theirs.
 function updateGoreHordeUI() {
   const localMax = goreHordeLocal();
   const clientForced = net.role === 'client' && net.hostGoreHorde;
   const grey = clientForced && !localMax;
-  for (const key of ['extraGore', 'zombieSpawn', 'drawDist']) {
+  for (const key of ['zombieSpawn', 'drawDist']) {
     const row = rowEls[key];
     if (!row) continue;
-    const rowOn = key === 'extraGore' ? localMax
-                : key === 'drawDist' ? notches.drawDist >= 5
-                : (localMax || clientForced);
+    const rowOn = key === 'drawDist' ? notches.drawDist >= 5 : (localMax || clientForced);
     row.classList.toggle('gorehorde', rowOn);
     row.classList.toggle('greygore', rowOn && grey);
     if (key === 'drawDist') row.classList.toggle('live', rowOn);
   }
+  if (rowEls.zombieSpawn) rowEls.zombieSpawn.classList.toggle('live', localMax);
 }
 syncSettingsUI();
 
