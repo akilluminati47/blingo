@@ -26,6 +26,19 @@ const {
   skyDome, cloudDome, hemi, moon, addRotGore,
   groundHeight, bossState, zombies,
 } = $;
+// verify critical refs loaded
+const _missing = [];
+if (!COUSINS) _missing.push('COUSINS');
+if (!buildBlob) _missing.push('buildBlob');
+if (!spawnZombie) _missing.push('spawnZombie');
+if (!wxSet) _missing.push('wxSet');
+if (!skyDome) _missing.push('skyDome');
+if (_missing.length) {
+  console.error('❌ Missing __dbg props:', _missing.join(', '));
+  console.log('Available keys:', Object.keys($).sort().join(', '));
+  throw new Error('Missing game refs — run git pull and hard-refresh (Ctrl+Shift+R)');
+}
+console.log('✅ Director ready —', Object.keys($).length, 'refs loaded');
 
 const C = document.getElementById('c');
 let _origW, _origH;

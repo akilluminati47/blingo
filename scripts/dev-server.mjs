@@ -4,7 +4,7 @@
 // Then open http://localhost:3000 in your browser, paste film_storyboard.js into console, run dirRunAll()
 
 import { createServer } from 'node:http';
-import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,6 +51,21 @@ const server = createServer((req, res) => {
     return;
   }
 
+  // Clear keyframes for a fresh shoot
+  if (req.method === 'POST' && req.url === '/clear') {
+    try {
+      const files = existsSync(OUT) ? readdirSync(OUT) : [];
+      for (const f of files) unlinkSync(join(OUT, f));
+      console.log(`  🧹 Cleared ${files.length} keyframes`);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, cleared: files.length }));
+    } catch (e) {
+      res.writeHead(500);
+      res.end(JSON.stringify({ error: e.message }));
+    }
+    return;
+  }
+
   // Status endpoint
   if (req.method === 'GET' && req.url === '/status') {
     const files = existsSync(OUT) ? readdirSync(OUT) : [];
@@ -71,7 +86,11 @@ const server = createServer((req, res) => {
 
   const ext = extname(filePath).toLowerCase();
   const mime = MIME[ext] || 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': mime });
+  res.writeHead(200, {
+    'Content-Type': mime,
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Pragma': 'no-cache',
+  });
   res.end(readFileSync(filePath));
 });
 
