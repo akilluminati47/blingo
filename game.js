@@ -2489,17 +2489,16 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
     slab.rotation.x = s * ang;
     group.add(slab);
   }
-  // gable ends
+  // gable ends with thickness matching the walls
   const shape = new THREE.Shape();
   shape.moveTo(-d / 2, 0); shape.lineTo(d / 2, 0); shape.lineTo(0, rh); shape.closePath();
-  const ggeo = new THREE.ShapeGeometry(shape);
-  // the gable triangles wear the house's own wall colour — they ARE wall, not trim,
-  // and the old mystery brown read as a third material the building never had
+  const gdepth = 0.22;
+  const ggeo = new THREE.ExtrudeGeometry(shape, { depth: gdepth, bevelEnabled: false });
   const gmat = new THREE.MeshLambertMaterial({ color: gableC !== undefined ? gableC : 0x5d5044, side: THREE.DoubleSide });
-  gmat.userData.owned = true; // already per-house, just needs disposing with the chunk
+  gmat.userData.owned = true;
   for (const s of [-1, 1]) {
     const gable = new THREE.Mesh(ggeo, gmat);
-    gable.rotation.y = Math.PI / 2;
+    gable.rotation.y = -s * Math.PI / 2;  // face outward, extrude into the house
     gable.position.set(bx + s * w / 2, by, bz);
     group.add(gable);
   }
