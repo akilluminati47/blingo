@@ -386,6 +386,7 @@ if(location.hash === '#policies') openPolicies();
   const verEl = document.getElementById('pdownver');
   const btnExe = document.getElementById('pdown-exe');
   const btnApk = document.getElementById('pdown-apk');
+  const btnIpa = document.getElementById('pdown-ipa');
   const badgeEl = document.getElementById('pdown-badge');
   if (!verEl || !btnExe || !btnApk) return;
   const CACHE_KEY = 'blingo_release', CACHE_TTL = 300000; // 5 min
@@ -407,15 +408,22 @@ if(location.hash === '#policies') openPolicies();
   const setup = assets.find(a => /\.exe$/i.test(a.name) && /setup/i.test(a.name));
   const portable = assets.find(a => /\.exe$/i.test(a.name) && !/setup/i.test(a.name));
   const apk = assets.find(a => /\.apk$/i.test(a.name));
+  const ipa = assets.find(a => /\.ipa$/i.test(a.name));
   const exeAsset = setup || portable;
   btnExe.classList.remove('pdown-loading');
   btnApk.classList.remove('pdown-loading');
+  if (btnIpa) btnIpa.classList.remove('pdown-loading');
   if (exeAsset) {
     btnExe.href = exeAsset.browser_download_url;
   } else { btnExe.style.opacity = '0.5'; btnExe.title = 'No Windows build for this release'; }
   if (apk) {
     btnApk.href = apk.browser_download_url;
   } else { btnApk.style.opacity = '0.5'; btnApk.title = 'No Android build for this release'; }
+  if (btnIpa) {
+    if (ipa) {
+      btnIpa.href = ipa.browser_download_url;
+    } else { btnIpa.style.opacity = '0.5'; btnIpa.title = 'No iOS build for this release'; }
+  }
   const ghLink = document.getElementById('pdown-ghlink');
   if (ghLink && data.html_url) ghLink.href = data.html_url;
   if (data.tag_name && badgeEl) { badgeEl.hidden = false; badgeEl.textContent = data.tag_name; }

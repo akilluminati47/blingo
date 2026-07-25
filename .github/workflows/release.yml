@@ -67,6 +67,7 @@ jobs:
             - **BLINGO Setup ${{ steps.bump.outputs.version }}.exe** — Windows installer (recommended)
             - **BLINGO-${{ steps.bump.outputs.version }}-portable.exe** — Windows no-install single file
             - **BLINGO-${{ steps.bump.outputs.version }}-android.apk** — Android sideload (allow "install unknown apps" when prompted)
+            - **BLINGO-${{ steps.bump.outputs.version }}-ios.ipa** — iOS sideload via AltStore / SideStore
 
             Play instantly in the browser instead: https://blingo.pages.dev
 
@@ -150,3 +151,47 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           V: ${{ needs.bump.outputs.version }}
         run: gh release upload "v$V" "BLINGO-$V-android.apk" --clobber
+
+  ios:
+    needs: bump
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Stage web assets and sync Capacitor
+        run: |
+          node scripts/copy-web.mjs
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Build iOS IPA (unsigned)
+        env:
+          V: ${{ needs.bump.outputs.version }}
+        run: |
+          cd ios/App
+          xcodebuild -project App.xcodeproj -scheme App -configuration Release \
+            -sdk iphoneos -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+            -destination 'generic/platform=iOS'
+          APP=$(find build -name "*.app" -type d -maxdepth 4 | head -1)
+          echo "Found app at: $APP"
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -r -y "../../BLINGO-$V-ios.ipa" Payload/
+          echo "IPA created: $(stat -f%z ../../BLINGO-$V-ios.ipa) bytes"
+
+      - name: Upload IPA
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          V: ${{ needs.bump.outputs.version }}
+        run: gh release upload "v$V" "BLINGO-$V-ios.ipa" --clobber
