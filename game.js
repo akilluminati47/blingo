@@ -590,7 +590,7 @@ const CLOUD_THOR = Math.sqrt(2 * CLOUD_RP * CLOUD_CH + CLOUD_CH * CLOUD_CH); // 
 const cloudDome = new THREE.Mesh(
   new THREE.SphereGeometry(232, 24, 16),
   new THREE.ShaderMaterial({
-    side: THREE.BackSide, transparent: true, depthWrite: false, fog: false,
+    side: THREE.BackSide, transparent: true, depthWrite: false, depthTest: false, fog: false,
     uniforms: cloudUni,
     vertexShader: /* glsl */`
       varying vec3 vP;
@@ -12428,14 +12428,14 @@ function updateCompanionPeek(dt) {
         }
       });
     }
-    const bx = c.pos.x, by = c.pos.y + 0.9, bz = c.pos.z;
+    const bx = c.pos.x, by = (c.y || c.pos.y) + 1.0, bz = c.pos.z;
     const cx = bx - cp.x, cy = by - cp.y, cz = bz - cp.z;
     // project companion centre onto the sightline
     const dot = (cx * dx + cy * dy + cz * dz) / (camDist * camDist);
     const t = clamp(dot, 0, 1);
     const nearX = cp.x + dx * t, nearY = cp.y + dy * t, nearZ = cp.z + dz * t;
     const dist = Math.hypot(bx - nearX, by - nearY, bz - nearZ);
-    const cw = 1; // companion is basically a unit cylinder — any closer than 1u is blocking
+    const cw = 1.2; // companion cylinder radius — wide enough for all six cousins
     c.peekWant = dist < cw ? PEEK_OP : 1;
 
     c.peekOp = lerp(c.peekOp, c.peekWant, k);
