@@ -1115,7 +1115,18 @@
     });
   }
 
-  cycle();
+  // Wait until the splash is dismissed before starting the cycle
+  var _started = false;
+  function waitForPicker() {
+    var splash = document.getElementById('splash');
+    var gone = !splash || splash.classList.contains('hide') || splash.style.display === 'none';
+    if (gone) {
+      if (!_started) { _started = true; cycle(); }
+    } else {
+      requestAnimationFrame(waitForPicker);
+    }
+  }
+  waitForPicker();
 })();
 </script>
 </body>
