@@ -4172,16 +4172,12 @@ function petrify(root) {
 function buildBlingoStatue(x, z) {
   const y0 = groundHeight(x, z);
   const granite = 0x8f939b, graniteDk = 0x6d7178;
-  // paved apron + stepped plinth — each tier sits on the last, all colliders flush
-  const pave = terrainDisc(6.4, 22, x, z, mat(0x9a948a), 0.08);
-  townGroup.add(pave);
-  townColliders.push(aabb(x, z, 3.2, 3.2, 0.08, y0));
-
-  const stepH = 0.48, stepTop = y0 + stepH;
+  // stacked plinth tiers — no ground pad, just the step → plinth → lip → statue
+  const stepH = 0.42, stepTop = y0 + stepH;
   const step = box(6.2, stepH, 6.2, 0xaaa49a); step.position.set(x, stepTop - stepH / 2, z); townGroup.add(step);
   townColliders.push(aabb(x, z, 3.1, 3.1, stepH, y0));
 
-  const plinthH = 1.04, plinthBase = stepTop;
+  const plinthH = 0.88, plinthBase = stepTop;
   const plinth = box(4.6, plinthH, 4.6, graniteDk); plinth.position.set(x, plinthBase + plinthH / 2, z); townGroup.add(plinth);
   townColliders.push(aabb(x, z, 2.3, 2.3, plinthH, plinthBase));
 
@@ -4189,7 +4185,7 @@ function buildBlingoStatue(x, z) {
   const lip = box(5.0, lipH, 5.0, granite); lip.position.set(x, lipBase + lipH / 2, z); townGroup.add(lip);
   townColliders.push(aabb(x, z, 2.5, 2.5, lipH, lipBase));
 
-  const py = lipBase + lipH; // statue feet rest flush on the lip
+  const py = lipBase + lipH; // statue feet flush with lip top
   const statue = buildBlob({ color: granite });
   scene.remove(statue.shadow);
   petrify(statue.root);
