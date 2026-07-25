@@ -14060,7 +14060,7 @@ player.pos.y = groundHeight(0, 0);
 playerBlob.root.position.copy(player.pos);
 window.__tagDbg = { updatePlayerTags, trackedActors, tagOccluded, spawnBoss2, darken, CRIMSON_HANDS };
 window.__dbg = {
-  player, game, zombies, crows, buildCrow, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop, net,
+  player, game, zombies, crows, buildCrow, camera, input, companions, settings, notches, setNotch, WEAPONS, supportTop, net, startRun,
   groundHeight, chunks, buildingAt, flatPads, rollCrateLoot,
   openNearest: () => { const c = findNearCrate(); if (c) openCrate(c); },
   recruitNearest: () => { const c = findNearRecruit(); if (c) recruitCousin(c); },
