@@ -1062,59 +1062,52 @@
   var wEl = document.querySelector('#typelore .white');
   if (!gEl || !wEl) return;
 
-  // Merge into one span so the wipe is a single clean pass
-  var el = gEl;
-  wEl.style.display = 'none';
-  el.style.color = '#5a5a64';
-
   var TYPE = 32, WIPE = 4, HOLD = 4200, BLANK = 900;
-  var fullText = GOLD.join('\n') + '\n\n' + WHITE.join('\n') + '\n' + LUCK;
-  var goldLen = GOLD.join('\n').length;
-  var whiteStart = goldLen + 2; // skip two \n
-  var whiteEnd = whiteStart + WHITE.join('\n').length;
+  var gText = GOLD.join('\n'), wText = WHITE.join('\n'), wFull = wText + '\n' + LUCK;
 
-  // Pre-render
-  el.innerHTML = fullText.replace(/\n/g, '<br>');
-
-  function render(pos) {
+  function render(el, text, pos, color) {
     var h = '';
-    for (var i = 0; i < fullText.length; i++) {
-      var ch = fullText[i] === '\n' ? '<br>' : fullText[i];
-      var color, style = '';
-      if (i < pos) {
-        if (i < goldLen) { color = '#ffd9a8'; }
-        else { color = '#eef1f5'; style = 'font-style:normal;'; }
-      } else {
-        color = '#5a5a64';
-      }
-      h += '<span style="color:' + color + ';' + style + '">' + ch + '</span>';
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i] === '\n' ? '<br>' : text[i];
+      h += '<span style="color:' + (i < pos ? color : '#5a5a64') + '">' + c + '</span>';
     }
     el.innerHTML = h;
   }
 
-  function fill(pos, cb) {
-    if (pos > fullText.length) { cb(); return; }
-    render(pos);
-    setTimeout(function() { fill(pos + 1, cb); }, TYPE);
+  function fill(el, text, color, i, cb) {
+    i = i || 0;
+    if (i > text.length) { cb(); return; }
+    render(el, text, i, color);
+    setTimeout(function() { fill(el, text, color, i + 1, cb); }, TYPE);
   }
 
-  function wipe(pos, cb) {
-    if (pos < 0) { el.innerHTML = fullText.replace(/\n/g, '<br>'); cb(); return; }
-    render(pos);
-    setTimeout(function() { wipe(pos - 1, cb); }, WIPE);
+  function wipe(el, text, pos, color, cb) {
+    if (pos < 0) { el.innerHTML = text.replace(/\n/g, '<br>'); cb(); return; }
+    render(el, text, pos, color);
+    setTimeout(function() { wipe(el, text, pos - 1, color, cb); }, WIPE);
   }
 
   function pause(ms, cb) { setTimeout(cb, ms); }
 
   function cycle() {
-    el.innerHTML = fullText.replace(/\n/g, '<br>');
-    // Fill gold
-    fill(0, function() {
-      // Main white text is already done — flash luck line
-      render(fullText.length);
-      pause(HOLD, function() {
-        wipe(fullText.length - 1, function() {
-          pause(BLANK, cycle);
+    gEl.innerHTML = gText.replace(/\n/g, '<br>');
+    wEl.innerHTML = wFull.replace(/\n/g, '<br>');
+    gEl.style.color = '#5a5a64';
+    wEl.style.color = '#5a5a64';
+
+    fill(gEl, gText, '#ffd9a8', 0, function() {
+      pause(200, function() {
+        fill(wEl, wText, '#eef1f5', 0, function() {
+          // Flash luck line instantly
+          render(wEl, wFull, wFull.length, '#eef1f5');
+          pause(HOLD, function() {
+            // Wipe white (including luck) right-to-left, then gold
+            wipe(wEl, wFull, wFull.length - 1, '#eef1f5', function() {
+              wipe(gEl, gText, gText.length - 1, '#ffd9a8', function() {
+                pause(BLANK, cycle);
+              });
+            });
+          });
         });
       });
     });
