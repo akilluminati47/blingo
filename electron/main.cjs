@@ -8,7 +8,7 @@
  * absolute paths behave pixel-identically to the deployed site.
  */
 
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, nativeImage } = require('electron');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -95,6 +95,7 @@ async function createWindow() {
     title: 'BLINGO',
     icon: path.join(ROOT, 'icon-512.png'),
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       backgroundThrottling: false,   // rAF never gets backgrounded mid-run
       contextIsolation: true,
       nodeIntegration: false,
@@ -116,6 +117,15 @@ async function createWindow() {
 
   win.loadURL(`http://127.0.0.1:${port}/index.html`);
   win.on('closed', () => { win = null; server.close(); });
+
+  // Allow the renderer to update the taskbar icon dynamically (tab favicon cycling)
+  ipcMain.on('set-icon', (_e, dataUrl) => {
+    if (!win) return;
+    try {
+      const img = nativeImage.createFromDataURL(dataUrl);
+      win.setIcon(img);
+    } catch (_) {}
+  });
 }
 
 app.whenReady().then(() => {

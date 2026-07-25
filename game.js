@@ -14035,7 +14035,14 @@ tabTitle = (function livingTab() {
   let ci = 0, li = 0, lock = null, timer = null;
   function tick() {
     const c = COUSINS[ci];
-    if (li === 0) { link.href = faceIcon(c.color, c.id === 'blondie'); tabCousin = ci; } // this cousin's turn begins
+    if (li === 0) {
+      const dataUrl = faceIcon(c.color, c.id === 'blondie');
+      link.href = dataUrl; tabCousin = ci;
+      // also push to Electron taskbar if available
+      if (window.electronAPI && window.electronAPI.setIcon) {
+        try { window.electronAPI.setIcon(dataUrl); } catch (_) {}
+      }
+    } // this cousin's turn begins
     li++;
     if (li >= c.name.length) {
       document.title = c.name + ' .ᐟ';              // finished: name + flourish
