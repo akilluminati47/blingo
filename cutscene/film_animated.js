@@ -184,47 +184,7 @@ const SHOTS = [
     await panShot('s02', 10, v3(-5, 3, -30), v3(6, 2.5, -30), v3(0, 1.5, -35));
   },
 
-  // SHOT 3 — Melee combat closeups (12s)
-  async function() {
-    console.log('🎬 S3: Melee Montage');
-    setClock(19); setWeather('cloudy'); setFog(28, 95);
-    const cuts = [
-      { id: 'blingo',  x: 4, z: -30 },
-      { id: 'blazo',   x: 8, z: -28 },
-      { id: 'blizzy',  x: 2, z: -26 },
-      { id: 'blomba',  x: -2, z: -32 },
-      { id: 'bloopy',  x: 10, z: -32 },
-      { id: 'blondie', x: -5, z: -34 },
-    ];
-    for (const cut of cuts) {
-      clearAll();
-      spawnCousin(cut.id, cut.x, cut.z, 0);
-      spawnZ(cut.x + 2, cut.z + 3, {});
-      spawnZ(cut.x - 1.5, cut.z + 2.5, { droopy: true });
-      player.pos.set(cut.x, groundHeight(cut.x, cut.z), cut.z);
-      const cx = cut.x + (cut.x > 0 ? 5 : -5);
-      const cz = cut.z + 4;
-      const look = v3(cut.x, 1, cut.z + 1);
-      await panShot('s03_' + cut.id, 2, v3(cx, 2.5, cz), v3(cx, 2.3, cz), look);
-    }
-  },
-
-  // SHOT 4 — Gunfight on main street (10s)
-  async function() {
-    console.log('🎬 S4: Gunfight');
-    setClock(20); setWeather('cloudy'); setFog(25, 85);
-    clearAll();
-    for (let i = 0; i < 6; i++) spawnCousin(COUSINS[i].id, i * 2.5 - 6, -44, Math.PI / 2);
-    for (let i = 0; i < 15; i++) spawnZ(-4 + i * 1.3, -30 + Math.random() * 4, {});
-    player.pos.set(0, groundHeight(0, -44), -44);
-    await panShot('s04_wide', 5, v3(-7, 3.5, -26), v3(7, 4, -26), v3(0, 1.5, -42));
-    const cx = 6, cz = -28;
-    await panShot('s04_blazo', 2.5, v3(cx, 2.5, cz), v3(cx, 2.5, cz), v3(5, 1.2, -40));
-    const cx2 = -7, cz2 = -36;
-    await panShot('s04_blondie', 2.5, v3(cx2, 4, cz2), v3(cx2, 4, cz2), v3(-5, 1.2, -42));
-  },
-
-  // SHOT 5 — Rotten One closeup (10s, storm + lightning)
+  // SHOT 5 — Rotten One closeup (14s, storm + lightning)
   async function() {
     console.log('🎬 S5: Rotten One');
     setClock(23); setWeather('rain'); setFog(18, 65);
@@ -243,52 +203,8 @@ const SHOTS = [
     await pause(300);
     // wide orbit
     await panShot('s05_orbit', 5, v3(138, 5, -28), v3(127, 4, -40), v3(bx, 3, bz));
-    // close on exposed chest + dangling eye
-    await panShot('s05_close', 4, v3(bx + 1.5, 4, bz - 2), v3(bx - 1, 3.5, bz - 1.5), v3(bx, 3, bz));
-  },
-
-  // SHOT 6 — Family charges the Rotten One (10s)
-  async function() {
-    console.log('🎬 S6: Family Charge');
-    setClock(23.2); setWeather('rain'); setFog(18, 65);
-    clearAll();
-    const bx = 132, bz = -36, gy = groundHeight(bx, bz);
-    const boss = buildBlob({ color: 0x77a12c, zombie: true, scale: 3.1, hands: 0x3f5a14 });
-    if (addRotGore) addRotGore(boss, { hangEye: true, chestHole: true });
-    boss.root.position.set(bx, gy, bz);
-    scene.add(boss.root); cleanup.push(boss.root);
-    for (let i = 0; i < 8; i++) {
-      const a = Math.random() * Math.PI * 2, d = 4 + Math.random() * 3;
-      spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true });
-    }
-    // cousins charge from the park edge
-    for (let i = 0; i < 6; i++) spawnCousin(COUSINS[i].id, 126 + i * 1.5, -30, -0.4);
-    player.pos.set(bx, gy, bz);
-    await panShot('s06_charge', 10, v3(130, 7, -22), v3(124, 6, -32), v3(bx, 2.5, bz));
-  },
-
-  // SHOT 7 — Bluga at Jelly House (8s, cold night)
-  async function() {
-    console.log('🎬 S7: Bluga');
-    setClock(23.5); setWeather('rain'); setFog(20, 70);
-    clearAll();
-    const jx = 124, jz = 182, jy = groundHeight(jx, jz);
-    player.pos.set(jx, jy, jz);
-    const bluga = buildBlob({ color: 0x141519, scale: 1, hands: 0x141519 });
-    bluga.root.position.set(jx, jy + 0.3, jz);
-    bluga.root.rotation.y = Math.PI;
-    scene.add(bluga.root); cleanup.push(bluga.root);
-    // guards in a semi-circle in front
-    for (let i = 0; i < 5; i++) {
-      const a = -Math.PI/2 + (i * Math.PI / 5);
-      const d = 6;
-      const gx = jx + Math.cos(a) * d, gz = jz + Math.sin(a) * d;
-      const g = buildBlob({ color: 0x141519, scale: 0.8 });
-      g.root.position.set(gx, groundHeight(gx, gz), gz);
-      scene.add(g.root); cleanup.push(g.root);
-    }
-    await pause(400);
-    await panShot('s07_reveal', 8, v3(jx + 8, 2.5, jz + 6), v3(jx - 4, 2, jz + 4), v3(jx, 1.5, jz));
+    // close on exposed chest + dangling eye from the front
+    await panShot('s05_close', 4, v3(bx - 2, 4, bz + 2), v3(bx + 1, 3.5, bz + 1.5), v3(bx, 3, bz));
   },
 ];
 
