@@ -2074,6 +2074,8 @@ function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly 
     // its back sells the depth. The eyeball itself now dangles below on a red optic stalk, off
     // one group so the whole thing swings with every head twitch (its sway is in updateZombies).
     const es = eyeSide < 0 ? -1 : 1, ei = es > 0 ? 1 : 0; // which original eye to pull out
+    // read the pupil colour before hiding it — blind zombies keep their pale eye
+    const pupilColor = blob.pupils && blob.pupils[ei] ? blob.pupils[ei].material.color.getHex() : 0x7a1010;
     if (blob.eyes && blob.eyes[ei]) blob.eyes[ei].visible = false;
     if (blob.pupils && blob.pupils[ei]) blob.pupils[ei].visible = false;
     // the empty socket is backfilled with brain pink — you look into flesh, not into a
@@ -2086,13 +2088,14 @@ function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly 
     const pit = ball(0.06, 0xa84a5e); pit.position.set(0.16 * es, 0.05, 0.2); // the soft back of the hole
     blob.head.add(track(pit));
     const hang = new THREE.Group(); hang.position.set(0.16 * es, 0.0, 0.24);
-    const stalkLen = 0.22 + Math.random() * 0.30; // some short, some long
+    const stalkLen = 0.22 + Math.random() * 0.30;
     const stalk = cyl(0.015, 0.025, stalkLen, 0x8a2430, 5);
     stalk.position.set(0, -stalkLen * 0.42, 0.02); stalk.rotation.x = 0.18;
     hang.add(track(stalk));
     const eyeDrop = stalkLen * 0.86;
     const eyeball = ball(0.11, 0xe8e4da); eyeball.position.set(0, -eyeDrop, 0.04); hang.add(track(eyeball));
-    const pupil = ball(0.05, 0x7a1010); pupil.position.set(0, -eyeDrop - 0.01, 0.12); hang.add(track(pupil));
+    // Keep the original pupil colour — blind zombies keep their white/grey pupil
+    const pupil = ball(0.05, pupilColor); pupil.position.set(0, -eyeDrop - 0.01, 0.12); hang.add(track(pupil));
     blob.head.add(hang);
     blob.hangEye = hang;
   }
