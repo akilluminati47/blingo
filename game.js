@@ -2225,7 +2225,7 @@ function terrainPlane(w, d, segW, segD, cx, cz, material, lift = 0) {
   const m = new THREE.Mesh(geo, material);
   m.position.set(cx, 0, cz);
   m.receiveShadow = true; m.castShadow = false;
-  m.position.set(cx, 0, cz);
+  return m;
 }
 // same ground-following approach as terrainPlane, but a fan disc instead of a grid — for round
 // ground decals (floodlight pools) that need to ride the terrain's own tilt instead of sinking
