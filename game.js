@@ -1136,9 +1136,10 @@ function updateBulletHoles(dt) {
       // Peek fade: if the hole sits on a wall that's being peeked through, fade with it
       const p = d.mesh.position;
       for (const s of peeking) {
-        if (p.x > s.box.x - s.box.hw && p.x < s.box.x + s.box.hw &&
-            p.z > s.box.z - s.box.hd && p.z < s.box.z + s.box.hd &&
-            p.y > s.box.y0 && p.y < s.box.y1) {
+        if (!s.box || !s.box.hw) continue;
+        if (p.x > s.box.x - s.box.hw - 0.3 && p.x < s.box.x + s.box.hw + 0.3 &&
+            p.z > s.box.z - s.box.hd - 0.3 && p.z < s.box.z + s.box.hd + 0.3 &&
+            p.y > s.box.y0 - 0.3 && p.y < s.box.y1 + 0.3) {
           op *= s.op; break;
         }
       }
