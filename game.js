@@ -562,6 +562,8 @@ function updateSkyFade(dt) {
   if (skyFadeT >= 1) {
     skyDomes[1 - skyFront].visible = false;
     skyDomes[1 - skyFront].material.transparent = false;
+    skyDomes[skyFront].material.transparent = false;
+    skyDomes[skyFront].material.opacity = 1;
     return;
   }
   skyFadeT = Math.min(1, skyFadeT + dt / SKY_FADE_S);
