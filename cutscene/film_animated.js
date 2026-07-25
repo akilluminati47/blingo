@@ -154,21 +154,44 @@ const SHOTS = [
   async function() {
     console.log('🎬 S1: The Block flyover');
     clearAll();
+    maxSettings();
     player.pos.set(20, groundHeight(20, 50), 50);
-    // seamless flyover: each shot starts where the last one ended — position AND look-at
-    // Night — start high behind the church, descending toward the graveyard
-    setClock(23.5); setWeather('sunny'); applyEnvironment(true);
-    await pause(300);
-    await panShot('s01a_night', 4, v3(28, 30, 100), v3(20, 22, 70), v3(20, 5, 50));
-    // Dawn — continue from the graveyard across the plaza
-    setClock(6); applyEnvironment(true);
-    await panShot('s01b_dawn', 4, v3(20, 22, 70), v3(15, 18, 40), v3(20, 5, 50));
-    // Noon — descend across the plaza toward the bank
-    setClock(13); applyEnvironment(true);
-    await panShot('s01c_noon', 4, v3(15, 18, 40), v3(8, 14, 10), v3(15, 5, 30));
-    // Sunset — slow pan down to the bank steps
-    setClock(18.5); applyEnvironment(true);
-    await panShot('s01d_sunset', 6, v3(8, 14, 10), v3(2, 8, -20), v3(8, 4, 0));
+    setWeather('sunny');
+    // single 18s continuous pan — clock changes midway, no gaps
+    const dur = 18, n = Math.round(dur * D.FPS);
+    const waypoints = [
+      { t: 0.00, pos: v3(28, 30, 100), look: v3(20, 5, 50), clock: 23.5 },  // night
+      { t: 0.22, pos: v3(20, 22, 70),  look: v3(20, 5, 50), clock: 6    },  // dawn
+      { t: 0.50, pos: v3(15, 18, 40),  look: v3(15, 5, 30), clock: 13   },  // noon
+      { t: 0.72, pos: v3(8, 14, 10),   look: v3(8, 4, 0),   clock: 18.5 },  // sunset
+      { t: 1.00, pos: v3(2, 8, -20),   look: v3(0, 3, -30), clock: 18.5 },
+    ];
+    beginCapture();
+    let lastClock = -1;
+    for (let i = 0; i < n; i++) {
+      const t = i / Math.max(n - 1, 1);
+      // find the two surrounding waypoints
+      let lo = 0, hi = waypoints.length - 1;
+      for (let w = 1; w < waypoints.length; w++) {
+        if (t <= waypoints[w].t) { lo = w - 1; hi = w; break; }
+      }
+      const wt = (t - waypoints[lo].t) / (waypoints[hi].t - waypoints[lo].t || 1);
+      const cp = waypoints[lo].pos.clone().lerp(waypoints[hi].pos, wt);
+      const cl = waypoints[lo].look.clone().lerp(waypoints[hi].look, wt);
+      camera.position.copy(cp);
+      camera.lookAt(cl);
+      skyDome.position.copy(camera.position);
+      cloudDome.position.copy(camera.position);
+      // change clock at waypoint crossings
+      const ck = waypoints[lo].clock;
+      if (ck !== lastClock) { game.clock = ck; applyEnvironment(true); lastClock = ck; }
+      snap('s01_flyover_' + String(i).padStart(4, '0'));
+      if (window.__step) window.__step(1, 1 / D.FPS);
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    endCapture();
+    restoreSettings();
+    console.log('  ✅ s01 flyover', n, 'frames');
   },
 
   // SHOT 2 — Cousins on bank steps facing the fountain (10s slow pan)
