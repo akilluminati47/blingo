@@ -317,6 +317,7 @@ function openPolicies(){
   screenEl.classList.remove('hidden');
   screenEl.scrollTop = 0;
   navRow = -1; navCol = 0;
+  gpPrev = {};
   if(location.hash !== '#policies') history.replaceState(null, '', '#policies');
 }
 function closePolicies(){
