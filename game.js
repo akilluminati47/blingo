@@ -2030,7 +2030,7 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   root.scale.setScalar(scale);
   // collect skin meshes for red damage flash
   const skinList = [];
-  root.traverse(o => { if (o.isMesh && o.material !== shadowMat) skinList.push({ mesh: o, mat: o.material }); });
+  root.traverse(o => { if (o.isMesh) skinList.push({ mesh: o, mat: o.material }); });
   return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, pupils, mouth, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
 }
@@ -5726,7 +5726,7 @@ function ownPlayerBodyMats() {
   playerBodyMats = [];
   (function walk(node) {
     if (node === playerBlob.gunSocket) return; // never descend the gun
-    if (node.material && node.material !== shadowMat) {
+    if (node.material) {
       if (!node.userData._ownMat) { node.material = node.material.clone(); node.userData._ownMat = true; }
       playerBodyMats.push(node.material);
     }
@@ -9339,7 +9339,7 @@ const _cv = new THREE.Vector3();
 function beginBlobFade(c) {
   c.tpMats = [];
   c.blob.root.traverse(o => {
-    if (!o.isMesh || o.material === shadowMat) return;
+    if (!o.isMesh) return;
     const m = o.material.clone(); m.transparent = true;
     c.tpMats.push({ mesh: o, orig: o.material, clone: m });
     o.material = m;
@@ -10893,14 +10893,14 @@ function spawnJellyMarks() {
   scene.add(b.root);
   jelly.skins = [];
   b.root.traverse(o => {
-    if (!o.isMesh || o.material === shadowMat) return;
+    if (!o.isMesh) return;
     const base = o.material.color.getHex();
     o.material = o.material.clone();            // never touch the shared mat() cache
     o.material.transparent = true; o.material.opacity = 0.5;
     if (base === 0xff8c42) jelly.skins.push(o.material); // body + head + arms — the recolour set
   });
   jelly.ghostMats = [];
-  b.root.traverse(o => { if (o.isMesh && o.material !== shadowMat) jelly.ghostMats.push(o.material); });
+  b.root.traverse(o => { if (o.isMesh) jelly.ghostMats.push(o.material); });
   jelly.ghost = b;
   jelly.sat = 0; jelly.awake = false; jelly.wakeT = 0; jelly.statT = -1;
 }

@@ -346,7 +346,6 @@ function applyNav(){
   items.forEach((el,i)=>el.classList.toggle('navfocus', i===navIdx));
   if(navIdx>=0 && items[navIdx]) items[navIdx].focus({preventScroll:true});
 }
-}
 function move(dir){
   const n=navItems().length;
   navIdx = navIdx<0 ? (dir>0?0:n-1) : (navIdx+dir+n)%n;
