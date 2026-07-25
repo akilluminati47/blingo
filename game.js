@@ -72,15 +72,26 @@ function curveDrop(x, z) {
 
 const hemi = new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 0.9);
 scene.add(hemi);
-const sunLight = new THREE.DirectionalLight(0xaebfff, 0.8);
+const sunLight = new THREE.DirectionalLight(0xffeccb, 0.9);
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.set(1024, 1024);
 sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 200;
 sunLight.shadow.camera.left = -60; sunLight.shadow.camera.right = 60;
 sunLight.shadow.camera.top = 60; sunLight.shadow.camera.bottom = -60;
 sunLight.shadow.bias = -0.0004; sunLight.shadow.normalBias = 0.02;
-sunLight.position.set(-30, 50, -20);
+sunLight.position.set(50, 60, -40);
 scene.add(sunLight);
+const moonLight = new THREE.DirectionalLight(0xaec8ff, 0.5);
+moonLight.castShadow = true;
+moonLight.shadow.mapSize.set(512, 512);
+moonLight.shadow.camera.near = 1; moonLight.shadow.camera.far = 200;
+moonLight.shadow.camera.left = -60; moonLight.shadow.camera.right = 60;
+moonLight.shadow.camera.top = 60; moonLight.shadow.camera.bottom = -60;
+moonLight.shadow.bias = -0.0003; moonLight.shadow.normalBias = 0.02;
+moonLight.position.set(-30, 50, -20);
+moonLight.intensity = 0;
+moonLight.castShadow = false;
+scene.add(moonLight);
 const warm = new THREE.AmbientLight(0x64513a, 0.35);
 scene.add(warm);
 
@@ -1111,7 +1122,8 @@ function applyEnvironment(redraw = true) {
   const dimD = W.sunny + W.cloudy * 0.55 + W.rain * 0.35;
   const dimH = W.sunny + W.cloudy * 0.85 + W.rain * 0.7;
   hemi.color.set(p.hemiSky); hemi.groundColor.set(p.hemiGnd); hemi.intensity = p.hemiI * dimH;
-  sunLight.color.set(p.dirC); sunLight.intensity = p.dirI * dimD;
+  // sunLight + moonLight colours come from the phase palette; intensities are driven per-frame by updateCamera
+  moonLight.color.set(p.dirC);
   moonOff.set(p.dirPos[0], p.dirPos[1], p.dirPos[2]);
   warm.color.set(p.ambC); warm.intensity = p.ambI;
   const fogC = new THREE.Color(p.fog);
@@ -12314,11 +12326,17 @@ function updateCamera(dt) {
   cloudDome.position.copy(camera.position); // drift lives in the shader's uTime, wind-paced
   updateCelestial(dt); // arc the sun + moon, dress the clouds' uniforms, drift the motes
   updateSunGlare();    // lens flare from the sun — warm glare + ghost rings
-  // shadow-casting light follows the actual sun in the sky
-  const sd = _sunDir;
+  // twin directional shadow lights: sun by day, moon by night — crossfade at dawn/dusk
+  const dayW = clamp((_sunDir.y + 0.05) / 0.1, 0, 1);
+  const sd = _sunDir, md = _moonDir;
   sunLight.position.set(player.pos.x + sd.x * 80, player.pos.y + sd.y * 80, player.pos.z + sd.z * 80);
-  sunLight.target.position.copy(player.pos);
-  sunLight.target.updateMatrixWorld();
+  sunLight.target.position.copy(player.pos); sunLight.target.updateMatrixWorld();
+  sunLight.intensity = (0.8 + dayW * 0.4) * (dayW > 0.05 ? 1 : 0);
+  sunLight.castShadow = dayW > 0.05;
+  moonLight.position.set(player.pos.x + md.x * 80, player.pos.y + md.y * 80, player.pos.z + md.z * 80);
+  moonLight.target.position.copy(player.pos); moonLight.target.updateMatrixWorld();
+  moonLight.intensity = 0.35 + (1 - dayW) * 0.25;
+  moonLight.castShadow = dayW < 0.95;
 }
 
 // ---- see-through house ----
