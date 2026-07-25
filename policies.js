@@ -333,9 +333,9 @@ addEventListener('hashchange', ()=>{ if(location.hash==='#policies' && !isOpen()
 
 /* ---- keyboard + gamepad navigation (only while the overlay is open) ---- */
 function navGrid(){
-  const ptiles = [...document.querySelectorAll('.ptile')].filter(el => el.offsetParent !== null);
-  const ppips = [...document.querySelectorAll('.ppip')].filter(el => el.offsetParent !== null);
-  const pdownBtns = [...document.querySelectorAll('.pdown-btn:not(.pdown-loading)')].filter(el => el.offsetParent !== null);
+  const ptiles = [...document.querySelectorAll('.ptile')];
+  const ppips = [...document.querySelectorAll('.ppip')];
+  const pdownBtns = [...document.querySelectorAll('.pdown-btn:not(.pdown-loading)')];
   const ghbadge = document.querySelector('.pdown-ghbadge');
   const ptoblock = document.getElementById('ptoblock');
   const pcredit = document.getElementById('pcreditlink');
@@ -345,9 +345,9 @@ function navGrid(){
   else if (ptiles.length > 0) rows.push(ptiles);
   if (ppips.length > 0) rows.push(ppips);
   if (pdownBtns.length > 0) rows.push(pdownBtns);
-  if (ghbadge && ghbadge.offsetParent !== null) rows.push([ghbadge]);
-  if (ptoblock && ptoblock.offsetParent !== null) rows.push([ptoblock]);
-  if (pcredit && pcredit.offsetParent !== null) rows.push([pcredit]);
+  if (ghbadge) rows.push([ghbadge]);
+  if (ptoblock) rows.push([ptoblock]);
+  if (pcredit) rows.push([pcredit]);
   return rows;
 }
 function navItems(){ return navGrid().flat(); }
