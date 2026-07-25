@@ -7244,6 +7244,8 @@ function refreshRow(key) {
   // (Music no longer has a hidden threshold — the full cousin track now plays in-game at any
   // level above zero, so the pips already tell the whole story.)
   if (key === 'extraGore') row.classList.toggle('live', extraGoreOn());
+  if (key === 'music') row.classList.toggle('live', notches.music >= 5);
+  if (key === 'drawDist') row.classList.toggle('live', notches.drawDist >= 5);
 }
 function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); updateGoreHordeUI(); }
 // light the Extra Gore + Zombies pips while the gore horde is on. The owner (single player,
