@@ -3620,8 +3620,9 @@ function buildChurchyard(rng) {
   }
   const spire = cyl(0.02, 1.85, 2.8, 0x1f1d24, 4);
   spire.position.set(cx, ridgeY + 4, steepleZ);
-  spire.rotation.y = Math.PI / 4; // 4-sided cone's corners default to the box's face centers; twist to cap the tower's faces instead
+  spire.rotation.y = Math.PI / 4;
   townGroup.add(spire);
+  townColliders.push(aabb(cx, steepleZ, 1.6, 1.6, 2.6, ridgeY + 2.4)); // spiked top — standable landing
   const crossV = box(0.08, 0.95, 0.08, 0x14121a);
   crossV.position.set(cx, ridgeY + 5.75, steepleZ); crossV.rotation.z = 0.09; // slightly askew
   townGroup.add(crossV);
@@ -4179,14 +4180,16 @@ function buildBlingoStatue(x, z) {
   const plinth = box(4.6, 1.3, 4.6, graniteDk); plinth.position.set(x, y0 + 0.85, z); townGroup.add(plinth);
   townColliders.push(aabb(x, z, 2.3, 2.3, 1.3, y0 + 0.2));
   const lip = box(5.0, 0.22, 5.0, granite); lip.position.set(x, y0 + 1.55, z); townGroup.add(lip);
-  const py = y0 + 1.66; // top of the pedestal — the blob stands here
+  const py = y0 + 2.0; // top of the pedestal lip — flush with the statue's feet
   const statue = buildBlob({ color: granite });
-  scene.remove(statue.shadow); // stone casts its presence, not a gameplay shadow blob
+  scene.remove(statue.shadow);
   petrify(statue.root);
-  statue.root.scale.setScalar(3.3); // the family silhouette at monument scale
+  statue.root.scale.setScalar(3.3);
   statue.root.position.set(x, py, z);
-  statue.root.rotation.y = -Math.PI / 2; // faces the side road, eyes on the town he took back
+  statue.root.rotation.y = -Math.PI / 2;
   townGroup.add(statue.root);
+  // solid statue: a narrow cylinder around the blob body so bullets and players bounce off
+  townColliders.push(aabb(x, z, 1.5, 1.5, 4.5, py - 0.4));
   // the plaque sits ON the plinth itself, west face, BEST JELLY in the goopy face
   const plaque = textPlate('BEST JELLY', 1.9, 0.5, '#3c3428', '#e8d9a8');
   plaque.position.set(x - 2.32, y0 + 1.05, z);
