@@ -6820,15 +6820,19 @@ function updateWeaponBtn() {
     : player.weapon.melee ? 'FIST' : player.weapon.id.slice(0, 4).toUpperCase();
 }
 let toastT = 0;
+const toastQueue = [];
 function toast(txt, long) {
-  // break the line after each .ᐟ so whatever follows drops onto its own centred row,
-  // sitting under the statement it belongs to. Escape first — these strings carry weapon
-  // and cousin names — then insert the only markup we add ourselves.
-  const safe = String(txt).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  toastQueue.push({ txt: String(txt), long: !!long });
+  if (toastT <= 0) showNextToast();
+}
+function showNextToast() {
+  if (!toastQueue.length) return;
+  const item = toastQueue.shift();
+  const safe = item.txt.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   hud.toast.innerHTML = safe.replace(/\.ᐟ[ ]+/g, '.ᐟ<br>').replace(/<br>\s*$/, '');
   hud.toast.style.opacity = 1;
   hud.toast.style.top = '32%';
-  toastT = long ? 4.2 : 1.6;
+  toastT = item.long ? 4.2 : 1.6;
 }
 let hitmarkT = 0;
 // set from the crosshair test each frame in updateFx — an enemy is under the sights
@@ -12558,7 +12562,7 @@ function updateFx(dt) {
     hud.hitmarker.style.opacity = 1;
     hud.hitmarker.style.transform = `translate(-50%,-50%) rotate(45deg) scale(${1 + hitmarkT * 3.5})`; // snappy pop
   } else hud.hitmarker.style.opacity = 0;
-  if (toastT > 0) { toastT -= dt; if (toastT <= 0) { hud.toast.style.opacity = 0; hud.toast.style.top = '30%'; } }
+  if (toastT > 0) { toastT -= dt; if (toastT <= 0) { hud.toast.style.opacity = 0; hud.toast.style.top = '30%'; showNextToast(); } }
   if (bloodSplatT > 0) { bloodSplatT -= dt; if (bloodSplatT <= 0) bloodEl.style.opacity = 0; }
 }
 
