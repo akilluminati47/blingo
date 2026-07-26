@@ -6938,6 +6938,7 @@ function startRun() {
   initAudio();
   for (const id of ['startscreen', 'deathscreen', 'lobbyscreen', 'hostclosed'])
     document.getElementById(id).classList.add('hidden');
+  if (window._pauseTypewriter) window._pauseTypewriter();
   deathFx.on = false; deathFadeEl.style.opacity = 0; // the fade never follows you into a fresh run
   document.getElementById('waitmsg').classList.add('hidden');
   document.body.classList.add('playing');
@@ -7004,11 +7005,13 @@ document.getElementById('lobbybackbtn').addEventListener('click', () => {
   netScanStop();
   document.getElementById('lobbyscreen').classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
+  if (window._resumeTypewriter) window._resumeTypewriter();
 });
 document.getElementById('hcmenu').addEventListener('click', () => {
   document.getElementById('hostclosed').classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
   renderPrestige();
+  if (window._resumeTypewriter) window._resumeTypewriter();
 });
 
 // ---------- the death transition ----------
@@ -7120,6 +7123,7 @@ function quitToMenu(keepChain) {
   game.state = 'menu';
   pauseScreen.classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
+  if (window._resumeTypewriter) window._resumeTypewriter();
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   hideFinalStats(); // grandma's tally never follows you onto the menu

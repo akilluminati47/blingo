@@ -1074,9 +1074,9 @@
     el.innerHTML = h;
   }
 
-  var _tid = null;
+  var _tid = null, _paused = false;
   function clearTypewriter() { if (_tid) { clearTimeout(_tid); _tid = null; } }
-  function schedule(ms, fn) { clearTypewriter(); _tid = setTimeout(function() { _tid = null; fn(); }, ms); }
+  function schedule(ms, fn) { if (_paused) return; clearTypewriter(); _tid = setTimeout(function() { _tid = null; fn(); }, ms); }
 
   function fill(el, text, fullText, color, i, cb) {
     i = i || 0;
@@ -1122,7 +1122,9 @@
     });
   }
 
-  window._resetTypewriter = function() { clearTypewriter(); cycle(); };
+  window._resetTypewriter = function() { clearTypewriter(); _paused = false; cycle(); };
+  window._pauseTypewriter = function() { _paused = true; clearTypewriter(); };
+  window._resumeTypewriter = function() { _paused = false; cycle(); };
 
   // Wait until the splash is dismissed before starting the cycle
   var _started = false;
