@@ -329,6 +329,8 @@ function closePolicies(){
   if(location.hash === '#policies') history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('policiesopen').blur();
   if (window._resetTypewriter) window._resetTypewriter();
+  const v = document.getElementById('policybg');
+  if (v) v.pause();
 }
 document.getElementById('policiesopen').addEventListener('click', e=>{ e.preventDefault(); openPolicies(); });
 document.getElementById('ptoblock').addEventListener('click', closePolicies);
