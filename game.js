@@ -9235,6 +9235,10 @@ function updatePlayer(dt) {
   b.legs[0].rotation.x = swing + stumbleLean * 0.3;
   b.legs[1].rotation.x = -swing - stumbleLean * 0.2;
   const aimAmt = player.aimT;
+  // default walk pose — every branch below overrides the arms it needs, so no state
+  // can leave one arm frozen in a previous pose
+  b.arms[0].rotation.x = -swing * 0.8; b.arms[0].rotation.z = 0;
+  b.arms[1].rotation.x = swing * 0.8; b.arms[1].rotation.z = 0;
   if (w.melee) {
     // swingT drives a real arc rather than snapping the arm to a pose: -1 when idle
     const sw = player.swingT > 0 && player.swingDur > 0 ? 1 - player.swingT / player.swingDur : -1;
