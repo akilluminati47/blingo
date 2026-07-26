@@ -6523,11 +6523,8 @@ function trackedActors() {
         x: z.pos.x, y: z.blob.root.position.y, z: z.pos.z, downed: false, boss: false, mini: true, scale: z.scale });
     }
   }
-  // Bank landmark: hidden until the last unrecruited cousin beacon sinks below the
-  // curved horizon — then fades in so it's never spammy. Once the boss wakes (checks
-  // both spawned state and active fight), the pillar and chevron take over.
-  const bossAggro = bossState.spawned && (bossState.beamFade || (bossState.boss && bossState.boss.state !== 'dormant'));
-  if (!bossAggro && companions.length > 0) {
+  // Bank landmark: hidden once the Two Horned One is spawned — the pillar and chevron take over permanently.
+  if (!bossState.spawned && companions.length > 0) {
     let anyBeaconUp = false;
     const unrecruited = companions.filter(c => !c.recruited);
     if (unrecruited.length > 0) {
