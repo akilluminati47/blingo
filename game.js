@@ -7191,6 +7191,9 @@ function setNotch(key, n, silent) {
   // in a joined lobby the spawn dials belong to the HOST — a client's copies are read-only
   if (net.role === 'client' && HOST_NOTCH_KEYS.includes(key)) return;
   n = clamp(Math.round(n), 0, 5);
+  // Extra Gore is a continuation of Gore: dialing it up fills Gore first
+  if (key === 'extraGore' && n > 0 && notches.gore < 5) setNotch('gore', 5, true);
+  if (key === 'gore' && n < 5 && notches.extraGore > 0) { notches.extraGore = 0; refreshRow('extraGore'); }
   if (n === notches[key]) return;
   notches[key] = n;
   syncDerived();
