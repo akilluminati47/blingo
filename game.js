@@ -373,11 +373,14 @@ const roofMats = [
 ];
 const darkGlassMat = new THREE.MeshLambertMaterial({ color: 0x11131a, side: THREE.DoubleSide });
 const glowTex = canvasTex(64, 64, ctx => {
-  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  const g = ctx.createRadialGradient(32, 32, 4, 32, 32, 31);
   g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.14, 'rgba(255,255,255,0.92)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
 });
+glowTex.generateMipmaps = false;
+glowTex.minFilter = THREE.LinearFilter;
 // ---------- the loot glow kit ----------
 // One dressed-up glow, reused everywhere something wants to be found: a soft tinted pool
 // laid on the ground (the drop shadow), a sharp ring breathing over it, and a brighter orb
@@ -2262,7 +2265,10 @@ function terrainDisc(r, segs, cx, cz, material, lift = 0, rings = 0) {
 // indoor: a box someone stashed under a roof rather than one left lying in a field. Worth
 // more when you open it — see rollLoot.
 function makeCrate(rng, x, y, z, group, colliders, crateList, onShelf, indoor) {
-  if (net.role === 'client') return null;
+  // clients don't create local crates, but the host's crate code consumes 2 rng
+  // calls — consume them here too or the deterministic RNG diverges and every
+  // subsequent object (cars, trees, rocks) lands in a different spot.
+  if (net.role === 'client') { rng(); rng(); return null; }
   const g = new THREE.Group();
   const base = box(0.7, 0.5, 0.7, 0x8a5a2b);
   base.position.y = 0.25;
@@ -5038,7 +5044,8 @@ let lockLossT = -9999;
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement !== canvas && game.state === 'playing' && input.device === 'kbm') {
     lockLossT = performance.now();
-    pauseGame();
+    if (!net.role) pauseGame(); // solo only — a multiplayer world can't stop for one person
+  }
   }
 });
 addEventListener('mouseup', e => {
@@ -6768,8 +6775,10 @@ function spawnTracer(from, to) {
   const len = from.distanceTo(to);
   if (len < 0.2) return;
   const g = new THREE.BoxGeometry(0.025, 0.025, len);
-  const m = new THREE.Mesh(g, tracerMat.clone());
-  m.material.defines = { NO_CURVE: 1 }; // clones don't reliably carry defines across
+  const mat = tracerMat.clone();
+  mat.defines = { NO_CURVE: 1 }; // clones don't reliably carry defines across
+  mat.needsUpdate = true;
+  const m = new THREE.Mesh(g, mat);
   m.position.copy(from).lerp(to, 0.5);
   m.lookAt(to);
   scene.add(m);
@@ -6846,7 +6855,7 @@ function resetGame() {
   player.pos.set(0, groundHeight(0, 0), 0);
   player.vy = 0; player.hp = player.maxHp; player.dead = false;
   player.camYaw = 0; player.camPitch = -0.24; player.groundCamT = 0;
-  player.reloading = 0;
+  player.reloading = 0; player.shootCd = 0;
   player.lastHurtT = -9; player.lastShotT = -9;
   player.stumbleT = 0; player.idlePhase = 0; player.lastStepPh = -1; player.meleeArm = 0;
   player.comboN = 0; player.lastPunchT = -9; player.swingT = 0; player.meleeChopT = 0; player.meleeCombo = 0; player.lastMeleeT = -9;
@@ -7164,6 +7173,10 @@ function onWindowBlur() {
   if (game.state === 'menu') return;
   if (game.state === 'playing' && net.role === null) pauseGame();
   setBlurMute(true);
+  // clear held input state so a key released while the window was gone
+  // doesn't stay stuck (prevents auto-firing, auto-interacting on return)
+  input.shoot = false; input.aim = false;
+  input.interactHeld = false; input.interactHeldPad = false;
 }
 addEventListener('blur', onWindowBlur);
 addEventListener('focus', () => setBlurMute(false));
@@ -10156,7 +10169,23 @@ function updateZombies(dt) {
         const d = Math.hypot(c.pos.x - z.pos.x, c.pos.z - z.pos.z);
         if (d < tDist) { tDist = d; tx = c.pos.x; tz = c.pos.z; ty = c.y || 0; tgtC = c; }
       }
-      if (tDist === Infinity) hasTarget = false;
+      if (tDist === Infinity) {
+        hasTarget = false;
+        // no standing prey anywhere near — don't just stand there. Wander the block
+        // like a blind walker, same pace and repath rhythm, so a downed player with
+        // jelly to spend still watches a live horde while they bleed.
+        if (!z.blind) {
+          z.wanderT = (z.wanderT || 0) - dt;
+          if (z.wanderT <= 0) {
+            z.wanderT = 2.5 + Math.random() * 4;
+            z.wanderYaw = Math.random() * TAU;
+            z.repathed = true;
+          }
+          tx = z.pos.x + Math.sin(z.wanderYaw) * 6;
+          tz = z.pos.z + Math.cos(z.wanderYaw) * 6;
+          hasTarget = true; wander = true;
+        }
+      }
     }
     // how far the actual prey is, kept clear of the door/surround detour below — a zombie
     // pressed against a wall it can't get past is "close" for the sake of the idle claw-wave
@@ -11555,7 +11584,7 @@ function onBlugaDefeated(z) {
   if (bluga.beam) { scene.remove(bluga.beam); bluga.beam = null; }
   bossBarEl.classList.remove('show', 'bluga');
   for (const zz of [...zombies]) if (zz.fbi && zz.state !== 'dying') killZombie(zz, 0, 0, false);
-  toast('BLUGA FALLS .ᐟ THE BLOCK IS FINALLY QUIET .ᐟ', true);
+  toast('BLUGA LEAVES THE BLOCK .ᐟ', true);
   for (let k = 0; k < 40; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0x6fd8ff, 0xf2c21a, 0xffffff][k % 3], 1, 6, 1.2);
   rumble(600, 1, 1);
   spawnJellyMarks();                          // NOW grandma's spirit comes
@@ -13028,7 +13057,8 @@ function netHostTick(dt) {
   // client renders the same full x/y aim the owning screen sees
   const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
     playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed,
-    playerBlob.arms[playerBlob.gunArm].rotation.x, player.giantScale || 1)];
+    playerBlob.arms[playerBlob.gunArm].rotation.x, player.giantScale || 1,
+    playerBlob.arms[playerBlob.gunArm].rotation.z)];
   // the remaining cousins still waiting to be found: streamed so every client sees the same
   // recruit beacons the host does and can walk one up themselves (netFindNearRecruit)
   const rc = [];
@@ -13039,7 +13069,8 @@ function netHostTick(dt) {
   for (const c of companions) {
     if (!c.recruited) continue;
     ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed,
-      c.blob.arms[c.blob.gunArm].rotation.x, c.netGs || 1));
+      c.blob.arms[c.blob.gunArm].rotation.x, c.netGs || 1,
+      c.blob.arms[c.blob.gunArm].rotation.z));
   }
   const zb = [];
   const shielded = bossShielded();   // its wave guards are up: the boss is invuln right now
@@ -13111,13 +13142,14 @@ function netHostTick(dt) {
   }
   base.zb = null; base.pk = null; base.cr = null; // never let the last client's filtered lists linger on the shared object
 }
-function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs) {
+function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az) {
   const R = v => Math.round(v * 20) / 20;
   const key = p ? 'p' + p : 'ai' + cid;
   const mv = Math.hypot(x - (net['_lx' + key] || x), z - (net['_lz' + key] || z)) > 0.03 ? 1 : 0;
   net['_lx' + key] = x; net['_lz' + key] = z;
   return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv,
     ar: ar == null ? undefined : Math.round(ar * 100) / 100, // gun-arm angle, finer grain than position
+    az: az == null ? undefined : Math.round(az * 100) / 100, // melee roundhouse sweep
     gs: gs && gs > 1.02 ? Math.round(gs * 20) / 20 : undefined }; // chili-giant scale: absent = small
 }
 
@@ -13235,6 +13267,16 @@ function netClientData(m, conn, peer, code) {
     // the host's landmark deal comes first: if their town differs from ours (a prestige
     // remix), rebuild OUR world on their anchors before anything walks through a wall
     if (m.lay && m.lay !== currentLayout) { applyLayout(JSON.parse(m.lay)); rebuildTownWorld(); }
+    // We are now a client: the host owns every crate. Clear any boot-time crates that were
+    // generated before net.role was set so they don't sit on top of the host's streamed ghosts.
+    for (let i = allCrates.length - 1; i >= 0; i--) {
+      const cr = allCrates[i];
+      if (!cr.netGhost) {
+        cr.mesh.removeFromParent();
+        if (cr.col && cr.colList) { const ci = cr.colList.indexOf(cr.col); if (ci >= 0) cr.colList.splice(ci, 1); }
+        allCrates.splice(i, 1);
+      }
+    }
     applyCousin(m.cousin);
     startRun();
     // this world belongs to the host: no local squad, no local spawner
@@ -13339,11 +13381,16 @@ function netClientData(m, conn, peer, code) {
   } else if (m.t === 'jelly') {
     // the Rotten One fell on the host's watch: the same light + ghost + toasts, our screen.
     // (On a prestige run this arrives only once Bluga is down — his beam clears with it.)
+    const wasBluga = !!bluga.beam;
     if (bluga.beam) { scene.remove(bluga.beam); bluga.beam = null; }
     spawnJellyMarks();
-    toast('THE ROTTEN ONE FALLS .ᐟ', true);
-    setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
-    setTimeout(() => toast('AHA, TO THE OLD JELLY HOUSE .ᐟ', true), 7400);
+    if (wasBluga) {
+      toast('BLUGA LEAVES THE BLOCK .ᐟ', true);
+    } else {
+      toast('THE ROTTEN ONE FALLS .ᐟ', true);
+      setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
+      setTimeout(() => toast('AHA, TO THE OLD JELLY HOUSE .ᐟ', true), 7400);
+    }
   } else if (m.t === 'jellyGive') {
     grantJelly();   // the host honoured our jar: it lands in the hand
   } else if (m.t === 'chiliGive') {
@@ -13602,7 +13649,7 @@ function netApplySnapshot(m) {
     // another player just hit the floor: the lobby callout (0-check skips fresh ghosts,
     // so joining mid-rescue doesn't announce an old fall)
     if (a.p && a.dn && g.dn === 0) toast(`P${a.p} ${g.data.name.toUpperCase()} DOWN .ᐟ`, true);
-    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar;
+    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar; g.taz = a.az;
     g.tgs = a.gs || 1; // chili-giant scale target: the ghost grows/shrinks toward it with the melt blur
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
@@ -13639,11 +13686,9 @@ function netApplySnapshot(m) {
       // zombie colour, so a joiner met a differently-coloured monster than the host
       let blob;
       if (zs.fb) {
-        // a black-ops blob: the FBI look, a gun in hand, and the dark shadow-glow tell
+        // a black-ops blob: the FBI look and a gun in hand
         blob = buildFbiBlob(zs.ff != null ? zs.ff : 0xffffff, !!zs.bg);
         const gun = buildGunMesh(zs.bg ? 'rifle' : 'smg'); blob.gunSocket.add(gun); blob.gunMesh = gun;
-        const gl = makeLootGlow(0, { r: zs.bg ? 1.1 : 0.85, y: zs.bg ? 2.6 : 2.0, s: zs.bg ? 1.7 : 1.35, dark: true });
-        blob.root.add(gl); blob.guardGlow = gl;
       } else {
         const color = zs.bo ? (zs.b4 ? BOSS_ROTTEN : zs.b3 ? BOSS_INFECTED : zs.b2 ? BOSS_CRIMSON : BOSS_PURPLE)
           : zs.re ? 0xd43a3a : zs.gr ? 0x39b83a : zs.pu ? 0x9b4dff : ZOMBIE_COLORS[zs.i % ZOMBIE_COLORS.length];
@@ -13734,18 +13779,18 @@ function netClientWorldTick(dt) {
     b.root.position.z = lerp(b.root.position.z, g.tz ?? b.root.position.z, k);
     b.root.position.y = g.ty ?? b.root.position.y;
     b.root.rotation.y = angLerp(b.root.rotation.y, g.tyw || 0, k);
-    g.walk += dt * (g.mv ? 10 : 0);
-    const swing = Math.sin(g.walk) * (g.mv ? 0.8 : 0.05);
+    g.walk += dt * (g.mv ? 10 : 1.5);
+    const swing = Math.sin(g.walk) * (g.mv ? 0.8 : 0.06);
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
     b.arms[b.offArm].rotation.x = -swing * 0.7;
+    // idle: a slow breathing wobble so standing players don't look frozen
+    const idleBreath = Math.sin(performance.now() * 0.0015 + g.walkPhase) * 0.022;
     // ranged arms ride the streamed gun-arm angle (eased over the 10Hz snapshots), so a
     // hero aiming at the sky here aims at the sky on every screen — not a levelled prop
     g.arS = lerp(g.arS ?? -Math.PI / 2, g.tar ?? -Math.PI / 2, 1 - Math.exp(-14 * dt));
-    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8
-      : (WEAPONS[g.wp] && WEAPONS[g.wp].melee
-        ? (MELEE_HOLD[g.wp] ? MELEE_HOLD[g.wp].x   // the straight-out carries match the hero's on every screen
-          : meleeCarryLift(-0.55, b.root.position.y + 0.95, groundHeight(b.root.position.x, b.root.position.z), g.gunMesh ? g.gunMesh.userData.reach : 0.8))
-        : g.arS);
+    g.azS = lerp(g.azS ?? 0, g.taz ?? 0, 1 - Math.exp(-14 * dt));
+    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8 : g.arS;
+    if (g.wp !== 'fists') b.arms[b.gunArm].rotation.z = g.azS;
     if (g.dn) {
       // downed players crawl on their belly, same read as the host's own view of them
       b.wob.rotation.x = 1.2;
@@ -13754,7 +13799,7 @@ function netClientWorldTick(dt) {
       b.arms[1].rotation.x = -2.25 - claw * 0.55;
       b.legs[0].rotation.x = 0.3 + claw * 0.18;
       b.legs[1].rotation.x = 0.3 - claw * 0.18;
-    } else b.wob.rotation.x = 0;
+    } else { b.wob.rotation.x = 0; b.wob.scale.y = 1 + idleBreath; }
     // chili giants on other screens: ease the ghost toward the streamed scale, wearing the
     // splash-melt blur while the size is actually changing (grow AND the shrink back)
     const gsNow = b.root.scale.x, gsTgt = g.tgs || 1;
@@ -13802,7 +13847,6 @@ function netClientWorldTick(dt) {
     // black-ops ghosts: mirror Bluga's smoke-vanish, and hold the gun on the streamed pitch
     if (g.fbi) {
       b.root.visible = !g.gv;
-      if (b.guardGlow) b.guardGlow.visible = !g.gv;
       if (!g.gv) {
         b.root.rotation.x = 0;
         g.walkPhase += dt * 2.4;
@@ -13811,7 +13855,6 @@ function netClientWorldTick(dt) {
         g.arS = lerp(g.arS ?? -Math.PI / 2, -Math.PI / 2 - (g.tar || 0) * 0.8, 1 - Math.exp(-12 * dt));
         b.arms[b.gunArm].rotation.x = g.arS;
         b.arms[b.offArm].rotation.x = -sw * 0.5;
-        if (b.guardGlow) animateLootGlow(b.guardGlow, game.time + (g.walkPhase || 0));
       }
       placeShadow(b, g.pos.x, g.pos.z);
       updateFlash(b, dt);
@@ -13824,6 +13867,7 @@ function netClientWorldTick(dt) {
       const sw = Math.sin(g.walkPhase);
       b.legs[0].rotation.x = sw * 0.7; b.legs[1].rotation.x = -sw * 0.7;
       b.arms[0].rotation.x = -1.4 + sw * 0.25; b.arms[1].rotation.x = -1.4 - sw * 0.25;
+      b.wob.scale.y = 1 + sw * 0.05;
     }
     animateRotGore(g, b);                              // rot hearts beat + eyes swing here too
     placeShadow(b, g.pos.x, g.pos.z);
@@ -13923,6 +13967,7 @@ function netClientTick(dt) {
         // the gun arm's actual angle — full vertical aim, kick included — so every other
         // screen sees this hero pointing exactly where they point
         ar: Math.round(playerBlob.arms[playerBlob.gunArm].rotation.x * 100) / 100,
+        az: Math.round((playerBlob.arms[playerBlob.gunArm].rotation.z || 0) * 100) / 100,
         gs: (player.giantScale || 1) > 1.02 ? Math.round(player.giantScale * 20) / 20 : undefined,
         dn: player.downed ? 1 : 0 });
     } catch (e) {}
@@ -14076,20 +14121,19 @@ function netPoseCompanion(c, dt) {
     c.pos.z = lerp(c.pos.z, p.z, k);
     c.y = p.y; c.yaw = p.yw;
     if (p.wp && WEAPONS[p.wp] && (c.weapon || {}).id !== p.wp) setCompanionWeapon(c, p.wp);
-    c.walkPhase += dt * (p.mv ? 10 : 0);
+    c.walkPhase += dt * (p.mv ? 10 : 1.5);
   }
-  const swing = Math.sin(c.walkPhase) * (p && p.mv ? 0.8 : 0.05);
+  const swing = Math.sin(c.walkPhase) * (p && p.mv ? 0.8 : 0.06);
   b.root.position.set(c.pos.x, c.y || groundHeight(c.pos.x, c.pos.z), c.pos.z);
   b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
   b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
   b.arms[b.offArm].rotation.x = -swing * 0.7;
+  const idleBreath = Math.sin(performance.now() * 0.0015 + c.walkPhase) * 0.022;
   // their streamed gun-arm angle, eased over the 15Hz stream: real x/y aim, not a levelled prop
   c.arS = lerp(c.arS ?? -Math.PI / 2, p && p.ar != null ? p.ar : -Math.PI / 2, 1 - Math.exp(-14 * dt));
-  b.arms[b.gunArm].rotation.x = c.weapon && c.weapon.melee
-    ? (MELEE_HOLD[c.weapon.id]
-      ? MELEE_HOLD[c.weapon.id].x   // the straight-out carries ride the same on every screen
-      : meleeCarryLift(-0.55, (c.y || 0) + 0.95, groundHeight(c.pos.x, c.pos.z), c.gunMesh ? c.gunMesh.userData.reach : 0.8))
-    : c.arS;
+  c.azS = lerp(c.azS ?? 0, p && p.az != null ? p.az : 0, 1 - Math.exp(-14 * dt));
+  b.arms[b.gunArm].rotation.x = (c.weapon && c.weapon.id === 'fists') ? -swing * 0.8 : c.arS;
+  if (!(c.weapon && c.weapon.id === 'fists')) b.arms[b.gunArm].rotation.z = c.azS;
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
   if (c.downed) {
     b.wob.rotation.x = 1.2;
@@ -14099,7 +14143,7 @@ function netPoseCompanion(c, dt) {
     b.legs[0].rotation.x = 0.3 + claw * 0.18;
     b.legs[1].rotation.x = 0.3 - claw * 0.18;
     if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
-  } else if (b.wob.rotation.x) b.wob.rotation.x = 0;
+  } else { if (b.wob.rotation.x) b.wob.rotation.x = 0; b.wob.scale.y = 1 + idleBreath; }
   // a client that ate the chili: the host's view of them grows/shrinks through the same
   // melt blur, driven off the gs field riding their pose stream
   const cgNow = b.root.scale.x, cgTgt = c.netGs || 1;
