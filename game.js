@@ -5963,7 +5963,6 @@ function cycleWeapon(dir = 1) {
   if (id === player.weapon.id) return;
   equipWeapon(id);
   SFX.swap(WEAPONS[id]);
-  toast(WEAPONS[id].name.toUpperCase());
   rumble(40, 0.2, 0.3);
 }
 // V / Select flips between the over-the-shoulder third-person rig and first person
