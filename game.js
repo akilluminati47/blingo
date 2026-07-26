@@ -10369,8 +10369,8 @@ function updateSpawner(dt) {
   // free walkers). They ride the SAME spawner, so every boss-phase / vigil / cleanup rule
   // above already governs them.
   const horde = goreHordeLocal();
-  const maxZ = Math.round(Math.min(26, 4 + Math.floor(game.time / 22) + Math.floor(game.kills / 7)) * settings.zombieSpawn * (horde ? 1.2 : 1));
-  const interval = Math.max(0.35, (3.6 - game.time / 80) / settings.zombieSpawn / (horde ? 1.2 : 1));
+  const maxZ = Math.round(Math.min(12, 4 + Math.floor(game.time / 40) + Math.floor(game.kills / 12)) * settings.zombieSpawn * (horde ? 1.2 : 1));
+  const interval = Math.max(0.6, (4.8 - game.time / 80) / settings.zombieSpawn / (horde ? 1.2 : 1));
   if (game.spawnT <= 0 && zombies.length < maxZ) {
     game.spawnT = interval;
     // the graveyard breathes: near the churchyard, some spawns claw up out of the mounds.
