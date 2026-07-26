@@ -11151,8 +11151,6 @@ function spawnFbi(x, z, { weapon, wave, bluga: isBluga } = {}) {
   const gy = groundHeight(x, z);
   blob.root.position.set(x, gy, z);
   scene.add(blob.root);
-  const gl = makeLootGlow(0, { r: isBluga ? 1.1 : 0.85, y: isBluga ? 2.6 : 2.0, s: isBluga ? 1.7 : 1.35, dark: true });
-  blob.root.add(gl); blob.guardGlow = gl;
   // squad stats track the Crimson One's red minions spawned at this same moment: the same
   // health pool and the same quick feet — armoured, but not spongier than the red brutes
   const power = 1 + game.time / 240;
