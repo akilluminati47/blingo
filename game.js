@@ -12131,32 +12131,8 @@ function updateCrows(dt) {
               c.hopTo = { x: s.x, z: s.z };
               c.hopP = 0;
               if (c.roost.face == null) g.rotation.y = Math.atan2(s.x - g.position.x, 0) + (Math.random() - 0.5) * 0.8;
-    }
-  }
-  // host crates mirrored as ghosts: same crates on every screen, first to open one wins.
-  // When a ghost leaves the stream (opened by someone), it disappears on every client.
-  if (m.cr) {
-    const seenC = new Set();
-    for (const e of m.cr) {
-      seenC.add(e.i);
-      if (!allCrates.some(c => c.netGhost && c.nid === e.i)) {
-        const y = groundHeight(e.x, e.z) + 0.02;
-        const g = new THREE.Group();
-        const baseM = box(0.7, 0.5, 0.7, 0x8a5a2b); baseM.position.y = 0.25; g.add(baseM);
-        const trimM = box(0.74, 0.1, 0.74, 0xc8a44a, { emissive: 0x886600, emissiveIntensity: 0.6 }); trimM.position.y = 0.5; g.add(trimM);
-        const lidM = box(0.72, 0.1, 0.72, 0x6e451f); lidM.position.y = 0.57; g.add(lidM);
-        const glowM = makeLootGlow(0xffdc78, { r: 0.78, y: 1.05, s: 1.7 }); g.add(glowM);
-        g.position.set(e.x, y, e.z);
-        scene.add(g);
-        const ghost = { mesh: g, lid: lidM, trim: trimM, glow: glowM, opened: false, shrink: 0, pos: new THREE.Vector3(e.x, y, e.z), netGhost: true, nid: e.i, t: Math.random() * 10, list: [], indoor: false };
-        allCrates.push(ghost);
-      }
-    }
-    for (let i = allCrates.length - 1; i >= 0; i--) {
-      const c = allCrates[i];
-      if (c.netGhost && !seenC.has(c.nid)) { c.mesh.removeFromParent(); allCrates.splice(i, 1); }
-    }
-  }
+            }
+          }
         }
       }
     }
@@ -13495,6 +13471,30 @@ function netApplySnapshot(m) {
     for (let i = pickups.length - 1; i >= 0; i--) {
       const p = pickups[i];
       if (p.netGhost && !seenP.has(p.nid)) { scene.remove(p.mesh); pickups.splice(i, 1); }
+    }
+  }
+  // host crates mirrored as ghosts: same crates on every screen, first to open one wins.
+  // When a ghost leaves the stream (opened by someone), it disappears on every client.
+  if (m.cr) {
+    const seenC = new Set();
+    for (const e of m.cr) {
+      seenC.add(e.i);
+      if (!allCrates.some(c => c.netGhost && c.nid === e.i)) {
+        const y = groundHeight(e.x, e.z) + 0.02;
+        const g = new THREE.Group();
+        const baseM = box(0.7, 0.5, 0.7, 0x8a5a2b); baseM.position.y = 0.25; g.add(baseM);
+        const trimM = box(0.74, 0.1, 0.74, 0xc8a44a, { emissive: 0x886600, emissiveIntensity: 0.6 }); trimM.position.y = 0.5; g.add(trimM);
+        const lidM = box(0.72, 0.1, 0.72, 0x6e451f); lidM.position.y = 0.57; g.add(lidM);
+        const glowM = makeLootGlow(0xffdc78, { r: 0.78, y: 1.05, s: 1.7 }); g.add(glowM);
+        g.position.set(e.x, y, e.z);
+        scene.add(g);
+        const ghost = { mesh: g, lid: lidM, trim: trimM, glow: glowM, opened: false, shrink: 0, pos: new THREE.Vector3(e.x, y, e.z), netGhost: true, nid: e.i, t: Math.random() * 10, list: [], indoor: false };
+        allCrates.push(ghost);
+      }
+    }
+    for (let i = allCrates.length - 1; i >= 0; i--) {
+      const c = allCrates[i];
+      if (c.netGhost && !seenC.has(c.nid)) { c.mesh.removeFromParent(); allCrates.splice(i, 1); }
     }
   }
   // the murder, mirrored: same birds, same ledges, same purple glares on every screen.
