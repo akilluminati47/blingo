@@ -9320,7 +9320,7 @@ function updatePlayer(dt) {
     // mid-aim — the casual sidearm carry. The long guns pull the second hand up into
     // the classic two-arm brace whenever the gun comes to bear
     b.arms[b.offArm].rotation.x = (!w.oneHand && (wantShoot || recentShot || aimAmt > 0.2)) ? b.arms[b.gunArm].rotation.x : -swing * 0.8;
-    const kick = game.time - player.lastShotT < 0.09 ? 0.35 : 0;
+    const kick = game.time - player.lastShotT < 0.09 ? (w.id === 'magnum' || w.id === 'sniper' ? -0.35 : w.id === 'pistol' || w.id === 'smg' ? -0.04 : -0.175) : 0;
     b.arms[b.gunArm].rotation.x += kick;
   }
   if (player.slideT > 0) {
@@ -9848,7 +9848,11 @@ function updateCompanions(dt) {
     // then relaxes back down — same as the hero
     if (!cw.melee) {
       b.arms[b.gunArm].rotation.x = -Math.PI / 2 - (c.aimPitch || 0) * 0.8;
-      if (game.time - (c.lastShotT || -9) < 0.09) b.arms[b.gunArm].rotation.x += 0.35;
+      if (game.time - (c.lastShotT || -9) < 0.09) {
+        const cw = c.weapon || WEAPONS.pistol;
+        const ck = cw.id === 'magnum' || cw.id === 'sniper' ? -0.35 : cw.id === 'pistol' || cw.id === 'smg' ? -0.04 : -0.175;
+        b.arms[b.gunArm].rotation.x += ck;
+      }
     }
     else {
       if (c.meleeT > 0) c.meleeHoldT = 1;
