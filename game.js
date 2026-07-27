@@ -7011,7 +7011,8 @@ function respawnRun() {
         h.conn.send({ t: 'restart' });
         h.conn.send({ t: 'welcome', n: h.num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
           w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
-          lay: currentLayout }); // the fresh run's landmark deal rides the re-welcome
+          lay: currentLayout,
+          hx: player.pos.x, hz: player.pos.z, hc: selectedCousin });
       } catch (e) {}
     }
     rebuildSquadBars();
@@ -9877,6 +9878,7 @@ function updateCompanions(dt) {
           const hx = c.pos.x + ddx * tWall, hy = sy + ddy * tWall, hz = c.pos.z + ddz * tWall;
           spawnTracer(_cv.clone(), new THREE.Vector3(hx, hy, hz));
           spawnParticles(hx, hy, hz, 0x9a9a8a, 3, 2, 0.3);
+          spawnBulletHole(hx, hy, hz, -ddx, -ddz, 0.14);
         } else if (miss) {
           // a clean miss: the rounds sail wide of the mark and hit nothing
           const shots = cw.id === 'shotgun' ? 3 : 1;
@@ -11011,7 +11013,8 @@ function restartFromFinale() {
         h.conn.send({ t: 'welcome', n: h.num, cousin: c.data.id,
           x: CAMEO_SPOT.x + (Math.random() - 0.5) * 2, z: CAMEO_SPOT.z + (Math.random() - 0.5) * 2,
           w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
-          lay: currentLayout });
+          lay: currentLayout,
+          hx: player.pos.x, hz: player.pos.z, hc: selectedCousin });
       } catch (e) {}
     }
     rebuildSquadBars();
@@ -11406,6 +11409,7 @@ function fbiShoot(z, tx, ty, tz, target, td) {
       spawnTracer(_fbiFrom, _fbiTo);
       relayTracerFx(z.fbiWeapon, _fbiFrom, _fbiTo);
       spawnParticles(_fbiTo.x, _fbiTo.y, _fbiTo.z, 0x9a9a8a, 3, 2, 0.3);
+      spawnBulletHole(_fbiTo.x, _fbiTo.y, _fbiTo.z, -dx, -dz2, 0.14);
       if (Math.hypot(z.pos.x - player.pos.x, z.pos.z - player.pos.z) < 32) play3d(z.pos.x, z.pos.z, () => SFX.shoot(w));
       return;
     }
@@ -12949,8 +12953,9 @@ function wireHostConn(conn) {
           conn.send({ t: 'welcome', n: mine.netP, cousin: mine.data.id, x: mine.pos.x, z: mine.pos.z,
             w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
             zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0,
-            lay: currentLayout, // the host's landmark deal — a reconnecting screen must match it
-            hp: game.state === 'paused' ? 1 : 0, resumed: 1 });
+            lay: currentLayout,
+            hp: game.state === 'paused' ? 1 : 0, resumed: 1,
+            hx: player.pos.x, hz: player.pos.z, hc: selectedCousin });
           toast(`PLAYER ${mine.netP} RECONNECTED .ᐟ`);
           rebuildSquadBars();
           updatePauseLobby();
@@ -12982,9 +12987,10 @@ function wireHostConn(conn) {
       net.conns.push(conn);
       conn.send({ t: 'welcome', n: num, cousin: c.data.id, x: c.pos.x, z: c.pos.z,
         w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
-        zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0, // the host's spawn dials + gore-horde flag
-        lay: currentLayout, // the host's landmark deal: prestige remixes rebuild on our screen too
-        hp: game.state === 'paused' ? 1 : 0 });               // joined a held lobby: wait with it
+        zs: notches.zombieSpawn, ls: notches.lootSpawn, hg: goreHordeLocal() ? 1 : 0,
+        lay: currentLayout,
+        hp: game.state === 'paused' ? 1 : 0,
+        hx: player.pos.x, hz: player.pos.z, hc: selectedCousin }); // host position + cousin so the client draws them right away
       rebuildSquadBars();
       updatePauseLobby();   // a paused host sees the count tick up the moment they join
     } else if (m.t === 'p') {
@@ -13435,6 +13441,14 @@ function netClientData(m, conn, peer, code) {
     game.phase = m.ph; wxSet(m.w); applyEnvironment();
     game.time = m.tm; game.kills = m.k; hud.kills.textContent = m.k;
     player.pos.set(m.x, groundHeight(m.x, m.z), m.z);
+    // seed the host's actor ghost immediately so they're visible from frame 1
+    if (m.hc && m.hx != null) {
+      const hd = COUSINS.find(c => c.id === m.hc) || COUSINS[0];
+      const hb = buildBlob({ color: hd.color, gunHand: m.hc === 'blondie' ? 'left' : 'right', hands: cousinHands(m.hc) });
+      hb.root.position.set(m.hx, groundHeight(m.hx, m.hz), m.hz);
+      scene.add(hb.root);
+      net.actors.set('p1', { blob: hb, wp: '', data: hd, p: 1, walk: 0, tx: m.hx, ty: groundHeight(m.hx, m.hz), tz: m.hz });
+    }
     applyHostNotches(m.zs, m.ls, m.hg);   // the host's spawn dials + gore-horde land on our greyed rows
     if (m.hp) { net.hostPaused = true; pauseGame(); } // lobby is held: wait with it
     toast(m.resumed ? `RECONNECTED .ᐟ YOU ARE PLAYER ${m.n}` : `JOINED ${code.toUpperCase()} .ᐟ YOU ARE PLAYER ${m.n}`, true);
@@ -13564,6 +13578,8 @@ function netClientData(m, conn, peer, code) {
     // and the same crack land here, so the fight LOOKS identical on every screen
     _fbiFrom.set(m.a[0], m.a[1], m.a[2]); _fbiTo.set(m.a[3], m.a[4], m.a[5]);
     spawnTracer(_fbiFrom, _fbiTo);
+    const ddx = _fbiTo.x - _fbiFrom.x, ddz = _fbiTo.z - _fbiFrom.z, dl = Math.hypot(ddx, ddz) || 1;
+    spawnBulletHole(_fbiTo.x, _fbiTo.y, _fbiTo.z, -ddx / dl, -ddz / dl, 0.14);
     if (Math.hypot(m.a[0] - player.pos.x, m.a[2] - player.pos.z) < 32)
       play3d(m.a[0], m.a[2], () => SFX.shoot(WEAPONS[m.w] || WEAPONS.rifle));
   } else if (m.t === 'pkGive') {
