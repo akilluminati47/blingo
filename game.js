@@ -5491,7 +5491,18 @@ let tabTitle = null;
 // the lobby code runs — a later const would still be in its temporal dead zone at that point.
 const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
   ghosts: new Map(), actors: new Map(), recruits: new Map(), txT: 0, zid: 0, pkid: 0, scan: null, leaving: false, barSig: '',
-  hostPaused: false, hostGoreHorde: false };
+  hostPaused: false, hostGoreHorde: false, hitQ: [], shotQ: [] };
+// a melee sweep can flash a whole crowd of zombies in one frame — a jump-attack combo into a
+// mob used to fire one immediate netBroadcast PER zombie hit. That's fine for a single gunshot,
+// but a burst of them backs up the same reliable ordered channel the authoritative world
+// snapshot rides (see netHostTick's backpressure comment) and the snapshot gets skipped tick
+// after tick until the buffer drains — which is what read as "zombies stay alive and mob the
+// client for several seconds, then everything snaps back." These are purely cosmetic flashes
+// (the real state already rides the 10Hz snapshot), so they're queued and flushed as one small
+// batch alongside it instead of racing ahead of it.
+function netQueueHit(i, g) {
+  if (net.hitQ.length < 60) net.hitQ.push({ i, g }); // hard cap: a runaway swarm-gib never grows this unbounded
+}
 // DEBUG: a single bad (NaN/undefined) network value written into a lerp target is permanent —
 // lerp(a, b, t) with a non-finite b returns NaN forever after, and a non-finite a poisons every
 // future lerp regardless of b. That reads in-game as an actor silently going invisible and
@@ -8108,7 +8119,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
     // the shrug is the same bright invuln green on every boss — one signal, learned once
     flashBlob(z.blob, FLASH_GREEN);
     spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, 0x3ae06a, 3, 2.5, 0.3);
-    if (net.role === 'host' && z.nid) netBroadcast({ t: 'hit', i: z.nid, g: 1 });
+    if (net.role === 'host' && z.nid) netQueueHit(z.nid, 1);
     return;
   }
   // poking the Two Horned One is a mistake: any hit wakes him and sparks a lunge
@@ -8140,7 +8151,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
 
   z.hp -= dmg;
   flashBlob(b);
-  if (net.role === 'host' && z.nid) netBroadcast({ t: 'hit', i: z.nid, g: 0 });
+  if (net.role === 'host' && z.nid) netQueueHit(z.nid, 0);
   // a round through the Rotten One's open chest: the heart itself sprays — the "you found
   // the spot" read, distinct from the ordinary body-shot blood below
   if (opts.weakspot && b.rotHeart) {
@@ -13047,11 +13058,12 @@ function wireHostConn(conn) {
             if (dn) toast(`P${c.netP} ${c.data.name.toUpperCase()} DOWN .ᐟ`, true);
           }
         }
+        // a mob melee kill reports every zombie it hit in one batch riding this same pose
+        // packet instead of a flurry of separate messages — see netClientShot/netQueueHit
+        if (m.sb) for (const s of m.sb) netApplyClientShot(s);
       }
     } else if (m.t === 'shot') {
-      const z = zombies.find(zz => zz.nid === m.id);
-      if (z) { damageZombie(z, m.d, m.kx, m.kz, 2, { weapon: WEAPONS[m.wid], dist: m.ds, isHead: m.hd }); if (!net._shotLog) { net._shotLog = true; console.log('[host] received client shot, zombie found:', !!z, 'nid:', m.id); } }
-      else if (!net._shotNF) { net._shotNF = true; console.warn('[host] client shot: zombie NOT found for nid:', m.id, 'total zombies:', zombies.length); }
+      netApplyClientShot(m);
     } else if (m.t === 'pew') {
       // a client fired: draw their round here, let it ring in the host's world (blind
       // zombies home on it like any gunshot), and relay it to everyone else's screen
@@ -13238,6 +13250,13 @@ function netFreeCousin(conn, gone) {
   updatePauseLobby();   // and tick back down the moment they leave, pause menu open or not
 }
 // 10Hz world snapshot to every client
+// applies one client-reported zombie hit on the host's authoritative world — shared by the
+// batched sb[] riding the pose packet and the standalone legacy 'shot' message
+function netApplyClientShot(m) {
+  const z = zombies.find(zz => zz.nid === m.id);
+  if (z) { damageZombie(z, m.d, m.kx, m.kz, 2, { weapon: WEAPONS[m.wid], dist: m.ds, isHead: m.hd }); if (!net._shotLog) { net._shotLog = true; console.log('[host] received client shot, zombie found:', !!z, 'nid:', m.id); } }
+  else if (!net._shotNF) { net._shotNF = true; console.warn('[host] client shot: zombie NOT found for nid:', m.id, 'total zombies:', zombies.length); }
+}
 function netHostTick(dt) {
   netSweepHolds();   // let go of any reserved seat whose reconnect window has lapsed
   net.txT -= dt;
@@ -13323,6 +13342,8 @@ function netHostTick(dt) {
       ph: cc.greetT ? (bluga.camT < cc.greetT + 2.2 ? 1 : 2) : 0 };
   }
   const INTEREST = Math.max(150, (scene.fog && scene.fog.far || 0) + 50);
+  // ride the same throttled, backpressure-guarded pipe as the world state — see netQueueHit
+  if (net.hitQ.length) base.hb = net.hitQ;
   for (const conn of net.conns) {
     try {
       const dc = conn.dataChannel;
@@ -13336,6 +13357,7 @@ function netHostTick(dt) {
     } catch (e) {}
   }
   base.zb = null; base.pk = null; base.cr = null; // never let the last client's filtered lists linger on the shared object
+  if (net.hitQ.length) net.hitQ = []; // flushed (or dropped for a congested conn, same as zb/pk/cr above) either way
 }
 function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az, sl, gr, dk, ar2) {
   const R = v => Math.round(v * 20) / 20;
@@ -13742,6 +13764,13 @@ function netClientSkinSwap(m) {
 function netApplySnapshot(m) {
   if (Math.abs(m.tm - game.time) > 1) game.time = m.tm;
   if (m.k !== game.kills) { game.kills = m.k; hud.kills.textContent = m.k; }
+  // the coalesced batch of zombie-hit flashes riding this tick (see netQueueHit) — same
+  // cosmetic flash the old per-hit 'hit' message drove, just delivered without flooding
+  // the channel the authoritative state below rides on
+  if (m.hb) for (const h of m.hb) {
+    const g = net.ghosts.get(h.i);
+    if (g) flashBlob(g.blob, h.g ? FLASH_GREEN : FLASH_RED);
+  }
   // the host owns the clock and the weather dice; we tick locally and correct on drift,
   // and glide into the host's weather through the same 20s crossfade it used
   if (m.ck != null && Math.abs(m.ck - (game.clock ?? 0)) > 0.15) game.clock = m.ck;
@@ -14264,7 +14293,7 @@ function netClientTick(dt) {
     if (th && !net.thPrev && TRADE_EMOTE >= 0) fireEmote(TRADE_EMOTE);
     net.thPrev = th;
     try {
-      net.conns[0].send({ t: 'p', x: player.pos.x, z: player.pos.z, y: player.pos.y,
+      const pm = { t: 'p', x: player.pos.x, z: player.pos.z, y: player.pos.y,
         yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp), th,
         ar: Math.round(playerBlob.arms[playerBlob.gunArm].rotation.x * 100) / 100,
         az: Math.round((playerBlob.arms[playerBlob.gunArm].rotation.z || 0) * 100) / 100,
@@ -14272,7 +14301,14 @@ function netClientTick(dt) {
         gs: (player.giantScale || 1) > 1.02 ? Math.round(player.giantScale * 20) / 20 : undefined,
         dn: player.downed ? 1 : 0,
         sl: player.slideT > 0 ? 1 : 0, gr: player.grounded ? 1 : 0,
-        dk: player.dropKick ? 1 : 0 });
+        dk: player.dropKick ? 1 : 0,
+        // an armed jump swing (or its post-swing hold) needs to survive the airborne tuck
+        // on OTHER screens the same way it survives it locally (see the swingArm guard in
+        // updatePlayer) — otherwise a mid-air weapon swing reads as nothing but its SFX
+        mh: (player.weapon.melee && player.weapon.id !== 'fists' && (player.swingT > 0 || player.meleeHoldT > 0)) ? 1 : 0 };
+      // any zombie hits landed since the last tick ride along in one batch — see netClientShot
+      if (net.shotQ.length) { pm.sb = net.shotQ; net.shotQ = []; }
+      net.conns[0].send(pm);
     } catch (e) {}
   }
 }
@@ -14365,10 +14401,14 @@ function netClientShot(z, dmg, kx, kz, opts) {
     spawnBlood(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, 1);
     flashBlob(z.blob);
   }
-  try {
-    net.conns[0].send({ t: 'shot', id: z.nid, d: dmg, hd: !!opts.isHead, kx, kz,
-      ds: opts.dist || 0, wid: (opts.weapon || {}).id });
-  } catch (e) {}
+  // a melee sweep (especially a jump-attack combo landing on a mob) can report several
+  // zombies in one frame; queued and flushed together on netClientTick's normal 15Hz beat
+  // instead of one immediate send apiece, so a mass-kill can't back up the reliable ordered
+  // channel this shares with our own position stream (see netQueueHit for the matching
+  // host-side fix — same channel-congestion symptom, opposite direction)
+  if (net.shotQ.length < 60) {
+    net.shotQ.push({ id: z.nid, d: dmg, hd: !!opts.isHead, kx, kz, ds: opts.dist || 0, wid: (opts.weapon || {}).id });
+  }
 }
 // tear down whatever multiplayer state exists (safe to call any time)
 function netLeave() {
@@ -14456,7 +14496,13 @@ function netPoseCompanion(c, dt) {
   } else if (p && p.sl) { b.wob.rotation.x = -0.85; }
   else { if (b.wob.rotation.x) b.wob.rotation.x = 0; }
   if (p && p.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
-  if (p && !p.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; b.arms[b.gunArm].rotation.x = -2.4; }
+  if (p && !p.gr) {
+    b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3;
+    b.arms[b.offArm].rotation.x = -2.4;
+    // mirrors the local player's own airborne-tuck guard (updatePlayer): never stomp a live
+    // armed jump swing/hold, or the weapon's jump-attack animation never reaches other screens
+    if (!p.mh) b.arms[b.gunArm].rotation.x = -2.4;
+  }
   // dropkick outranks the generic airborne tuck above — same fixed pose the local player uses
   if (p && p.dk) {
     b.wob.rotation.x = -0.75;
