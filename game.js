@@ -5704,6 +5704,7 @@ function hurtCompanion(c, dmg) {
   c.lastHurtT = game.time;
   flashBlob(c.blob);
   if (net.role === 'host') netBroadcast({ t: 'hit', c: c.data.id, g: 0 });
+  spawnBulletHole(c.pos.x, (c.y || 0) + 0.95, c.pos.z, 0, 0, 0.12);
   spawnDamageNumber(c.pos.x, (c.y || 0) + 1.8, c.pos.z, dmg, '#' + c.data.color.toString(16).padStart(6, '0'));
   if (c.hp <= 0) {
     // downed, not dead — but they stay down until you walk over and pick them up
@@ -5888,6 +5889,7 @@ function hurtPlayer(dmg, awayX, awayZ) {
   SFX.hurt();
   flashBlob(playerBlob);
   if (net.role === 'host') netBroadcast({ t: 'hit', p: 1, g: 0 });
+  spawnBulletHole(player.pos.x, player.pos.y + 0.95, player.pos.z, awayX / (d || 1), awayZ / (d || 1), 0.14);
   rumble(220, 0.9, 0.6);
   shakeAmp = Math.max(shakeAmp, 0.1);
   spawnParticles(player.pos.x, player.pos.y + 1, player.pos.z, 0xff5b5b, 5, 2.5, 0.4);
@@ -7914,6 +7916,12 @@ function fireWeapon() {
     for (const hit of line) {
       anyHit = true;
       const dHit = hit.t;
+      // impact point in world space — a small dark bullet hole at every body hit
+      const hx = _from.x + rdx * dHit, hy = _from.y + rdy * dHit, hz = _from.z + rdz * dHit;
+      if (!hit.crow) {
+        const bhSize = (w.id === 'magnum' || w.id === 'sniper') ? 0.24 : (w.id === 'shotgun' || w.id === 'rifle') ? 0.16 : 0.10;
+        spawnBulletHole(hx, hy + curveDrop(hx, hz), hz, -rdx, -rdz, bhSize);
+      }
       let died;
       if (hit.crow) {
         if (net.role === 'client') {
@@ -8115,6 +8123,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
   z.hp -= dmg;
   flashBlob(b);
   if (net.role === 'host' && z.nid) netBroadcast({ t: 'hit', i: z.nid, g: 0 });
+  spawnBulletHole(z.pos.x, b.root.position.y + 0.9 * z.scale, z.pos.z, -kx, -kz, 0.14);
   // a round through the Rotten One's open chest: the heart itself sprays — the "you found
   // the spot" read, distinct from the ordinary body-shot blood below
   if (opts.weakspot && b.rotHeart) {
@@ -14214,6 +14223,7 @@ function netClientShot(z, dmg, kx, kz, opts) {
     spawnDamageNumber(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.45 : 0.95) * z.scale, z.pos.z, dmg);
     spawnBlood(z.pos.x, z.blob.root.position.y + (opts.isHead ? 1.25 : 0.75) * z.scale, z.pos.z, kx, kz, 1);
     flashBlob(z.blob);
+    spawnBulletHole(z.pos.x, z.blob.root.position.y + 0.9 * z.scale, z.pos.z, -kx, -kz, 0.14);
   }
   try {
     net.conns[0].send({ t: 'shot', id: z.nid, d: dmg, hd: !!opts.isHead, kx, kz,
