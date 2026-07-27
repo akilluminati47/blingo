@@ -8614,6 +8614,8 @@ function openCrate(cr) {
   // and the crate leaves the stream on the next snapshot
   if (cr.netGhost && net.role === 'client') {
     try { net.conns[0].send({ t: 'crateOpen', i: cr.nid }); } catch(e) {}
+    cr.opened = true; cr.glow.visible = false; cr.trim.visible = false;
+    SFX.crate();
     return;
   }
   cr.opened = true;
@@ -12357,7 +12359,7 @@ function updateFountain(dt) {
 function updateCrates(dt) {
   for (let i = allCrates.length - 1; i >= 0; i--) {
     const cr = allCrates[i];
-    if (cr.netGhost) continue; // ghost crates are managed by the snapshot stream
+    if (cr.netGhost && !cr.opened) continue; // ghost crates are managed by the snapshot stream
     cr.t += dt;
     if (!cr.opened) {
       const p = animateLootGlow(cr.glow, game.time);
@@ -13209,7 +13211,7 @@ function netHostTick(dt) {
   const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
     playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed,
     playerBlob.arms[playerBlob.gunArm].rotation.x, player.giantScale || 1,
-    playerBlob.arms[playerBlob.gunArm].rotation.z)];
+    playerBlob.arms[playerBlob.gunArm].rotation.z, player.slideT > 0, player.grounded)];
   // the remaining cousins still waiting to be found: streamed so every client sees the same
   // recruit beacons the host does and can walk one up themselves (netFindNearRecruit)
   const rc = [];
@@ -13221,7 +13223,7 @@ function netHostTick(dt) {
     if (!c.recruited) continue;
     ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed,
       c.blob.arms[c.blob.gunArm].rotation.x, c.netGs || 1,
-      c.blob.arms[c.blob.gunArm].rotation.z));
+      c.blob.arms[c.blob.gunArm].rotation.z, c.slideT > 0, c.grounded));
   }
   const zb = [];
   const shielded = bossShielded();   // its wave guards are up: the boss is invuln right now
@@ -13293,15 +13295,16 @@ function netHostTick(dt) {
   }
   base.zb = null; base.pk = null; base.cr = null; // never let the last client's filtered lists linger on the shared object
 }
-function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az) {
+function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az, sl, gr) {
   const R = v => Math.round(v * 20) / 20;
   const key = p ? 'p' + p : 'ai' + cid;
   const mv = Math.hypot(x - (net['_lx' + key] || x), z - (net['_lz' + key] || z)) > 0.03 ? 1 : 0;
   net['_lx' + key] = x; net['_lz' + key] = z;
   return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv,
-    ar: ar == null ? undefined : Math.round(ar * 100) / 100, // gun-arm angle, finer grain than position
-    az: az == null ? undefined : Math.round(az * 100) / 100, // melee roundhouse sweep
-    gs: gs && gs > 1.02 ? Math.round(gs * 20) / 20 : undefined }; // chili-giant scale: absent = small
+    ar: ar == null ? undefined : Math.round(ar * 100) / 100,
+    az: az == null ? undefined : Math.round(az * 100) / 100,
+    sl: sl ? 1 : 0, gr: gr ? 1 : 0,
+    gs: gs && gs > 1.02 ? Math.round(gs * 20) / 20 : undefined };
 }
 
 // --- reconnect: a client that drops (phone sleeps, tunnel blinks) soft-pauses and dials
@@ -13829,7 +13832,7 @@ function netApplySnapshot(m) {
     // another player just hit the floor: the lobby callout (0-check skips fresh ghosts,
     // so joining mid-rescue doesn't announce an old fall)
     if (a.p && a.dn && g.dn === 0) toast(`P${a.p} ${g.data.name.toUpperCase()} DOWN .ᐟ`, true);
-    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar; g.taz = a.az;
+    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar; g.taz = a.az; g.sl = a.sl; g.gr = a.gr;
     g.tgs = a.gs || 1; // chili-giant scale target: the ghost grows/shrinks toward it with the melt blur
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
@@ -13979,7 +13982,9 @@ function netClientWorldTick(dt) {
       b.arms[1].rotation.x = -2.25 - claw * 0.55;
       b.legs[0].rotation.x = 0.3 + claw * 0.18;
       b.legs[1].rotation.x = 0.3 - claw * 0.18;
-    } else { b.wob.rotation.x = 0; b.wob.scale.y = 1 + idleBreath; }
+    } else { b.wob.rotation.x = g.sl ? 0.85 : 0; b.wob.scale.y = 1 + idleBreath; }
+    if (g.sl) { b.legs[0].rotation.x = -1.15; b.legs[1].rotation.x = -0.75; b.arms[b.offArm].rotation.x = -1.9; }
+    if (!g.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
     // chili giants on other screens: ease the ghost toward the streamed scale, wearing the
     // splash-melt blur while the size is actually changing (grow AND the shrink back)
     const gsNow = b.root.scale.x, gsTgt = g.tgs || 1;
@@ -14144,12 +14149,11 @@ function netClientTick(dt) {
     try {
       net.conns[0].send({ t: 'p', x: player.pos.x, z: player.pos.z, y: player.pos.y,
         yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp), th,
-        // the gun arm's actual angle — full vertical aim, kick included — so every other
-        // screen sees this hero pointing exactly where they point
         ar: Math.round(playerBlob.arms[playerBlob.gunArm].rotation.x * 100) / 100,
         az: Math.round((playerBlob.arms[playerBlob.gunArm].rotation.z || 0) * 100) / 100,
         gs: (player.giantScale || 1) > 1.02 ? Math.round(player.giantScale * 20) / 20 : undefined,
-        dn: player.downed ? 1 : 0 });
+        dn: player.downed ? 1 : 0,
+        sl: player.slideT > 0 ? 1 : 0, gr: player.grounded ? 1 : 0 });
     } catch (e) {}
   }
 }
@@ -14325,6 +14329,8 @@ function netPoseCompanion(c, dt) {
     b.legs[1].rotation.x = 0.3 - claw * 0.18;
     if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
   } else { if (b.wob.rotation.x) b.wob.rotation.x = 0; b.wob.scale.y = 1 + idleBreath; }
+  if (p && p.sl) { b.wob.rotation.x = 0.85; b.legs[0].rotation.x = -1.15; b.legs[1].rotation.x = -0.75; b.arms[b.offArm].rotation.x = -1.9; }
+  if (p && !p.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
   // a client that ate the chili: the host's view of them grows/shrinks through the same
   // melt blur, driven off the gs field riding their pose stream
   const cgNow = b.root.scale.x, cgTgt = c.netGs || 1;
