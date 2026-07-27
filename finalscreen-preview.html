@@ -52,11 +52,11 @@
   /* chips: slide in during tally */
   #tallywrap .dchip { opacity:0; transform:translateY(14px); transition:opacity .45s ease, transform .45s ease; }
   #tallywrap .dchip.in { opacity:1; transform:translateY(0); }
-  /* buttons + wait: zero-height until .expand opens them */
-  #tallywrap .fsbtns { display:flex; margin-top:8px; border:2px solid var(--hero); border-radius:14px;
+  /* buttons + wait: zero-height until .expand opens them, margins only when expanded */
+  #tallywrap .fsbtns { display:flex; margin-top:0; border:2px solid var(--hero); border-radius:14px;
     overflow:hidden; width:min(430px, 84vw); pointer-events:none;
-    opacity:0; max-height:0; transition:opacity .5s ease, max-height .01s .5s; }
-  #tallywrap.expand .fsbtns { max-height:60px; transition:opacity .5s ease, max-height .01s 0s; opacity:1; pointer-events:auto; }
+    opacity:0; max-height:0; transition:opacity .5s ease, max-height .01s .5s, margin-top .01s .5s; }
+  #tallywrap.expand .fsbtns { margin-top:8px; max-height:60px; transition:opacity .5s ease, max-height .01s 0s, margin-top .01s 0s; }
   #tallywrap.done .fsbtns { opacity:1; pointer-events:auto; }
   #tallywrap .fsbtns button { flex:1; pointer-events:auto; cursor:pointer; background:rgba(255,255,255,.05);
     border:none; color:#eee; font-size:15px; font-weight:700; letter-spacing:2px; padding:14px 0; }
@@ -64,11 +64,11 @@
   #tallywrap .fsbtns button:hover { background:var(--hero); color:#10131a; }
   #tallywrap .fsbtns button.waithost { opacity:.45; pointer-events:none; }
   /* wait message */
-  #tallywrap .fswait { margin-top:8px; font-size:14px; color:var(--hero);
+  #tallywrap .fswait { margin-top:0; font-size:14px; color:var(--hero);
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     animation:waitPulse 1.8s ease-in-out infinite;
-    opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s; }
-  #tallywrap.expand .fswait { max-height:2em; transition:opacity .5s ease, max-height .01s 0s; }
+    opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s, margin-top .01s .5s; }
+  #tallywrap.expand .fswait { margin-top:8px; max-height:2em; transition:opacity .5s ease, max-height .01s 0s, margin-top .01s 0s; }
   #tallywrap.done .fswait:not(.hidden) { opacity:1; }
   @keyframes waitPulse { 0%,100%{opacity:.15} 50%{opacity:.95} }
 
