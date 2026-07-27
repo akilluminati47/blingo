@@ -13452,7 +13452,11 @@ function netClientData(m, conn, peer, code) {
       const hb = buildBlob({ color: hd.color, gunHand: m.hc === 'blondie' ? 'left' : 'right', hands: cousinHands(m.hc) });
       hb.root.position.set(m.hx, groundHeight(m.hx, m.hz), m.hz);
       scene.add(hb.root);
-      net.actors.set('p1', { blob: hb, wp: '', data: hd, p: 1, walk: 0, tx: m.hx, ty: groundHeight(m.hx, m.hz), tz: m.hz });
+      net.actors.set('p1', { blob: hb, wp: '', data: hd, p: 1, walk: 0, hp: 100,
+        tx: m.hx, ty: groundHeight(m.hx, m.hz), tz: m.hz, tgs: 1 });
+      console.log('[welcome] host actor created at', m.hx, m.hz, 'cousin:', m.hc, 'actors total:', net.actors.size);
+    } else {
+      console.warn('[welcome] missing hc/hx/hz — host actor NOT seeded', { hc: m.hc, hx: m.hx, hz: m.hz });
     }
     applyHostNotches(m.zs, m.ls, m.hg);   // the host's spawn dials + gore-horde land on our greyed rows
     if (m.hp) { net.hostPaused = true; pauseGame(); } // lobby is held: wait with it
@@ -13798,6 +13802,8 @@ function netApplySnapshot(m) {
   if (m.cct !== undefined && m.cct !== net._cct) { net._cct = m.cct; applyChiliTaken(m.cct); }
   updateQuotaHud();
   applyHostNotches(m.zs, m.ls, m.hg); // and the host's spawn dials + gore-horde, in case a change slipped past
+  // DEBUG
+  if (!net._snapLogged) { net._snapLogged = true; console.log('[snap] first snapshot received, ac:', m.ac ? m.ac.length : 0, 'zb:', m.zb ? m.zb.length : 0, 'actors:', net.actors.size, 'ghosts:', net.ghosts.size); }
   const seenA = new Set();
   for (const a of m.ac) {
     if (a.p === net.playerNum) continue;          // that's me
@@ -13822,6 +13828,7 @@ function netApplySnapshot(m) {
       g = { blob: buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right', hands: cousinHands(a.c) }), wp: '', data: cd, p: a.p, walk: 0 };
       scene.add(g.blob.root);
       net.actors.set(key, g);
+      if (!net._actLogged) { net._actLogged = true; console.log('[snap] first actor created key:', key, 'p:', a.p, 'cousin:', a.c, 'at:', a.x, a.z); }
     }
     if (a.wp !== g.wp) {
       g.wp = a.wp;
@@ -13898,7 +13905,8 @@ function netApplySnapshot(m) {
         purple: !!zs.pu, green: !!zs.gr, goreHorn: !!zs.gh, fbi: !!zs.fb, bluga: !!zs.bg,
         rotHe: !!zs.he, rotRb: !!zs.rb, rotRr: !!zs.rr, rotPb: !!zs.pb };
       net.ghosts.set(zs.i, g);
-      zombies.push(g);              // lives in the same list so shots + crosshair see it
+      zombies.push(g);
+      if (!net._zlog) { net._zlog = true; console.log('[snap] first zombie ghost created nid:', zs.i, 'type:', zs.fb ? 'fbi' : zs.bo ? 'boss' : 'walker', 'total ghosts:', net.ghosts.size, 'total zombies array:', zombies.length); }
     }
     g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st; g.sh = !!zs.sh;
     // late rot: a pistol round can hang an eye mid-fight on the host, and a shotgun kill
@@ -14161,7 +14169,7 @@ function netClientTick(dt) {
 function netRefreshClientBars() {
   const rows = [];
   for (const [key, g] of net.actors) rows.push({ key, g });
-  rows.sort((a, b) => (a.g.p || 99) - (b.g.p || 99));
+  rows.sort((a, b) => (a.g.p || 0) - (b.g.p || 0)); // NPCs on top, then P1 P2 P3...
   const sig = rows.map(r => r.key + r.g.data.id + (r.g.wp || '')).join('|'); // cousin id too: skin trades relabel the rows
   if (sig !== net.barSig) {
     net.barSig = sig;
