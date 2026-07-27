@@ -10970,8 +10970,8 @@ function finishFinale() {
   document.body.classList.remove('playing');
   stopGameMusic();
   if (document.pointerLockElement === canvas) document.exitPointerLock();
-  // everything is already in the DOM — just fade in title, lore, and buttons
-  finalStatsEl.classList.add('done');
+  // everything is already in the DOM — set button states BEFORE .done so the
+  // wait message fades in smoothly with the buttons (or stays hidden for host)
   const playBtn = finalStatsEl.querySelector('#fsplaybtn');
   const lobbyActive = !!net.role && (net.role === 'host' || net.conns.length > 0);
   if (playBtn) {
@@ -10980,6 +10980,7 @@ function finishFinale() {
   }
   const waitEl = finalStatsEl.querySelector('.fswait');
   if (waitEl) waitEl.classList.toggle('hidden', !lobbyActive || net.role !== 'client');
+  finalStatsEl.classList.add('done');
   tabTitle && tabTitle.unlock();
 }
 function restartFromFinale() {

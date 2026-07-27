@@ -210,10 +210,14 @@
   function showTally(role) {
     resetAll();
     talWrap.style.display = 'flex';
-    // preset buttons for the role
-    if (role === 'client') { talPlay.textContent = 'PLAY . .'; talPlay.classList.add('waithost'); }
-    else { talPlay.textContent = 'PLAY'; talPlay.classList.remove('waithost'); }
-    talWait.classList.add('hidden');
+    if (role === 'client') {
+      talPlay.textContent = 'PLAY . .'; talPlay.classList.add('waithost');
+      // no .hidden — the wait message stays in flow, just opacity:0 / max-height:0,
+      // so it expands smoothly with the buttons instead of popping in late
+    } else {
+      talPlay.textContent = 'PLAY'; talPlay.classList.remove('waithost');
+      talWait.classList.add('hidden');
+    }
     const reveal = [1600, 3100, 4600, 6100];
     const countDur = 1100;
     const started = performance.now();
@@ -236,7 +240,7 @@
         talWrap.classList.add('expand'); // 7.2s
       }
       if (t > 8100 && !fadeEl.classList.contains('show')) fadeEl.classList.add('show');
-      if (t > 9000) { talWrap.classList.add('done'); if (role === 'client') talWait.classList.remove('hidden'); }
+      if (t > 9000) talWrap.classList.add('done');
       if (t < 11000) tallyRaf = requestAnimationFrame(tick);
     }
     tallyRaf = requestAnimationFrame(tick);
