@@ -13979,12 +13979,14 @@ function netClientWorldTick(dt) {
     b.root.position.z = lerp(b.root.position.z, g.tz ?? b.root.position.z, k);
     b.root.position.y = g.ty ?? b.root.position.y;
     b.root.rotation.y = angLerp(b.root.rotation.y, g.tyw || 0, k);
-    g.walk += dt * (g.mv ? 10 : 1.5);
-    const swing = Math.sin(g.walk) * (g.mv ? 0.8 : 0.06);
+    g.walk += dt * (g.mv ? 10 : 2);
+    const swing = Math.sin(g.walk) * (g.mv ? 0.85 : 0.06) + (g.mv ? 0 : Math.sin(performance.now() * 0.0011) * 0.05);
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
-    b.arms[b.offArm].rotation.x = -swing * 0.7;
-    // idle: a slow breathing wobble so standing players don't look frozen
-    const idleBreath = Math.sin(performance.now() * 0.0015 + g.walkPhase) * 0.022;
+    b.arms[b.offArm].rotation.x = -swing * 0.8;
+    // idle breathing wobble — same squash-and-stretch as the local player
+    const breathe = Math.sin(performance.now() * 0.002 + g.walkPhase) * 0.03;
+    const wobble = g.mv ? Math.sin(g.walk * 2) * 0.045 : breathe;
+    b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
     // ranged arms ride the streamed gun-arm angle (eased over the 10Hz snapshots), so a
     // hero aiming at the sky here aims at the sky on every screen — not a levelled prop
     g.arS = lerp(g.arS ?? -Math.PI / 2, g.tar ?? -Math.PI / 2, 1 - Math.exp(-14 * dt));
@@ -13999,8 +14001,9 @@ function netClientWorldTick(dt) {
       b.arms[1].rotation.x = -2.25 - claw * 0.55;
       b.legs[0].rotation.x = 0.3 + claw * 0.18;
       b.legs[1].rotation.x = 0.3 - claw * 0.18;
-    } else { b.wob.rotation.x = g.sl ? 0.85 : 0; b.wob.scale.y = 1 + idleBreath; }
-    if (g.sl) { b.legs[0].rotation.x = -1.15; b.legs[1].rotation.x = -0.75; b.arms[b.offArm].rotation.x = -1.9; }
+    } else if (g.sl) { b.wob.rotation.x = -0.85; }
+    else { b.wob.rotation.x = 0; }
+    if (g.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
     if (!g.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
     // chili giants on other screens: ease the ghost toward the streamed scale, wearing the
     // splash-melt blur while the size is actually changing (grow AND the shrink back)
@@ -14322,14 +14325,16 @@ function netPoseCompanion(c, dt) {
     c.pos.z = lerp(c.pos.z, p.z, k);
     c.y = p.y; c.yaw = p.yw;
     if (p.wp && WEAPONS[p.wp] && (c.weapon || {}).id !== p.wp) setCompanionWeapon(c, p.wp);
-    c.walkPhase += dt * (p.mv ? 10 : 1.5);
+    c.walkPhase += dt * (p.mv ? 10 : 2);
   }
-  const swing = Math.sin(c.walkPhase) * (p && p.mv ? 0.8 : 0.06);
+  const swing = Math.sin(c.walkPhase) * (p && p.mv ? 0.85 : 0.06) + (p && p.mv ? 0 : Math.sin(performance.now() * 0.0011) * 0.05);
   b.root.position.set(c.pos.x, c.y || groundHeight(c.pos.x, c.pos.z), c.pos.z);
   b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
   b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
-  b.arms[b.offArm].rotation.x = -swing * 0.7;
-  const idleBreath = Math.sin(performance.now() * 0.0015 + c.walkPhase) * 0.022;
+  b.arms[b.offArm].rotation.x = -swing * 0.8;
+  const breathe = Math.sin(performance.now() * 0.002 + c.walkPhase) * 0.03;
+  const wobble = (p && p.mv) ? Math.sin(c.walkPhase * 2) * 0.045 : breathe;
+  b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
   // their streamed gun-arm angle, eased over the 15Hz stream: real x/y aim, not a levelled prop
   c.arS = lerp(c.arS ?? -Math.PI / 2, p && p.ar != null ? p.ar : -Math.PI / 2, 1 - Math.exp(-14 * dt));
   c.azS = lerp(c.azS ?? 0, p && p.az != null ? p.az : 0, 1 - Math.exp(-14 * dt));
@@ -14344,8 +14349,9 @@ function netPoseCompanion(c, dt) {
     b.legs[0].rotation.x = 0.3 + claw * 0.18;
     b.legs[1].rotation.x = 0.3 - claw * 0.18;
     if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
-  } else { if (b.wob.rotation.x) b.wob.rotation.x = 0; b.wob.scale.y = 1 + idleBreath; }
-  if (p && p.sl) { b.wob.rotation.x = 0.85; b.legs[0].rotation.x = -1.15; b.legs[1].rotation.x = -0.75; b.arms[b.offArm].rotation.x = -1.9; }
+  } else if (p && p.sl) { b.wob.rotation.x = -0.85; }
+  else { if (b.wob.rotation.x) b.wob.rotation.x = 0; }
+  if (p && p.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
   if (p && !p.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
   // a client that ate the chili: the host's view of them grows/shrinks through the same
   // melt blur, driven off the gs field riding their pose stream
