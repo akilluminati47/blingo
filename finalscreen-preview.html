@@ -129,7 +129,7 @@
     <button id="talPlay">PLAY</button>
     <button id="talQuit">QUIT TO MENU</button>
   </div>
-  <p class="fswait hidden" id="talWait">. . waiting for Player 1 .ᐟ</p>
+  <p class="fswait" id="talWait">. . waiting for Player 1 .ᐟ</p>
 </div>
 
 <div id="fadeback"></div>
@@ -212,11 +212,9 @@
     talWrap.style.display = 'flex';
     if (role === 'client') {
       talPlay.textContent = 'PLAY . .'; talPlay.classList.add('waithost');
-      // no .hidden — the wait message stays in flow, just opacity:0 / max-height:0,
-      // so it expands smoothly with the buttons instead of popping in late
+      talWait.classList.remove('hidden'); // stay in flow; expand + fade with buttons
     } else {
       talPlay.textContent = 'PLAY'; talPlay.classList.remove('waithost');
-      talWait.classList.add('hidden');
     }
     const reveal = [1600, 3100, 4600, 6100];
     const countDur = 1100;
@@ -255,7 +253,6 @@
     if (role === 'host') {
       talPlay.textContent = 'PLAY';
       talPlay.classList.remove('waithost');
-      talWait.classList.add('hidden');
     } else {
       talPlay.textContent = 'PLAY . .';
       talPlay.classList.add('waithost');
