@@ -10953,10 +10953,9 @@ function updateCelebration(dt) {
   for (const c of companions) {
     if (c.recruited && !c.downed && c.grounded && Math.random() < dt * 2.5) { c.vy = 5.5 + Math.random() * 3; c.grounded = false; }
   }
-  // after the last chip appears, the wrapper expands top then bottom so the
-  // title + lore and buttons fade into view without any layout jump
-  if (game.celebrateT <= 2.8) finalStatsEl.classList.add('expand-top');
-  if (game.celebrateT <= 1.8) finalStatsEl.classList.add('expand-bottom');
+  // chips are done revealing — now grow the wrapper top and bottom at the same time
+  // so the title + lore and buttons + wait message all get their room together
+  if (game.celebrateT <= 2.0) finalStatsEl.classList.add('expand');
   if (game.celebrateT <= 1) fadeEl.classList.add('show');
   if (game.celebrateT <= 0) {
     finishFinale();
