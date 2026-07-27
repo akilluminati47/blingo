@@ -13005,7 +13005,8 @@ function wireHostConn(conn) {
       }
     } else if (m.t === 'shot') {
       const z = zombies.find(zz => zz.nid === m.id);
-      if (z) damageZombie(z, m.d, m.kx, m.kz, 2, { weapon: WEAPONS[m.wid], dist: m.ds, isHead: m.hd });
+      if (z) { damageZombie(z, m.d, m.kx, m.kz, 2, { weapon: WEAPONS[m.wid], dist: m.ds, isHead: m.hd }); if (!net._shotLog) { net._shotLog = true; console.log('[host] received client shot, zombie found:', !!z, 'nid:', m.id); } }
+      else if (!net._shotNF) { net._shotNF = true; console.warn('[host] client shot: zombie NOT found for nid:', m.id, 'total zombies:', zombies.length); }
     } else if (m.t === 'pew') {
       // a client fired: draw their round here, let it ring in the host's world (blind
       // zombies home on it like any gunshot), and relay it to everyone else's screen
