@@ -312,8 +312,17 @@ function build(){
  *  Open / close — the TO THE BLOCK sign returns you to the picker    *
  * ------------------------------------------------------------------ */
 const isOpen = () => !screenEl.classList.contains('hidden');
+let prevScreenId = null; // whichever screen was showing behind the overlay, restored on close
 function openPolicies(){
   build();
+  // hide the screen behind it — #policiesscreen is a translucent panel over the shared
+  // background video, same as #startscreen/#lobbyscreen, so leaving one of those visible
+  // just stacks two see-through layers instead of swapping to the policies page
+  prevScreenId = ['startscreen', 'lobbyscreen'].find(id => {
+    const el = document.getElementById(id);
+    return el && !el.classList.contains('hidden');
+  }) || null;
+  if (prevScreenId) document.getElementById(prevScreenId).classList.add('hidden');
   screenEl.classList.remove('hidden');
   screenEl.scrollTop = 0;
   navRow = -1; navCol = 0;
@@ -328,6 +337,7 @@ function openPolicies(){
 function closePolicies(){
   if(P.playing) stop(false);
   screenEl.classList.add('hidden');
+  if (prevScreenId) { document.getElementById(prevScreenId).classList.remove('hidden'); prevScreenId = null; }
   navRow = -1; navCol = 0; applyNav();
   if(location.hash === '#policies') history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('policiesopen').blur();
