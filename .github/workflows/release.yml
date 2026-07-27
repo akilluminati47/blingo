@@ -48,7 +48,10 @@ jobs:
           $gradle = $gradle -replace 'versionCode \d+', "versionCode $code"
           $gradle = $gradle -replace 'versionName "[^"]*"', "versionName ""$v"""
           Set-Content android/app/build.gradle $gradle -NoNewline
-          git add package.json package-lock.json android/app/build.gradle
+          # single source of truth the running game reads at startup to show
+          # "Loaded: vN.N.N" on the policies page, next to the latest GitHub release
+          Set-Content version.json "{`n  ""version"": ""v$v""`n}`n" -NoNewline
+          git add package.json package-lock.json android/app/build.gradle version.json
           git commit -m "Release v$v [skip ci]"
           git tag "v$v"
           git push origin main --follow-tags

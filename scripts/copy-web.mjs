@@ -7,7 +7,7 @@ const FILES = [
   'index.html', 'game.js', 'themes.js', 'policies.js', 'blingo_cutscene.mp4',
   'favicon.ico', 'favicon-32.png', 'apple-touch-icon.png',
   'icon-192.png', 'icon-512.png', 'banner-2.png', 'blingo.png',
-  'site.webmanifest',
+  'site.webmanifest', 'version.json',
 ];
 const DIRS = ['libs', 'icons', 'policies'];
 

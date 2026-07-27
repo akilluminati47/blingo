@@ -2,6 +2,14 @@
  * Original work; see LICENSE. https://blingo.pages.dev */
 import * as THREE from './libs/three.module.js';
 
+// version.json is rewritten automatically by .github/workflows/update-version.yml
+// whenever a GitHub release is published — nothing here to hand-edit or forget.
+// the policies page listens for 'blingo-version-ready' to show "Loaded: vN.N.N".
+fetch('./version.json').then(r => r.json()).then(d => {
+  window.BLINGO_VERSION = d.version;
+  window.dispatchEvent(new CustomEvent('blingo-version-ready', { detail: d.version }));
+}).catch(() => {});
+
 /* =========================================================
    BLINGO - infinite-map zombie shooter
    - chunked procedural world w/ rolling terrain + graded town

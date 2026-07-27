@@ -1,6 +1,6 @@
 {
   "name": "blingo",
-  "version": "2.2.6",
+  "version": "2.2.7",
   "description": "BLINGO - an infinite-map squad zombie shooter. Play as one of six immune blob cousins and save your block.",
   "author": {
     "name": "akilluminati47",
@@ -55,6 +55,7 @@
       "*.ico",
       "*.mp4",
       "*.webmanifest",
+      "version.json",
       "!dist/**",
       "!node_modules/**"
     ],

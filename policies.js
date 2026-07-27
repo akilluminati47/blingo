@@ -319,7 +319,10 @@ function openPolicies(){
   navRow = -1; navCol = 0;
   gpPrev = {};
   const v = document.getElementById('policybg');
-  if (v) { v.currentTime = 0; v.play(); }
+  // the video is shared with the picker and plays continuously in the background — never
+  // reset here. Just make sure it's actually running (autoplay can get blocked/suspended
+  // in some browsers after a long time backgrounded), without touching currentTime.
+  if (v && v.paused) v.play().catch(() => {});
   if (location.hash !== '#policies') history.replaceState(null, '', '#policies');
 }
 function closePolicies(){
@@ -329,8 +332,8 @@ function closePolicies(){
   if(location.hash === '#policies') history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('policiesopen').blur();
   if (window._resetTypewriter) window._resetTypewriter();
-  const v = document.getElementById('policybg');
-  if (v) v.pause();
+  // no more pausing #policybg here — it's the same shared video that plays behind the
+  // picker too, so closing policies should just let it keep running uninterrupted
 }
 document.getElementById('policiesopen').addEventListener('click', e=>{ e.preventDefault(); openPolicies(); });
 document.getElementById('ptoblock').addEventListener('click', closePolicies);
@@ -444,11 +447,20 @@ if(location.hash === '#policies') openPolicies();
 // fetch the latest GitHub release to populate the download section on the policies page
 (async function initDownloads() {
   const verEl = document.getElementById('pdownver');
+  const loadedEl = document.getElementById('pdownloaded');
   const btnExe = document.getElementById('pdown-exe');
   const btnApk = document.getElementById('pdown-apk');
   const btnIpa = document.getElementById('pdown-ipa');
   const badgeEl = document.getElementById('pdown-badge');
   if (!verEl || !btnExe || !btnApk) return;
+  // game.js fetches version.json (auto-updated by the release workflow) and sets
+  // window.BLINGO_VERSION, dispatching 'blingo-version-ready' when it's set. Show
+  // it right under the "Latest" line so an installed build can be compared at a glance.
+  if (loadedEl) {
+    const showLoaded = v => { loadedEl.textContent = 'Loaded: ' + (String(v).startsWith('v') ? v : 'v' + v); loadedEl.hidden = false; };
+    if (window.BLINGO_VERSION) showLoaded(window.BLINGO_VERSION);
+    else window.addEventListener('blingo-version-ready', e => showLoaded(e.detail), { once: true });
+  }
   const CACHE_KEY = 'blingo_release', CACHE_TTL = 300000; // 5 min
   let data = null;
   try {
