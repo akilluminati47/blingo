@@ -496,8 +496,10 @@
   .screen p.lore { color:#ffd9a8; font-style:italic; }
   /* the picker + lobby list get a lighter veil than other .screen users (death/pause stay
      fully opaque) — this is what lets the shared #policybg cutscene show through them, and
-     since it's the one persistent element, it stays in perfect sync across all three */
-  #startscreen, #lobbyscreen { background:rgba(5,7,10,.7); }
+     since it's the one persistent element, it stays in perfect sync across all three.
+     Matched to #policiesscreen's tone/brightness (rgba(10,12,16,.72)) so the video reads
+     the same lighter grey whichever of the three screens is on top of it. */
+  #startscreen, #lobbyscreen { background:rgba(10,12,16,.72); }
   /* town lore, restyled to match the badge/tile language the policies page uses for its
      sections (.pdoc/.ptile: soft translucent fill, hairline border, 16px radius) and widened
      to the same column as .pwrap so it reads as part of one consistent system */
