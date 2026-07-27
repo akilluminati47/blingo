@@ -13464,8 +13464,19 @@ function netClientData(m, conn, peer, code) {
     // together, and only the host's resume lifts it
     net.hostPaused = !!m.on;
     updateHostPauseLock();
-    if (m.on && game.state === 'playing') pauseGame();
-    else if (!m.on && game.state === 'paused') resumeGame();
+    if (m.on) { if (game.state === 'playing') pauseGame(); }
+    else {
+      // force-resume: snap state to playing even if the client got out of sync
+      if (game.state !== 'playing') {
+        pauseScreen.classList.add('hidden');
+        document.body.classList.add('playing');
+        game.state = 'playing';
+        stopTheme();
+        startGameMusic(selectedCousin);
+        if (input.device === 'kbm') grabPointer();
+        scheduleControlsFade();
+      }
+    }
   } else if (m.t === 'hurt') {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
   } else if (m.t === 'hit') {
