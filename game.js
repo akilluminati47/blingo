@@ -10953,13 +10953,13 @@ function updateCelebration(dt) {
   for (const c of companions) {
     if (c.recruited && !c.downed && c.grounded && Math.random() < dt * 2.5) { c.vy = 5.5 + Math.random() * 3; c.grounded = false; }
   }
-  // chips are done revealing — now grow the wrapper top and bottom at the same time
-  // so the title + lore and buttons + wait message all get their room together
-  if (game.celebrateT <= 2.0) finalStatsEl.classList.add('expand');
-  if (game.celebrateT <= 1) fadeEl.classList.add('show');
-  if (game.celebrateT <= 0) {
-    finishFinale();
-    setTimeout(() => fadeEl.classList.remove('show'), 300);
+  // the block-secure mid-run celebration (not grandma's tally): just fade and quit
+  if (!jelly.awake) {
+    if (game.celebrateT <= 1) fadeEl.classList.add('show');
+    if (game.celebrateT <= 0) {
+      quitToMenu(false);
+      setTimeout(() => fadeEl.classList.remove('show'), 300);
+    }
   }
 }
 function finishFinale() {
@@ -11240,16 +11240,29 @@ function updateJelly(dt) {
   }
   if (jelly.statT < 0) return;
   jelly.statT += dt;
+  let allDone = true;
   jelly.statRows.forEach((r, i) => {
     const t0 = 1.6 + i * 1.5;                  // each row takes the stage in turn
-    if (jelly.statT < t0) return;
+    if (jelly.statT < t0) { allDone = false; return; }
     if (!r.el.classList.contains('in')) r.el.classList.add('in');
     const p = clamp((jelly.statT - t0) / 1.1, 0, 1);
     const eased = 1 - Math.pow(1 - p, 3);      // count fast then settle on the number
     const v = Math.round(r.v * eased);
     const txt = r.fmt ? r.fmt(v) : String(v);
     if (r.num.textContent !== txt) r.num.textContent = txt;
+    if (p < 1) allDone = false;
   });
+  // once the fourth chip has finished counting, expand the wrapper to make room
+  // for the title, lore, and buttons — then fade and reveal them
+  if (allDone && jelly.statT > 0 && !finalStatsEl.classList.contains('expand')) {
+    finalStatsEl.classList.add('expand');
+    jelly.expandT = jelly.statT;
+  }
+  if (jelly.expandT > 0) {
+    const et = jelly.statT - jelly.expandT;
+    if (et > 0.9 && !fadeEl.classList.contains('show')) fadeEl.classList.add('show');
+    if (et > 1.8) { finishFinale(); jelly.expandT = -1; setTimeout(() => fadeEl.classList.remove('show'), 300); }
+  }
 }
 
 // ---------- Bluga the Bad Blob + the Black-ops blobs ----------

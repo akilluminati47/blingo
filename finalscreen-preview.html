@@ -189,43 +189,31 @@
   function showTally() {
     resetAll();
     talWrap.style.display = 'flex';
-    const revealDelays = [1600, 3100, 4600, 6100];
+    // chip reveal delays: 1.6s, 3.1s, 4.6s, 6.1s — each counts up over 1.1s
+    const reveal = [1600, 3100, 4600, 6100];
     const countDur = 1100;
     const started = performance.now();
 
     function tick() {
-      const elapsed = performance.now() - started;
-      // reveal chips
+      const t = performance.now() - started;
+      let allDone = true;
       for (let i = 0; i < talChips.length; i++) {
-        if (elapsed >= revealDelays[i]) talChips[i].classList.add('in');
-      }
-      // count up
-      talChips.forEach((c, i) => {
-        const rt = revealDelays[i];
-        if (elapsed < rt) return;
-        const p = Math.min((elapsed - rt) / countDur, 1);
+        if (t >= reveal[i]) talChips[i].classList.add('in');
+        const ct = t - reveal[i];
+        if (ct < 0) { allDone = false; continue; }
+        const p = Math.min(ct / countDur, 1);
+        if (p < 1) allDone = false;
         const eased = 1 - Math.pow(1 - p, 3);
-        const t = parseInt(c.dataset.target);
-        c.querySelector('b').textContent = c.dataset.fmt === 'time' ? fmtTime(Math.round(t * eased)) : String(Math.round(t * eased));
-      });
-      if (elapsed < 2200) {
-        // chips still revealing — tight skinny wrapper
-        tallyRaf = requestAnimationFrame(tick);
-      } else if (elapsed < 3200) {
-        // all chips visible — expand top + bottom together for title/lore/buttons
-        talWrap.classList.add('expand');
-        tallyRaf = requestAnimationFrame(tick);
-      } else if (elapsed < 4200) {
-        // expansion settled — fade backdrop in
-        fadeEl.classList.add('show');
-        tallyRaf = requestAnimationFrame(tick);
-      } else if (elapsed < 5200) {
-        // fade complete — .done reveals everything at full opacity
-        talWrap.classList.add('done');
-        tallyRaf = requestAnimationFrame(tick);
-      } else {
-        requestAnimationFrame(tick);
+        const target = parseInt(talChips[i].dataset.target);
+        talChips[i].querySelector('b').textContent = talChips[i].dataset.fmt === 'time' ? fmtTime(Math.round(target * eased)) : String(Math.round(target * eased));
       }
+      // last chip done counting at 7.2s → expand → fade at 8.1s → done at 9.0s
+      if (allDone && t > 0 && !talWrap.classList.contains('expand')) {
+        talWrap.classList.add('expand'); // 7.2s
+      }
+      if (t > 8100 && !fadeEl.classList.contains('show')) fadeEl.classList.add('show');
+      if (t > 9000) talWrap.classList.add('done');
+      if (t < 11000) tallyRaf = requestAnimationFrame(tick);
     }
     tallyRaf = requestAnimationFrame(tick);
   }
