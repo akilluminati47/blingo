@@ -11183,8 +11183,6 @@ function buildFinalStats() {
   finalStatsEl.appendChild(wait);
   finalStatsEl.classList.remove('hidden');
 }
-  finalStatsEl.classList.remove('hidden');
-}
 function hideFinalStats() { finalStatsEl.classList.add('hidden'); finalStatsEl.innerHTML = ''; }
 function updateJelly(dt) {
   if (!jelly.beacon) return;
