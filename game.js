@@ -5046,7 +5046,6 @@ document.addEventListener('pointerlockchange', () => {
     lockLossT = performance.now();
     if (!net.role) pauseGame(); // solo only — a multiplayer world can't stop for one person
   }
-  }
 });
 addEventListener('mouseup', e => {
   if (e.button === 0) input.shoot = false;
@@ -5495,7 +5494,7 @@ const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
   hostPaused: false, hostGoreHorde: false };
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
-const prestige = { blocks: {}, bestTime: 0, bestHero: '', campaign: 0, bestStreak: 0 };
+const prestige = { blocks: {}, bestTime: 0, bestHero: '', campaign: 0, bestStreak: 0, fbiOutfit: false };
 // The block is not the block it was: the Infected One now stands between the Crimson One and
 // the street party, so every clear banked before him was banked on a shorter game and every
 // record time was set on one. Those runs don't compare, so the old save is dropped rather
@@ -5550,6 +5549,7 @@ function renderPrestige() {
     const hero = COUSINS.find(c => c.id === prestige.bestHero);
     mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#' + (hero ? hero.color : 0xffd24a).toString(16).padStart(6, '0'));
   }
+  if (prestige.fbiOutfit) mkBadge('SHIESTY', '#f2c21a'); // Bluga's outfit, earned once, worn forever
   el.style.display = el.children.length ? 'flex' : 'none';
 }
 const companions = []; // {data, blob, beacon, pos, recruited, shootCd, walkPhase, yaw}
@@ -5703,6 +5703,7 @@ function hurtCompanion(c, dmg) {
   c.hp -= dmg;
   c.lastHurtT = game.time;
   flashBlob(c.blob);
+  if (net.role === 'host') netBroadcast({ t: 'hit', c: c.data.id, g: 0 });
   spawnDamageNumber(c.pos.x, (c.y || 0) + 1.8, c.pos.z, dmg, '#' + c.data.color.toString(16).padStart(6, '0'));
   if (c.hp <= 0) {
     // downed, not dead — but they stay down until you walk over and pick them up
@@ -5886,6 +5887,7 @@ function hurtPlayer(dmg, awayX, awayZ) {
   player.stumbleT = 0.42;
   SFX.hurt();
   flashBlob(playerBlob);
+  if (net.role === 'host') netBroadcast({ t: 'hit', p: 1, g: 0 });
   rumble(220, 0.9, 0.6);
   shakeAmp = Math.max(shakeAmp, 0.1);
   spawnParticles(player.pos.x, player.pos.y + 1, player.pos.z, 0xff5b5b, 5, 2.5, 0.4);
@@ -6813,8 +6815,9 @@ function updateAmmoHUD() {
   if (player.weapon.consumable) { hud.clip.textContent = '1'; hud.res.textContent = ''; }
   else if (player.weapon.melee) { hud.clip.textContent = '∞'; hud.res.textContent = ''; }
   else {
-    hud.clip.textContent = player.clip;
-    hud.res.textContent = ' / ' + (reserves[player.weapon.id] | 0);
+    const unlim = player.fbiOutfit && (player.weapon.id === 'pistol' || player.weapon.id === 'smg');
+    hud.clip.textContent = unlim ? '∞' : player.clip;
+    hud.res.textContent = unlim ? '' : ' / ' + (reserves[player.weapon.id] | 0);
   }
   // holding Red's bowl, the reload button becomes RED'S: pressing it is the meal
   const rb = document.getElementById('btnReload');
@@ -6931,6 +6934,19 @@ function resetGame() {
   tradeRing(0); tradePactReset();
   for (const k in reserves) delete reserves[k];
   equipWeapon('fists');
+  // FBI outfit reward: black shiesty skin with your cousin's face colour peeking through,
+  // FBI letters on the back, and unlimited pistol + SMG ammo forever
+  player.fbiOutfit = !!prestige.fbiOutfit;
+  if (player.fbiOutfit) {
+    scene.remove(playerBlob.root);
+    if (playerBlob.shadow) scene.remove(playerBlob.shadow);
+    const data = COUSINS.find(c => c.id === selectedCousin);
+    playerBlob = buildFbiBlob(data.color, false);
+    scene.add(playerBlob.root);
+    player.owned = ['fists', 'pistol', 'smg', data.melee];
+    reserves.pistol = Infinity; reserves.smg = Infinity;
+    equipWeapon('pistol');
+  }
   scatterCousins();
   hud.kills.textContent = 0;
   hud.crates.textContent = 0;
@@ -6947,6 +6963,11 @@ function startRun() {
   initAudio();
   for (const id of ['startscreen', 'deathscreen', 'lobbyscreen', 'hostclosed'])
     document.getElementById(id).classList.add('hidden');
+  // clear stat sheets & UI panels from the last run so they don't sit in memory
+  document.getElementById('deathstats').innerHTML = '';
+  document.getElementById('pauselobby').innerHTML = '';
+  finalStatsEl.innerHTML = '';
+  finalStatsEl.classList.add('hidden');
   if (window._pauseTypewriter) window._pauseTypewriter();
   deathFx.on = false; deathFadeEl.style.opacity = 0; // the fade never follows you into a fresh run
   document.getElementById('waitmsg').classList.add('hidden');
@@ -6996,10 +7017,13 @@ function respawnRun() {
   }
   netLeave(); startRun();
 }
-document.getElementById('retrybtn').addEventListener('click', respawnRun); // clients never fire this: their copy is pointer-events:none
+document.getElementById('retrybtn').addEventListener('click', () => {
+  if (game.state === 'finale') restartFromFinale();
+  else respawnRun();
+}); // clients never fire this: their copy is pointer-events:none
 document.getElementById('dquitbtn').addEventListener('click', () => {
   document.getElementById('deathscreen').classList.add('hidden');
-  quitToMenu();
+  quitToMenu(game.state === 'finale' ? true : false);
 });
 document.getElementById('mpbtn').addEventListener('click', () => { initAudio(); showLobbies(); });
 document.getElementById('hostbtn').addEventListener('click', () => hostLobby(codeEl.value));
@@ -7060,7 +7084,7 @@ function finishDeath() {
     ['bullets', game.shots | 0, 'bullets'],
   ];
   document.getElementById('deathstats').innerHTML = chips.map(([ic, val, lab]) =>
-    `<div class="dchip">${DEATH_ICONS[ic]}<div><b>${val}</b><span>${lab}</span></div></div>`).join('');
+    `<div class="dchip">${DEATH_ICONS[ic]}<div class="chipbody"><span>${lab}</span><b>${val}</b></div></div>`).join('');
   document.getElementById('deathtitle').textContent = deathFx.gameOver && net.role ? 'GAME OVER' : 'YOU GOT EATEN';
   // one fused pair on every death now, dressed in the fallen hero's colour: solo deaths
   // read RETRY .ᐟ, a lobby game over reads HOST RETRY . . (live for the host, greyed-
@@ -7136,6 +7160,9 @@ function quitToMenu(keepChain) {
   document.body.classList.remove('playing');
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   hideFinalStats(); // grandma's tally never follows you onto the menu
+  document.getElementById('deathstats').innerHTML = ''; // and neither does the death sheet
+  document.getElementById('pauselobby').innerHTML = ''; // nor the pause lobby roster
+  document.getElementById('settingsGrid').innerHTML = ''; // nor the settings rows
   if (!keepChain) { sessionCampaign = 0; lastLmD = null; }
   rampWorldAudio(0, 0.6); // the world sinks back to a silent black stage behind the picker
   stopGameMusic();
@@ -7760,10 +7787,14 @@ function fireWeapon() {
   if (player.reloading > 0) return;
   // empty AND nothing left to load: just the dry click. The reload is kicked off by the
   // last round leaving the mag (below), not by a wasted trigger pull on zero.
-  if (player.clip <= 0) { SFX.dry(); return; }
-  player.clip--;
-  // the last round out of the mag starts the reload on its own
-  if (player.clip === 0) tryReload();
+  // FBI outfit: pistol & SMG never run dry
+  const unlim = player.fbiOutfit && (player.weapon.id === 'pistol' || player.weapon.id === 'smg');
+  if (!unlim) {
+    if (player.clip <= 0) { SFX.dry(); return; }
+    player.clip--;
+    // the last round out of the mag starts the reload on its own
+    if (player.clip === 0) tryReload();
+  }
   game.shots = (game.shots | 0) + 1; // the death screen counts every round you spent
   // AR discipline perk: the first pull after a beat off the trigger flies dead straight —
   // pace your taps and every one is a marksman round; hold it down and the spray returns
@@ -8049,6 +8080,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
     // the shrug is the same bright invuln green on every boss — one signal, learned once
     flashBlob(z.blob, FLASH_GREEN);
     spawnParticles(z.pos.x, z.blob.root.position.y + 1.6 * z.scale, z.pos.z, 0x3ae06a, 3, 2.5, 0.3);
+    if (net.role === 'host' && z.nid) netBroadcast({ t: 'hit', i: z.nid, g: 1 });
     return;
   }
   // poking the Two Horned One is a mistake: any hit wakes him and sparks a lunge
@@ -8080,6 +8112,7 @@ function damageZombie(z, dmg, kx, kz, knock, opts = {}) {if (z.vanished) return;
 
   z.hp -= dmg;
   flashBlob(b);
+  if (net.role === 'host' && z.nid) netBroadcast({ t: 'hit', i: z.nid, g: 0 });
   // a round through the Rotten One's open chest: the heart itself sprays — the "you found
   // the spot" read, distinct from the ordinary body-shot blood below
   if (opts.weakspot && b.rotHeart) {
@@ -10902,7 +10935,7 @@ function completeCleanup() {
   game.celebrateT = 5.5;
   recordPrestige();
   if (net.role === 'host') netBroadcast({ t: 'secured', tm: game.time }); // everyone banks the clear
-  toast('BLOCK SECURED .ᐟ', true);
+  toast('BLOCK SECURED .ᐟ Thanks to you blob-kind prevails . .', true);
   rumble(600, 1, 1);
 }
 const fadeEl = document.getElementById('fade');
@@ -10920,13 +10953,59 @@ function updateCelebration(dt) {
   for (const c of companions) {
     if (c.recruited && !c.downed && c.grounded && Math.random() < dt * 2.5) { c.vy = 5.5 + Math.random() * 3; c.grounded = false; }
   }
+  // a beat before the fade, the tally wrapper expands its padding to make room for the
+  // title, lore line, and buttons — so nothing jumps when they fade into view
+  if (game.celebrateT <= 2.8) finalStatsEl.classList.add('expand');
   if (game.celebrateT <= 1) fadeEl.classList.add('show');
   if (game.celebrateT <= 0) {
-    // jelly.awake means this was the grandma finale (a win), not a mid-run block clear: bank
-    // the campaign so the next solo run rolls into new-game-plus (Bluga + the farther deal)
-    quitToMenu(jelly.awake);
+    finishFinale();
     setTimeout(() => fadeEl.classList.remove('show'), 300);
   }
+}
+function finishFinale() {
+  game.state = 'finale';
+  document.body.classList.remove('playing');
+  stopGameMusic();
+  if (document.pointerLockElement === canvas) document.exitPointerLock();
+  // everything is already in the DOM — just fade in title, lore, and buttons
+  finalStatsEl.classList.add('done');
+  const playBtn = finalStatsEl.querySelector('#fsplaybtn');
+  const lobbyActive = !!net.role && (net.role === 'host' || net.conns.length > 0);
+  if (playBtn) {
+    playBtn.textContent = lobbyActive ? (net.role === 'client' ? 'PLAY . .' : 'PLAY') : 'PLAY';
+    playBtn.classList.toggle('waithost', lobbyActive && net.role === 'client');
+  }
+  const waitEl = finalStatsEl.querySelector('.fswait');
+  if (waitEl) waitEl.classList.toggle('hidden', !lobbyActive || net.role !== 'client');
+  tabTitle && tabTitle.unlock();
+}
+function restartFromFinale() {
+  if (net.role === 'client') { document.getElementById('waitmsg').classList.remove('hidden'); return; }
+  if (net.role === 'host' && net.conns.length) {
+    const held = net.conns.map(conn => {
+      const c = companions.find(k => k.netConn === conn);
+      return { conn, num: (c && c.netP) || 0, cousin: c && c.data.id, tok: c && c.netTok };
+    });
+    startRun();
+    for (const h of held) {
+      if (!h.num) continue;
+      const c = companions.find(k => k.data.id === h.cousin && !k.netP) || companions.find(k => !k.netP);
+      if (!c) continue;
+      c.netP = h.num; c.netConn = h.conn; c.netPose = null; c.netTok = h.tok || null; c.netHold = 0;
+      if (!c.recruited) recruitCousin(c);
+      try {
+        h.conn.send({ t: 'restart' });
+        // spawn clients at the fountain so they see Bluga's cameo without re-grouping
+        h.conn.send({ t: 'welcome', n: h.num, cousin: c.data.id,
+          x: CAMEO_SPOT.x + (Math.random() - 0.5) * 2, z: CAMEO_SPOT.z + (Math.random() - 0.5) * 2,
+          w: game.weather, ph: game.phase, ck: game.clock, tm: game.time, k: game.kills,
+          lay: currentLayout });
+      } catch (e) {}
+    }
+    rebuildSquadBars();
+    return;
+  }
+  netLeave(); startRun();
 }
 function updateBossFx(dt) {
   if (bossState.beam) {
@@ -11057,15 +11136,49 @@ function startFinale() {
 }
 const finalStatsEl = document.getElementById('finalstats');
 function buildFinalStats() {
-  finalStatsEl.innerHTML = '<div class="fshead">GRANDMA’S TALLY .ᐟ</div>';
+  finalStatsEl.innerHTML = '';
+  // title slot — always takes space, fades in on finale
+  const title = document.createElement('div');
+  title.className = 'fstitle';
+  title.textContent = 'MISSION COMPLETE .ᐟ';
+  finalStatsEl.appendChild(title);
+  // lore slot
+  const lore = document.createElement('div');
+  lore.className = 'fslore';
+  lore.textContent = 'Count up your contributions . .';
+  finalStatsEl.appendChild(lore);
+  // stat chips (in a 2×2 grid wrapper so they stay in place)
+  const grid = document.createElement('div');
+  grid.className = 'statsgrid';
   for (const r of jelly.statRows) {
     const row = document.createElement('div');
-    row.className = 'fsrow';
-    // each category wears its little inked icon — the same set the death screen uses
-    row.innerHTML = `<span>${DEATH_ICONS[r.icon] || ''}${r.label}</span><b>${r.fmt ? r.fmt(0) : 0}</b>`;
-    finalStatsEl.appendChild(row);
+    row.className = 'dchip';
+    const icon = DEATH_ICONS[r.icon] || '';
+    row.innerHTML = `${icon}<div class="chipbody"><span>${r.label}</span><b>${r.fmt ? r.fmt(0) : 0}</b></div>`;
+    grid.appendChild(row);
     r.el = row; r.num = row.querySelector('b');
   }
+  finalStatsEl.appendChild(grid);
+  // button pair slot
+  const btns = document.createElement('div');
+  btns.className = 'fsbtns';
+  const playBtn = document.createElement('button');
+  playBtn.id = 'fsplaybtn';
+  playBtn.textContent = 'PLAY';
+  playBtn.addEventListener('click', () => { if (playBtn.classList.contains('waithost')) return; restartFromFinale(); });
+  const quitBtn = document.createElement('button');
+  quitBtn.textContent = 'QUIT TO MENU';
+  quitBtn.addEventListener('click', () => { finalStatsEl.classList.add('hidden'); quitToMenu(true); });
+  btns.appendChild(playBtn);
+  btns.appendChild(quitBtn);
+  finalStatsEl.appendChild(btns);
+  // client wait message slot
+  const wait = document.createElement('p');
+  wait.className = 'fswait';
+  wait.textContent = '. . waiting for Player 1 .ᐟ';
+  finalStatsEl.appendChild(wait);
+  finalStatsEl.classList.remove('hidden');
+}
   finalStatsEl.classList.remove('hidden');
 }
 function hideFinalStats() { finalStatsEl.classList.add('hidden'); finalStatsEl.innerHTML = ''; }
@@ -11178,7 +11291,9 @@ function buildFbiBlob(faceColor, big) {
     new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false }));
   // clear of the torso ellipsoid (z extent ~0.42 at chest height) — at -0.31 the letters
   // sat buried INSIDE the body and never showed
-  back.position.set(0, 0.95, -0.46); back.rotation.y = Math.PI; blob.wob.add(back);
+  // clear of the torso ellipsoid (z extent ~0.42 at chest height) — rides the
+  // wobble so it breathes with the body, but sits close enough it doesn't float off
+  back.position.set(0, 0.95, -0.42); back.rotation.y = Math.PI; blob.wob.add(back);
   return blob;
 }
 // stand up one black-ops blob in the zombie list (so the whole hitscan / damage / death /
@@ -11584,10 +11699,15 @@ function onBlugaDefeated(z) {
   if (bluga.beam) { scene.remove(bluga.beam); bluga.beam = null; }
   bossBarEl.classList.remove('show', 'bluga');
   for (const zz of [...zombies]) if (zz.fbi && zz.state !== 'dying') killZombie(zz, 0, 0, false);
+  // reward: the shiesty black outfit with your cousin's colour peeking through, plus
+  // unlimited pistol and SMG ammo for every run from here on
+  prestige.fbiOutfit = true;
+  try { localStorage.setItem(PRESTIGE_KEY, JSON.stringify(prestige)); } catch (e) {}
+  renderPrestige();
   toast('BLUGA LEAVES THE BLOCK .ᐟ', true);
   for (let k = 0; k < 40; k++) spawnParticles(z.pos.x, z.blob.root.position.y + 2, z.pos.z, [0x6fd8ff, 0xf2c21a, 0xffffff][k % 3], 1, 6, 1.2);
   rumble(600, 1, 1);
-  spawnJellyMarks();                          // NOW grandma's spirit comes
+  spawnJellyMarks();
   if (net.role === 'host') netBroadcast({ t: 'jelly' });
 }
 // master tick: cameo script, then the final fight's waves + smoke-vanish + boss bar
@@ -13308,6 +13428,21 @@ function netClientData(m, conn, peer, code) {
     else if (!m.on && game.state === 'paused') resumeGame();
   } else if (m.t === 'hurt') {
     hurtPlayer(m.d, Math.random() - 0.5, Math.random() - 0.5);
+  } else if (m.t === 'hit') {
+    // a zombie, player, or AI companion took damage somewhere in the lobby: flash
+    // their body so every screen reads the same chaos — help arrives faster
+    if (m.i != null) {
+      const g = net.ghosts.get(m.i);
+      if (g) flashBlob(g.blob, m.g ? FLASH_GREEN : FLASH_RED);
+    }
+    if (m.p != null) {
+      const a = net.actors.get('p' + m.p);
+      if (a) flashBlob(a.blob);
+    }
+    if (m.c != null) {
+      const a = net.actors.get('ai' + m.c);
+      if (a) flashBlob(a.blob);
+    }
   } else if (m.t === 'revive') {
     playerGetUp(true, m.hp); // someone hauled us up — we inherit what the pull cost them
   } else if (m.t === 'reviveCost') {
@@ -13325,8 +13460,10 @@ function netClientData(m, conn, peer, code) {
       rumble(500, 1, 1);
     }
   } else if (m.t === 'restart') {
-    // Player 1 respawned the lobby: drop the death screen and step back into the fresh run
+    // Player 1 respawned the lobby: drop the death / finale screen and step back into the fresh run
     deathFx.on = false; deathFadeEl.style.opacity = 0;
+    document.getElementById('deathscreen').classList.add('hidden');
+    hideFinalStats();
     startRun();
   } else if (m.t === 'pew') {
     // another player's round (the host's own, or a relayed client's): trace it from
@@ -13386,6 +13523,8 @@ function netClientData(m, conn, peer, code) {
     spawnJellyMarks();
     if (wasBluga) {
       toast('BLUGA LEAVES THE BLOCK .ᐟ', true);
+      prestige.fbiOutfit = true;
+      try { localStorage.setItem(PRESTIGE_KEY, JSON.stringify(prestige)); } catch (e) {}
     } else {
       toast('THE ROTTEN ONE FALLS .ᐟ', true);
       setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
@@ -13471,7 +13610,7 @@ function netClientData(m, conn, peer, code) {
     game.time = m.tm; game.cleanup = false; game.celebrateT = 5.5;
     updateQuotaHud();
     recordPrestige();                 // multiplayer clears count toward your badges too
-    toast('BLOCK SECURED .ᐟ', true);
+    toast('BLOCK SECURED .ᐟ Thanks to you blob-kind prevails . .', true);
   }
 }
 function netSendEmote(i) {
