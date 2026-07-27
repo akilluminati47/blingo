@@ -7825,7 +7825,7 @@ function fireWeapon() {
   // the long guns reach the whole VISIBLE world: out to wherever the fog actually ends
   // today (weather + draw-distance notch), never less than the old 80
   const REACH = (w.id === 'sniper' || w.id === 'rifle') ? Math.max(80, scene.fog.far) : 80;
-  let anyHit = false;
+  let anyHit = false, lastStopped = false, lastStopT = REACH, lastBhSize = 0.14;
   for (let p = 0; p < pellets; p++) {
     const sp = steady ? 0.002 : w.spread;
     const dx = _aimDir.x + (Math.random() - 0.5) * sp * 2;
@@ -7913,7 +7913,7 @@ function fireWeapon() {
     // anything it drops, shotgun pellets through kills inside party range, magnum rounds
     // through the skulls they pop. And no crow ever stopped a heavy round: 1hp of
     // feathers pops and the shot flies on, so one blast can pick a whole murder apart.
-    let stopT = tMax, stopped = false;
+    let stopT = tMax; let stopped = false;
     for (const hit of line) {
       anyHit = true;
       const dHit = hit.t;
@@ -7964,7 +7964,9 @@ function fireWeapon() {
       spawnParticles(_to.x, _to.y, _to.z, 0x9a9a8a, 3, 2, 0.3);
       const bhSize = (w.id === 'magnum' || w.id === 'sniper') ? 0.36 : (w.id === 'shotgun' || w.id === 'rifle') ? 0.22 : 0.14;
       spawnBulletHole(_to.x, _to.y, _to.z, -rdx, -rdz, bhSize);
+      lastBhSize = bhSize;
     }
+    lastStopped = stopped; lastStopT = stopT;
   }
   // the bang flushes crows near the muzzle, and near where the shot landed
   scareCrows(player.pos.x, player.pos.z, 16);
@@ -7975,7 +7977,7 @@ function fireWeapon() {
   // as Player 1; a client's go up to the host, who draws them and relays to the rest.
   if (net.role) {
     const pm = { t: 'pew', x: Math.round(_to.x * 10) / 10, y: Math.round(_to.y * 10) / 10, z: Math.round(_to.z * 10) / 10 };
-    if (!stopped && stopT < REACH) pm.h = bhSize;
+    if (!lastStopped && lastStopT < REACH) pm.h = lastBhSize;
     if (net.role === 'host') netBroadcast({ ...pm, p: 1 });
     else try { net.conns[0].send(pm); } catch (e) {}
   }
