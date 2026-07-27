@@ -7165,7 +7165,6 @@ function quitToMenu(keepChain) {
   hideFinalStats(); // grandma's tally never follows you onto the menu
   document.getElementById('deathstats').innerHTML = ''; // and neither does the death sheet
   document.getElementById('pauselobby').innerHTML = ''; // nor the pause lobby roster
-  document.getElementById('settingsGrid').innerHTML = ''; // nor the settings rows
   if (!keepChain) { sessionCampaign = 0; lastLmD = null; }
   rampWorldAudio(0, 0.6); // the world sinks back to a silent black stage behind the picker
   stopGameMusic();
