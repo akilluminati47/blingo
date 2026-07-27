@@ -17,7 +17,7 @@ concurrency:
 jobs:
   bump:
     # the version-bump commit this workflow pushes must not retrigger itself
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: "!contains(github.event.head_commit.message, '[no-retrigger]')"
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.bump.outputs.version }}
@@ -52,7 +52,7 @@ jobs:
           # "Loaded: vN.N.N" on the policies page, next to the latest GitHub release
           Set-Content version.json "{`n  ""version"": ""v$v""`n}`n" -NoNewline
           git add package.json package-lock.json android/app/build.gradle version.json
-          git commit -m "Release v$v [skip ci]"
+          git commit -m "Release v$v [no-retrigger]"
           git tag "v$v"
           git push origin main --follow-tags
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
