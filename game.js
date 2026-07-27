@@ -5492,6 +5492,23 @@ let tabTitle = null;
 const net = { role: null, peer: null, conns: [], playerNum: 0, lobbyCode: '',
   ghosts: new Map(), actors: new Map(), recruits: new Map(), txT: 0, zid: 0, pkid: 0, scan: null, leaving: false, barSig: '',
   hostPaused: false, hostGoreHorde: false };
+// DEBUG: a single bad (NaN/undefined) network value written into a lerp target is permanent —
+// lerp(a, b, t) with a non-finite b returns NaN forever after, and a non-finite a poisons every
+// future lerp regardless of b. That reads in-game as an actor silently going invisible and
+// staying that way (position/scale collapse to NaN → nothing to render, nothing recoverable).
+// This guard is the seatbelt: reject the bad value, keep the last good one, and log loudly
+// (rate-limited per tag) so a real corruption source shows up in the console instead of just
+// manifesting as an unexplained disappearance.
+const _netWarnT = {};
+function netFinite(v, fallback, tag) {
+  if (Number.isFinite(v)) return v;
+  const now = performance.now();
+  if (!_netWarnT[tag] || now - _netWarnT[tag] > 3000) {
+    _netWarnT[tag] = now;
+    console.warn('[net] non-finite value rejected, tag:', tag, 'raw:', v, 'falling back to:', fallback);
+  }
+  return fallback;
+}
 
 // ---------- prestige (persisted across runs; shown as badges on the menu) ----------
 const prestige = { blocks: {}, bestTime: 0, bestHero: '', campaign: 0, bestStreak: 0, fbiOutfit: false };
@@ -6775,7 +6792,11 @@ const tracerMat = new THREE.MeshBasicMaterial({ color: 0xffe08a, transparent: tr
 tracerMat.defines = { NO_CURVE: 1 };
 function spawnTracer(from, to) {
   const len = from.distanceTo(to);
-  if (len < 0.2) return;
+  // NaN fails every ordinary comparison, so `len < 0.2` silently let a NaN length through to
+  // `new THREE.BoxGeometry(..., len)` — that's the exact flood of "BoxGeometry radius is NaN"
+  // console spam right after a fresh ghost/actor gets created and something fires a tracer at
+  // it before its position is fully populated. Guard the NaN case explicitly instead.
+  if (!(len >= 0.2)) return;
   const g = new THREE.BoxGeometry(0.025, 0.025, len);
   const mat = tracerMat.clone();
   mat.defines = { NO_CURVE: 1 }; // clones don't reliably carry defines across
@@ -12993,14 +13014,22 @@ function wireHostConn(conn) {
     } else if (m.t === 'p') {
       const c = cousinByConn(conn);
       if (c) {
-        c.netPose = m; c.hp = m.hp;
-        c.netGs = m.gs || 1; // their chili-giant scale rides the pose stream
-        // a player-controlled cousin owns its own downed state (hurtCompanion bails out
-        // for them), so mirror it here and run their rescue beacon from it
-        const dn = !!m.dn;
-        if (dn !== !!c.downed) {
-          c.downed = dn; netSyncCousinBeacon(c); rebuildSquadBars();
-          if (dn) toast(`P${c.netP} ${c.data.name.toUpperCase()} DOWN .ᐟ`, true);
+        // DEBUG/SAFETY: reject a non-finite pose field before it ever reaches netPoseCompanion's
+        // lerp chain — one bad value here otherwise corrupts c.pos/c.blob permanently (NaN lerp
+        // never recovers) and reads in-game as that player silently going invisible for good.
+        const badKey = ['x', 'z', 'y', 'yw'].find(k => !Number.isFinite(m[k]));
+        if (badKey) {
+          console.warn('[host] rejected non-finite pose field from P' + c.netP, badKey, '=', m[badKey], 'full packet:', m);
+        } else {
+          c.netPose = m; c.hp = m.hp;
+          c.netGs = m.gs || 1; // their chili-giant scale rides the pose stream
+          // a player-controlled cousin owns its own downed state (hurtCompanion bails out
+          // for them), so mirror it here and run their rescue beacon from it
+          const dn = !!m.dn;
+          if (dn !== !!c.downed) {
+            c.downed = dn; netSyncCousinBeacon(c); rebuildSquadBars();
+            if (dn) toast(`P${c.netP} ${c.data.name.toUpperCase()} DOWN .ᐟ`, true);
+          }
         }
       }
     } else if (m.t === 'shot') {
@@ -13205,7 +13234,8 @@ function netHostTick(dt) {
   const ac = [netActorOf(1, selectedCousin, player.pos.x, player.pos.z, player.pos.y,
     playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed,
     playerBlob.arms[playerBlob.gunArm].rotation.x, player.giantScale || 1,
-    playerBlob.arms[playerBlob.gunArm].rotation.z, player.slideT > 0, player.grounded)];
+    playerBlob.arms[playerBlob.gunArm].rotation.z, player.slideT > 0, player.grounded, !!player.dropKick,
+    playerBlob.arms[playerBlob.offArm].rotation.x)];
   // the remaining cousins still waiting to be found: streamed so every client sees the same
   // recruit beacons the host does and can walk one up themselves (netFindNearRecruit)
   const rc = [];
@@ -13217,7 +13247,9 @@ function netHostTick(dt) {
     if (!c.recruited) continue;
     ac.push(netActorOf(c.netP || 0, c.data.id, c.pos.x, c.pos.z, c.y || 0, c.yaw, (c.weapon || WEAPONS.pistol).id, c.hp, !!c.downed,
       c.blob.arms[c.blob.gunArm].rotation.x, c.netGs || 1,
-      c.blob.arms[c.blob.gunArm].rotation.z, c.slideT > 0, c.grounded));
+      c.blob.arms[c.blob.gunArm].rotation.z, c.slideT > 0, c.grounded,
+      !!(c.netPose && c.netPose.dk), // a player-controlled cousin's dropkick lives in their streamed pose, not host physics
+      c.blob.arms[c.blob.offArm].rotation.x));
   }
   const zb = [];
   const shielded = bossShielded();   // its wave guards are up: the boss is invuln right now
@@ -13289,7 +13321,7 @@ function netHostTick(dt) {
   }
   base.zb = null; base.pk = null; base.cr = null; // never let the last client's filtered lists linger on the shared object
 }
-function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az, sl, gr) {
+function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az, sl, gr, dk, ar2) {
   const R = v => Math.round(v * 20) / 20;
   const key = p ? 'p' + p : 'ai' + cid;
   const mv = Math.hypot(x - (net['_lx' + key] || x), z - (net['_lz' + key] || z)) > 0.03 ? 1 : 0;
@@ -13297,7 +13329,8 @@ function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az, sl, gr) {
   return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv,
     ar: ar == null ? undefined : Math.round(ar * 100) / 100,
     az: az == null ? undefined : Math.round(az * 100) / 100,
-    sl: sl ? 1 : 0, gr: gr ? 1 : 0,
+    ar2: ar2 == null ? undefined : Math.round(ar2 * 100) / 100,
+    sl: sl ? 1 : 0, gr: gr ? 1 : 0, dk: dk ? 1 : 0,
     gs: gs && gs > 1.02 ? Math.round(gs * 20) / 20 : undefined };
 }
 
@@ -13842,7 +13875,16 @@ function netApplySnapshot(m) {
         scene.add(g.blob.root);
       }
       net.actors.set(key, g);
-      if (!net._actLogged) { net._actLogged = true; console.log('[snap] first actor created key:', key, 'p:', a.p, 'cousin:', a.c, 'at:', a.x, a.z); }
+      net._actCreateCount = net._actCreateCount || {};
+      net._actCreateCount[key] = (net._actCreateCount[key] || 0) + 1;
+      if (net._actCreateCount[key] > 1) {
+        // this key already existed before — the ghost is being rebuilt from scratch, which
+        // restarts its fade-in every time and can read as the actor flickering or never
+        // fully appearing. A healthy actor should only ever hit this branch once.
+        console.warn('[net] actor key', key, 'recreated — creation #' + net._actCreateCount[key], 'at:', a.x, a.z, '(should only ever be 1 — investigate key churn)');
+      } else {
+        console.log('[snap] actor created key:', key, 'p:', a.p, 'cousin:', a.c, 'at:', a.x, a.z);
+      }
     }
     if (a.wp !== g.wp) {
       g.wp = a.wp;
@@ -13853,10 +13895,19 @@ function netApplySnapshot(m) {
     // another player just hit the floor: the lobby callout (0-check skips fresh ghosts,
     // so joining mid-rescue doesn't announce an old fall)
     if (a.p && a.dn && g.dn === 0) toast(`P${a.p} ${g.data.name.toUpperCase()} DOWN .ᐟ`, true);
-    g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar; g.taz = a.az; g.sl = a.sl; g.gr = a.gr;
+    g.tx = netFinite(a.x, g.tx ?? player.pos.x, 'actor.x:' + key);
+    g.tz = netFinite(a.z, g.tz ?? player.pos.z, 'actor.z:' + key);
+    g.ty = netFinite(a.y, g.ty ?? 0, 'actor.y:' + key);
+    g.tyw = netFinite(a.yw, g.tyw ?? 0, 'actor.yw:' + key);
+    g.mv = a.mv; g.hp = a.hp; g.dn = a.dn;
+    g.tar = netFinite(a.ar, g.tar ?? -Math.PI / 2, 'actor.ar:' + key);
+    g.taz = netFinite(a.az, g.taz ?? 0, 'actor.az:' + key);
+    g.tar2 = netFinite(a.ar2, g.tar2 ?? 0, 'actor.ar2:' + key);
+    g.sl = a.sl; g.gr = a.gr; g.dk = a.dk;
     g.tgs = a.gs || 1; // chili-giant scale target: the ghost grows/shrinks toward it with the melt blur
   }
   for (const [key, g] of net.actors) if (!seenA.has(key)) {
+    console.log('[snap] actor removed key:', key, '(not in latest snapshot)');
     // if this AI actor just got recruited (key changes from aiXYZ to pN),
     // stash the blob so the new player actor re-uses it instead of popping in at (0,0,0)
     if (!g.p && !net._xfer) net._xfer = new Map();
@@ -13929,7 +13980,10 @@ function netApplySnapshot(m) {
       zombies.push(g);
       if (!net._zlog) { net._zlog = true; console.log('[snap] first zombie ghost created nid:', zs.i, 'type:', zs.fb ? 'fbi' : zs.bo ? 'boss' : 'walker', 'total ghosts:', net.ghosts.size, 'total zombies array:', zombies.length); }
     }
-    g.tx = zs.x; g.tz = zs.z; g.tyw = zs.yw; g.netSt = zs.st; g.sh = !!zs.sh;
+    g.tx = netFinite(zs.x, g.tx ?? g.pos.x, 'zombie.x:' + zs.i);
+    g.tz = netFinite(zs.z, g.tz ?? g.pos.z, 'zombie.z:' + zs.i);
+    g.tyw = netFinite(zs.yw, g.tyw ?? 0, 'zombie.yw:' + zs.i);
+    g.netSt = zs.st; g.sh = !!zs.sh;
     // late rot: a pistol round can hang an eye mid-fight on the host, and a shotgun kill
     // can split a stomach or blow a chest side open on the way down — dress the ghost the
     // moment each flag arrives, not just at creation
@@ -13997,18 +14051,18 @@ function netClientWorldTick(dt) {
     g.walk += dt * (g.mv ? 10 : 2);
     const swing = Math.sin(g.walk) * (g.mv ? 0.85 : 0.06) + (g.mv ? 0 : Math.sin(performance.now() * 0.0011) * 0.05);
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
-    b.arms[b.offArm].rotation.x = -swing * 0.8;
     // idle breathing wobble — same squash-and-stretch as the local player
     const breathe = Math.sin(performance.now() * 0.002 + g.walkPhase) * 0.03;
     const wobble = g.mv ? Math.sin(g.walk * 2) * 0.045 : breathe;
     b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
-    // ranged arms ride the streamed gun-arm angle (eased over the 10Hz snapshots), so a
-    // hero aiming at the sky here aims at the sky on every screen — not a levelled prop
+    // both arms ride their own streamed angle (eased over the 10Hz snapshots): a hero aiming
+    // at the sky here aims at the sky on every screen, and a punch shows on whichever arm
+    // actually threw it — not a guessed walk swing
     g.arS = lerp(g.arS ?? -Math.PI / 2, g.tar ?? -Math.PI / 2, 1 - Math.exp(-14 * dt));
     g.azS = lerp(g.azS ?? 0, g.taz ?? 0, 1 - Math.exp(-14 * dt));
-    // fists: match the local player's alternating pace (offArm/gunArm swing opposite),
-    // not both arms pumping the same direction
-    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? swing * 0.8 : g.arS;
+    g.arS2 = lerp(g.arS2 ?? -swing * 0.8, g.tar2 ?? -swing * 0.8, 1 - Math.exp(-14 * dt));
+    b.arms[b.gunArm].rotation.x = g.arS;
+    b.arms[b.offArm].rotation.x = g.arS2;
     if (g.wp !== 'fists') b.arms[b.gunArm].rotation.z = g.azS;
     if (g.dn) {
       // downed players crawl on their belly, same read as the host's own view of them
@@ -14022,6 +14076,12 @@ function netClientWorldTick(dt) {
     else { b.wob.rotation.x = 0; }
     if (g.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
     if (!g.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; b.arms[b.gunArm].rotation.x = -2.4; }
+    // dropkick outranks the generic airborne tuck above — same fixed pose the local player uses
+    if (g.dk) {
+      b.wob.rotation.x = -0.75;
+      b.legs[0].rotation.x = -1.5; b.legs[1].rotation.x = -1.2;
+      b.arms[0].rotation.x = -2.7; b.arms[1].rotation.x = -2.7;
+    }
     // chili giants on other screens: ease the ghost toward the streamed scale, wearing the
     // splash-melt blur while the size is actually changing (grow AND the shrink back)
     const gsNow = b.root.scale.x, gsTgt = g.tgs || 1;
@@ -14188,9 +14248,11 @@ function netClientTick(dt) {
         yw: playerBlob.root.rotation.y, mv, wp: player.weapon.id, hp: Math.round(player.hp), th,
         ar: Math.round(playerBlob.arms[playerBlob.gunArm].rotation.x * 100) / 100,
         az: Math.round((playerBlob.arms[playerBlob.gunArm].rotation.z || 0) * 100) / 100,
+        ar2: Math.round(playerBlob.arms[playerBlob.offArm].rotation.x * 100) / 100,
         gs: (player.giantScale || 1) > 1.02 ? Math.round(player.giantScale * 20) / 20 : undefined,
         dn: player.downed ? 1 : 0,
-        sl: player.slideT > 0 ? 1 : 0, gr: player.grounded ? 1 : 0 });
+        sl: player.slideT > 0 ? 1 : 0, gr: player.grounded ? 1 : 0,
+        dk: player.dropKick ? 1 : 0 });
     } catch (e) {}
   }
 }
@@ -14351,14 +14413,16 @@ function netPoseCompanion(c, dt) {
   b.root.position.set(c.pos.x, c.y || groundHeight(c.pos.x, c.pos.z), c.pos.z);
   b.root.rotation.y = angLerp(b.root.rotation.y, c.yaw, 1 - Math.exp(-10 * dt));
   b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
-  b.arms[b.offArm].rotation.x = -swing * 0.8;
   const breathe = Math.sin(performance.now() * 0.002 + c.walkPhase) * 0.03;
   const wobble = (p && p.mv) ? Math.sin(c.walkPhase * 2) * 0.045 : breathe;
   b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
-  // their streamed gun-arm angle, eased over the 15Hz stream: real x/y aim, not a levelled prop
+  // their streamed arm angles, eased over the 15Hz stream: the real pose the owning screen
+  // shows (punches included, whichever arm actually throws them), not a guessed walk swing
   c.arS = lerp(c.arS ?? -Math.PI / 2, p && p.ar != null ? p.ar : -Math.PI / 2, 1 - Math.exp(-14 * dt));
   c.azS = lerp(c.azS ?? 0, p && p.az != null ? p.az : 0, 1 - Math.exp(-14 * dt));
-  b.arms[b.gunArm].rotation.x = (c.weapon && c.weapon.id === 'fists') ? swing * 0.8 : c.arS;
+  c.arS2 = lerp(c.arS2 ?? -swing * 0.8, p && p.ar2 != null ? p.ar2 : -swing * 0.8, 1 - Math.exp(-14 * dt));
+  b.arms[b.gunArm].rotation.x = c.arS;
+  b.arms[b.offArm].rotation.x = c.arS2;
   if (!(c.weapon && c.weapon.id === 'fists')) b.arms[b.gunArm].rotation.z = c.azS;
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
   if (c.downed) {
@@ -14373,6 +14437,12 @@ function netPoseCompanion(c, dt) {
   else { if (b.wob.rotation.x) b.wob.rotation.x = 0; }
   if (p && p.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
   if (p && !p.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; b.arms[b.gunArm].rotation.x = -2.4; }
+  // dropkick outranks the generic airborne tuck above — same fixed pose the local player uses
+  if (p && p.dk) {
+    b.wob.rotation.x = -0.75;
+    b.legs[0].rotation.x = -1.5; b.legs[1].rotation.x = -1.2;
+    b.arms[0].rotation.x = -2.7; b.arms[1].rotation.x = -2.7;
+  }
   // a client that ate the chili: the host's view of them grows/shrinks through the same
   // melt blur, driven off the gs field riding their pose stream
   const cgNow = b.root.scale.x, cgTgt = c.netGs || 1;
