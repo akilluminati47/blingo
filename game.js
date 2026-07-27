@@ -13818,8 +13818,17 @@ function netApplySnapshot(m) {
     }
     if (!g) {
       const cd = COUSINS.find(c => c.id === a.c) || COUSINS[0];
-      g = { blob: buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right', hands: cousinHands(a.c) }), wp: '', data: cd, p: a.p, walk: 0 };
-      scene.add(g.blob.root);
+      // check if this cousin's blob was just freed by a key-change (AI → player on recruit)
+      const xfer = net._xfer && net._xfer.get(a.c);
+      if (xfer) {
+        g = { blob: xfer, wp: '', data: cd, p: a.p, walk: 0 };
+        net._xfer.delete(a.c);
+        if (!net._xfer.size) net._xfer = null;
+        // keep it in scene — it was never removed
+      } else {
+        g = { blob: buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right', hands: cousinHands(a.c) }), wp: '', data: cd, p: a.p, walk: 0 };
+        scene.add(g.blob.root);
+      }
       net.actors.set(key, g);
       if (!net._actLogged) { net._actLogged = true; console.log('[snap] first actor created key:', key, 'p:', a.p, 'cousin:', a.c, 'at:', a.x, a.z); }
     }
@@ -13835,7 +13844,14 @@ function netApplySnapshot(m) {
     g.tx = a.x; g.tz = a.z; g.ty = a.y; g.tyw = a.yw; g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.tar = a.ar; g.taz = a.az; g.sl = a.sl; g.gr = a.gr;
     g.tgs = a.gs || 1; // chili-giant scale target: the ghost grows/shrinks toward it with the melt blur
   }
-  for (const [key, g] of net.actors) if (!seenA.has(key)) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
+  for (const [key, g] of net.actors) if (!seenA.has(key)) {
+    // if this AI actor just got recruited (key changes from aiXYZ to pN),
+    // stash the blob so the new player actor re-uses it instead of popping in at (0,0,0)
+    if (!g.p && !net._xfer) net._xfer = new Map();
+    if (!g.p && net._xfer) net._xfer.set(g.data.id, g.blob);
+    else { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); }
+    net.actors.delete(key);
+  }
   updatePauseLobby();   // the slots readout follows the actor list live, even mid-pause
   // the remaining cousins still waiting out there: mirror the host's recruit beacons so a
   // client sees (and can walk up) every cousin left to find. A standing cousin blob under a
