@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blingo — Death / Tally / Finale Preview</title>
+<link href="https://fonts.cdnfonts.com/css/opendyslexic" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0c10; font-family:'Segoe UI',system-ui,sans-serif; }
+  :root { --hero:#ffb347; }
+
+  /* ---- Full-screen page ---- */
+  .page { position:fixed; inset:0; z-index:30; display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+    background:rgba(5,7,10,.88); color:#fff; text-align:center; overflow-y:auto;
+    padding:calc(14px + env(safe-area-inset-top)) 16px calc(20px + env(safe-area-inset-bottom)); }
+  .page::before, .page::after { content:''; flex:0 0 auto; }
+  .page::before { margin-top:auto; }
+  .page::after { margin-bottom:auto; }
+  .page > * { flex-shrink:0; }
+  .page h1 { font-size:min(11vw,58px); letter-spacing:8px; margin-bottom:4px; text-shadow:0 0 26px rgba(255,160,60,.45); }
+
+  /* ---- Shared chip design ---- */
+  .statsgrid { display:grid; grid-template-columns:1fr 1fr; grid-auto-flow:column; grid-template-rows:repeat(2,auto);
+    gap:2px 28px; width:min(490px, 90vw); }
+  .dchip { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:9px;
+    color:#ddd; font-size:13px; border:1px solid transparent; background:rgba(255,255,255,.06); }
+  .dchip svg { width:22px; height:22px; flex:0 0 auto; color:var(--hero); filter:drop-shadow(0 1px 2px #000); }
+  .dchip .chipbody { display:flex; flex:1; justify-content:space-between; align-items:center; gap:8px; }
+  .dchip .chipbody span { font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--hero);
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
+  .dchip .chipbody b { font-size:20px; color:#fff; line-height:1; font-variant-numeric:tabular-nums; }
+
+  /* ---- Tally / Finale wrapper (matches game exactly) ---- */
+  #tallywrap { position:fixed; left:50%; top:52%; transform:translate(-50%,-50%); z-index:31;
+    display:none; flex-direction:column; align-items:center; pointer-events:none;
+    background:rgba(8,10,14,.62); border:1px solid rgba(255,179,71,.4); border-radius:14px;
+    padding:10px 22px 14px; backdrop-filter:blur(5px); box-shadow:0 0 26px rgba(255,150,40,.25);
+    width:min(520px, 92vw); transition:padding-top .7s ease, padding-bottom .7s ease; }
+  #tallywrap.expand-top { padding-top:18px; }
+  #tallywrap.expand-bottom { padding-bottom:22px; }
+  /* title + lore: zero-height until top expands */
+  #tallywrap .fstitle { color:#ffb347; font-weight:800; letter-spacing:.14em; font-size:17px;
+    text-shadow:0 2px 6px #000, 0 0 14px rgba(255,150,40,.6);
+    opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s; }
+  #tallywrap.expand-top .fstitle { max-height:1.8em; transition:opacity .5s ease, max-height .01s 0s; }
+  #tallywrap.done .fstitle, #tallywrap.expand-top .fstitle { opacity:1; }
+  #tallywrap .fslore { color:#ffd9a8; font-style:italic; font-size:13px;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s; margin-bottom:4px; }
+  #tallywrap.expand-top .fslore { max-height:1.6em; transition:opacity .5s ease, max-height .01s 0s; }
+  #tallywrap.done .fslore, #tallywrap.expand-top .fslore { opacity:1; }
+  /* chips: slide in during tally */
+  #tallywrap .dchip { opacity:0; transform:translateY(14px); transition:opacity .45s ease, transform .45s ease; }
+  #tallywrap .dchip.in { opacity:1; transform:translateY(0); }
+  /* buttons: zero-height until bottom expands */
+  #tallywrap .fsbtns { display:flex; margin-top:8px; border:2px solid var(--hero); border-radius:14px;
+    overflow:hidden; width:min(430px, 84vw); pointer-events:none;
+    opacity:0; max-height:0; transition:opacity .5s ease, max-height .01s .5s; }
+  #tallywrap.expand-bottom .fsbtns { max-height:60px; transition:opacity .5s ease, max-height .01s 0s; }
+  #tallywrap.done .fsbtns { opacity:1; pointer-events:auto; }
+  #tallywrap .fsbtns button { flex:1; pointer-events:auto; cursor:pointer; background:rgba(255,255,255,.05);
+    border:none; color:#eee; font-size:15px; font-weight:700; letter-spacing:2px; padding:14px 0; }
+  #tallywrap .fsbtns button:first-child { border-right:2px solid var(--hero); }
+  #tallywrap .fsbtns button:hover { background:var(--hero); color:#10131a; }
+  #tallywrap .fsbtns button.waithost { opacity:.45; pointer-events:none; }
+  /* wait message */
+  #tallywrap .fswait { margin-top:8px; font-size:14px; color:var(--hero);
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    animation:waitPulse 1.8s ease-in-out infinite;
+    opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s; }
+  #tallywrap.expand-bottom .fswait { max-height:2em; transition:opacity .5s ease, max-height .01s 0s; }
+  #tallywrap.done .fswait:not(.hidden) { opacity:1; }
+  @keyframes waitPulse { 0%,100%{opacity:.15} 50%{opacity:.95} }
+
+  /* ---- Death page ---- */
+  #deathpage h1 { color:#ff5b5b; text-shadow:0 0 24px rgba(255,60,60,.4); }
+  #deathpage .deathlore { color:#ffd9a8; font-style:italic; font-size:15px; margin-bottom:10px; opacity:.85;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
+  #waitmsg2 { margin-top:10px; font-size:14px; color:var(--hero); animation:waitPulse 1.8s ease-in-out infinite;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
+  .btnpair { display:flex; margin-top:12px; border:2px solid var(--hero); border-radius:14px;
+    overflow:hidden; width:min(430px, 84vw); }
+  .btnpair button { flex:1; cursor:pointer; background:rgba(255,255,255,.05);
+    border:none; color:#eee; font-size:15px; font-weight:700; letter-spacing:2px; padding:14px 0; }
+  .btnpair button:first-child { border-right:2px solid var(--hero); }
+  .btnpair button:hover { background:var(--hero); color:#10131a; }
+  .btnpair button.waithost { opacity:.45; pointer-events:none; }
+
+  #fadeback { position:fixed; inset:0; z-index:29; background:#000; opacity:0; transition:opacity .9s; pointer-events:none; }
+  #fadeback.show { opacity:1; }
+
+  #togglebar { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:40; display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
+  #togglebar button { padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.2);
+    background:rgba(255,255,255,.08); color:#ccc; cursor:pointer; font-size:11px; letter-spacing:1px; }
+  #togglebar button.active { background:var(--hero); color:#10131a; border-color:var(--hero); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<!-- DEATH PAGE -->
+<div class="page hidden" id="deathpage">
+  <h1 id="deathtitle">YOU GOT EATEN</h1>
+  <p class="deathlore">The cousins will avenge you, blob-kind remembers. .</p>
+  <div class="statsgrid">
+    <div class="dchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a7 7 0 0 0-7 7c0 2.6 1.2 4.4 3 5.6V19h8v-3.4c1.8-1.2 3-3 3-5.6a7 7 0 0 0-7-7z"/><circle cx="9.2" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="14.8" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><path d="M10 19v2.2M14 19v2.2"/></svg><div class="chipbody"><span>KILLS</span><b>142</b></div></div>
+    <div class="dchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10c0-3 1.2-5.4 3-7 1.8 1.6 3 4 3 7v6H9v-6z"/><path d="M8.4 16h7.2v3H8.4z"/></svg><div class="chipbody"><span>SHOTS FIRED</span><b>87</b></div></div>
+    <div class="dchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="1.2"/><path d="M4 11h16M12 7v13M4 7l2.5-3h11L20 7"/></svg><div class="chipbody"><span>CRATES OPENED</span><b>6</b></div></div>
+    <div class="dchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.8 2M9.5 3h5"/></svg><div class="chipbody"><span>SURVIVED</span><b>8:22</b></div></div>
+  </div>
+  <div class="btnpair">
+    <button id="dretrybtn">RETRY .ᐟ</button>
+    <button id="dquitbtn">QUIT TO MENU</button>
+  </div>
+  <p id="waitmsg2" class="hidden">. . waiting for Player 1 .ᐟ</p>
+</div>
+
+<!-- TALLY / FINALE WRAPPER -->
+<div id="tallywrap">
+  <div class="fstitle">MISSION COMPLETE .ᐟ</div>
+  <div class="fslore">Count up your contributions . .</div>
+  <div class="statsgrid" id="talStats">
+    <div class="dchip" data-target="847"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a7 7 0 0 0-7 7c0 2.6 1.2 4.4 3 5.6V19h8v-3.4c1.8-1.2 3-3 3-5.6a7 7 0 0 0-7-7z"/><circle cx="9.2" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="14.8" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><path d="M10 19v2.2M14 19v2.2"/></svg><div class="chipbody"><span>KILLS</span><b>0</b></div></div>
+    <div class="dchip" data-target="312"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 10c0-3 1.2-5.4 3-7 1.8 1.6 3 4 3 7v6H9v-6z"/><path d="M8.4 16h7.2v3H8.4z"/></svg><div class="chipbody"><span>SHOTS FIRED</span><b>0</b></div></div>
+    <div class="dchip" data-target="24"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="7" width="16" height="13" rx="1.2"/><path d="M4 11h16M12 7v13M4 7l2.5-3h11L20 7"/></svg><div class="chipbody"><span>CRATES OPENED</span><b>0</b></div></div>
+    <div class="dchip" data-target="3214" data-fmt="time"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.8 2M9.5 3h5"/></svg><div class="chipbody"><span>SURVIVED</span><b>0:00</b></div></div>
+  </div>
+  <div class="fsbtns" id="talBtns">
+    <button id="talPlay">PLAY</button>
+    <button id="talQuit">QUIT TO MENU</button>
+  </div>
+  <p class="fswait hidden" id="talWait">. . waiting for Player 1 .ᐟ</p>
+</div>
+
+<div id="fadeback"></div>
+
+<div id="togglebar">
+  <button id="viewDeath">Death</button>
+  <button id="viewDeathClient">Death (Client)</button>
+  <button id="viewTally" class="active">Tally → Finale</button>
+  <button id="viewFinaleHost">Finale (Host)</button>
+  <button id="viewFinaleClient">Finale (Client)</button>
+</div>
+
+<script>
+  const talWrap = document.getElementById('tallywrap');
+  const talChips = talWrap.querySelectorAll('.dchip');
+  const talBtns = document.getElementById('talBtns');
+  const talPlay = document.getElementById('talPlay');
+  const talQuit = document.getElementById('talQuit');
+  const talWait = document.getElementById('talWait');
+  const deathPage = document.getElementById('deathpage');
+  const fadeEl = document.getElementById('fadeback');
+  const btns = document.querySelectorAll('#togglebar button');
+
+  function fmtTime(v) { const m = Math.floor(v/60), s = v%60; return m + ':' + String(s).padStart(2,'0'); }
+
+  let tallyRaf = 0;
+  function stopTally() { if (tallyRaf) { cancelAnimationFrame(tallyRaf); tallyRaf = 0; } }
+
+  function resetAll() {
+    stopTally();
+    deathPage.classList.add('hidden');
+    talWrap.style.display = 'none';
+    fadeEl.classList.remove('show');
+    talWrap.classList.remove('expand-top', 'expand-bottom', 'done');
+    talPlay.classList.remove('waithost');
+    talWait.classList.add('hidden');
+    talChips.forEach(c => { c.classList.remove('in'); c.querySelector('b').textContent = '0'; });
+  }
+
+  function setChipValues() {
+    talChips.forEach(c => {
+      c.classList.add('in');
+      const t = parseInt(c.dataset.target);
+      c.querySelector('b').textContent = c.dataset.fmt === 'time' ? fmtTime(t) : String(t);
+    });
+  }
+
+  function showDeath(client) {
+    resetAll();
+    deathPage.classList.remove('hidden');
+    document.getElementById('deathtitle').textContent = 'YOU GOT EATEN';
+    document.getElementById('dretrybtn').textContent = client ? 'HOST RETRY . .' : 'RETRY .ᐟ';
+    document.getElementById('dretrybtn').classList.toggle('waithost', client);
+    document.getElementById('waitmsg2').classList.toggle('hidden', !client);
+  }
+
+  function showTally() {
+    resetAll();
+    talWrap.style.display = 'flex';
+    const revealDelays = [1600, 3100, 4600, 6100];
+    const countDur = 1100;
+    const started = performance.now();
+
+    function tick() {
+      const elapsed = performance.now() - started;
+      // reveal chips
+      for (let i = 0; i < talChips.length; i++) {
+        if (elapsed >= revealDelays[i]) talChips[i].classList.add('in');
+      }
+      // count up
+      talChips.forEach((c, i) => {
+        const rt = revealDelays[i];
+        if (elapsed < rt) return;
+        const p = Math.min((elapsed - rt) / countDur, 1);
+        const eased = 1 - Math.pow(1 - p, 3);
+        const t = parseInt(c.dataset.target);
+        c.querySelector('b').textContent = c.dataset.fmt === 'time' ? fmtTime(Math.round(t * eased)) : String(Math.round(t * eased));
+      });
+      if (elapsed < 2200) {
+        // chips still revealing — tight, no expansion
+        tallyRaf = requestAnimationFrame(tick);
+      } else if (elapsed < 3200) {
+        // all chips visible — grow top padding for the title + lore
+        talWrap.classList.add('expand-top');
+        tallyRaf = requestAnimationFrame(tick);
+      } else if (elapsed < 4200) {
+        // top settled — grow bottom padding for the buttons
+        talWrap.classList.add('expand-bottom');
+        tallyRaf = requestAnimationFrame(tick);
+      } else if (elapsed < 5200) {
+        // bottom settled — fade backdrop in
+        fadeEl.classList.add('show');
+        tallyRaf = requestAnimationFrame(tick);
+      } else if (elapsed < 6200) {
+        // fade complete — reveal title, lore, buttons
+        talWrap.classList.add('done');
+        tallyRaf = requestAnimationFrame(tick);
+      } else {
+        requestAnimationFrame(tick);
+      }
+    }
+    tallyRaf = requestAnimationFrame(tick);
+  }
+
+  function showFinale(role) {
+    resetAll();
+    talWrap.style.display = 'flex';
+    talWrap.classList.add('expand-top', 'expand-bottom', 'done');
+    fadeEl.classList.add('show');
+    setChipValues();
+    if (role === 'host') {
+      talPlay.textContent = 'PLAY';
+      talPlay.classList.remove('waithost');
+      talWait.classList.add('hidden');
+    } else {
+      talPlay.textContent = 'PLAY . .';
+      talPlay.classList.add('waithost');
+      talWait.classList.remove('hidden');
+    }
+  }
+
+  talPlay.addEventListener('click', () => { if (!talPlay.classList.contains('waithost')) alert('→ restartFromFinale()'); });
+  talQuit.addEventListener('click', () => alert('→ quitToMenu(true)'));
+  document.getElementById('dretrybtn').addEventListener('click', () => alert(document.getElementById('dretrybtn').classList.contains('waithost') ? '(waiting for host)' : '→ respawnRun()'));
+  document.getElementById('dquitbtn').addEventListener('click', () => alert('→ quitToMenu()'));
+
+  document.getElementById('viewDeath').addEventListener('click', () => {
+    btns.forEach(b => b.classList.remove('active'));
+    document.getElementById('viewDeath').classList.add('active');
+    showDeath(false);
+  });
+  document.getElementById('viewDeathClient').addEventListener('click', () => {
+    btns.forEach(b => b.classList.remove('active'));
+    document.getElementById('viewDeathClient').classList.add('active');
+    showDeath(true);
+  });
+  document.getElementById('viewTally').addEventListener('click', () => {
+    btns.forEach(b => b.classList.remove('active'));
+    document.getElementById('viewTally').classList.add('active');
+    showTally();
+  });
+  document.getElementById('viewFinaleHost').addEventListener('click', () => {
+    btns.forEach(b => b.classList.remove('active'));
+    document.getElementById('viewFinaleHost').classList.add('active');
+    showFinale('host');
+  });
+  document.getElementById('viewFinaleClient').addEventListener('click', () => {
+    btns.forEach(b => b.classList.remove('active'));
+    document.getElementById('viewFinaleClient').classList.add('active');
+    showFinale('client');
+  });
+
+  showTally();
+</script>
+</body>
+</html>

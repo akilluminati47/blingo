@@ -10953,9 +10953,10 @@ function updateCelebration(dt) {
   for (const c of companions) {
     if (c.recruited && !c.downed && c.grounded && Math.random() < dt * 2.5) { c.vy = 5.5 + Math.random() * 3; c.grounded = false; }
   }
-  // a beat before the fade, the tally wrapper expands its padding to make room for the
-  // title, lore line, and buttons — so nothing jumps when they fade into view
-  if (game.celebrateT <= 2.8) finalStatsEl.classList.add('expand');
+  // after the last chip appears, the wrapper expands top then bottom so the
+  // title + lore and buttons fade into view without any layout jump
+  if (game.celebrateT <= 2.8) finalStatsEl.classList.add('expand-top');
+  if (game.celebrateT <= 1.8) finalStatsEl.classList.add('expand-bottom');
   if (game.celebrateT <= 1) fadeEl.classList.add('show');
   if (game.celebrateT <= 0) {
     finishFinale();

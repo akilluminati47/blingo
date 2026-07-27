@@ -186,28 +186,29 @@
     display:flex; flex-direction:column; align-items:center; pointer-events:none;
     background:rgba(8,10,14,.62); border:1px solid rgba(255,179,71,.4); border-radius:14px;
     padding:10px 22px 14px; backdrop-filter:blur(5px); box-shadow:0 0 26px rgba(255,150,40,.25);
-    width:min(520px, 92vw); transition:padding .7s ease; }
+    width:min(520px, 92vw); transition:padding-top .7s ease, padding-bottom .7s ease; }
   #finalstats.hidden { display:none; }
-  #finalstats.expand { padding:18px 22px 22px; }
-  /* title + lore: zero-height until expanded, then fade in on .done */
+  #finalstats.expand-top { padding-top:18px; }
+  #finalstats.expand-bottom { padding-bottom:22px; }
+  /* title + lore: zero-height until top expands, then fade in on .done */
   #finalstats .fstitle { color:#ffb347; font-weight:800; letter-spacing:.14em; font-size:17px;
     text-shadow:0 2px 6px #000, 0 0 14px rgba(255,150,40,.6);
     opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s; }
-  #finalstats.expand .fstitle { max-height:1.8em; transition:opacity .5s ease, max-height .01s 0s; }
-  #finalstats.done .fstitle, #finalstats.expand .fstitle { opacity:1; }
+  #finalstats.expand-top .fstitle { max-height:1.8em; transition:opacity .5s ease, max-height .01s 0s; }
+  #finalstats.done .fstitle, #finalstats.expand-top .fstitle { opacity:1; }
   #finalstats .fslore { color:#ffd9a8; font-style:italic; font-size:13px;
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s; margin-bottom:4px; }
-  #finalstats.expand .fslore { max-height:1.6em; transition:opacity .5s ease, max-height .01s 0s; }
-  #finalstats.done .fslore, #finalstats.expand .fslore { opacity:1; }
+  #finalstats.expand-top .fslore { max-height:1.6em; transition:opacity .5s ease, max-height .01s 0s; }
+  #finalstats.done .fslore, #finalstats.expand-top .fslore { opacity:1; }
   /* stat chips: slide in per-row during the tally (updateJelly adds .in) */
   #finalstats .dchip { opacity:0; transform:translateY(14px); transition:opacity .45s ease, transform .45s ease; }
   #finalstats .dchip.in { opacity:1; transform:translateY(0); }
-  /* button pair + wait message: zero-height until expanded, button opacity fades on .done */
+  /* button pair + wait message: zero-height until bottom expands */
   #finalstats .fsbtns { display:flex; margin-top:8px; border:2px solid var(--hero); border-radius:14px;
     overflow:hidden; width:min(430px, 84vw); pointer-events:none;
     opacity:0; max-height:0; transition:opacity .5s ease, max-height .01s .5s; }
-  #finalstats.expand .fsbtns { max-height:60px; transition:opacity .5s ease, max-height .01s 0s; }
+  #finalstats.expand-bottom .fsbtns { max-height:60px; transition:opacity .5s ease, max-height .01s 0s; }
   #finalstats.done .fsbtns { opacity:1; pointer-events:auto; }
   #finalstats .fsbtns button { flex:1; pointer-events:auto; cursor:pointer; background:rgba(255,255,255,.05);
     border:none; color:#eee; font-size:15px; font-weight:700; letter-spacing:2px; padding:14px 0; }
@@ -218,7 +219,7 @@
     font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     animation:waitPulse 1.8s ease-in-out infinite;
     opacity:0; max-height:0; overflow:hidden; transition:opacity .5s ease, max-height .01s .5s; }
-  #finalstats.expand .fswait { max-height:2em; transition:opacity .5s ease, max-height .01s 0s; }
+  #finalstats.expand-bottom .fswait { max-height:2em; transition:opacity .5s ease, max-height .01s 0s; }
   #finalstats.done .fswait:not(.hidden) { opacity:1; }
   /* the chip grid inside the tally wrapper */
   #finalstats .statsgrid { display:grid; grid-template-columns:1fr 1fr; grid-auto-flow:column; grid-template-rows:repeat(2,auto);
