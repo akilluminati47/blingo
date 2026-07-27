@@ -10439,13 +10439,22 @@ function nearestPlayerDist(x, z) {
   for (const c of companions) if (c.netP) best = Math.min(best, Math.hypot(c.pos.x - x, c.pos.z - z));
   return best;
 }
+// every human actually in the run: the host's own player, plus any client-controlled
+// cousin (AI squadmates ride the host's formation, so they don't need their own entry).
+// Shared by spawnAnchor (who a fresh street zombie rings in around) and updateSpawner
+// (how big/fast the shared horde budget scales) — a 4-player lobby spread across the map
+// shouldn't be splitting one solo-sized zombie budget four ways.
+function activeHumans() {
+  const out = [player];
+  for (const c of companions) if (c.netP && !c.downed) out.push(c);
+  return out;
+}
 // where a fresh street spawn rings in — any human in the run is fair game, not just the host,
 // so a client wandering off on their own still draws a horde of their own rather than an empty
 // map. AI cousins ride the host's formation, so anchoring on the humans already covers them.
 function spawnAnchor() {
-  const anchors = [player.pos];
-  for (const c of companions) if (c.netP && !c.downed) anchors.push(c.pos);
-  return anchors[(Math.random() * anchors.length) | 0];
+  const humans = activeHumans();
+  return humans[(Math.random() * humans.length) | 0].pos;
 }
 // step inside this of the churchyard and its ground starts giving up its dead (he wakes at 18)
 const CHURCHYARD_NEAR = 42;
@@ -10477,8 +10486,15 @@ function updateSpawner(dt) {
   // free walkers). They ride the SAME spawner, so every boss-phase / vigil / cleanup rule
   // above already governs them.
   const horde = goreHordeLocal();
-  const maxZ = Math.round(Math.min(28, 4 + Math.floor(game.time / 22) + Math.floor(game.kills / 7)) * settings.zombieSpawn * (horde ? 1.2 : 1));
-  const interval = Math.max(0.42, (4.2 - game.time / 80) / settings.zombieSpawn / (horde ? 1.2 : 1));
+  // the anchor ring already spreads spawns across every human, not just the host — but
+  // without this, they were all still drawing off ONE solo-sized cap/clock. A lobby of 3
+  // clients spread across the map would burn through a solo horde budget near whoever's
+  // anchor got picked first, leaving the others' stretch of map thin or empty. Scaling the
+  // cap and cadence by headcount gives every screen the same host-level density solo play
+  // always had, however many people are actually out there.
+  const humanCount = activeHumans().length;
+  const maxZ = Math.round(Math.min(28, 4 + Math.floor(game.time / 22) + Math.floor(game.kills / 7)) * humanCount * settings.zombieSpawn * (horde ? 1.2 : 1));
+  const interval = Math.max(0.42, (4.2 - game.time / 80) / settings.zombieSpawn / (horde ? 1.2 : 1) / humanCount);
   if (game.spawnT <= 0 && zombies.length < maxZ) {
     game.spawnT = interval;
     // the graveyard breathes: near the churchyard, some spawns claw up out of the mounds.
@@ -13858,7 +13874,7 @@ function netApplySnapshot(m) {
       nb.root.position.copy(g.blob.root.position);
       nb.root.rotation.y = g.blob.root.rotation.y;
       scene.add(nb.root);
-      g = { blob: nb, wp: '', data: cd, p: a.p, walk: g.walk };
+      g = { blob: nb, wp: '', data: cd, p: a.p, walk: g.walk, walkPhase: g.walkPhase ?? Math.random() * 9 };
       net.actors.set(key, g);
     }
     if (!g) {
@@ -13866,12 +13882,16 @@ function netApplySnapshot(m) {
       // check if this cousin's blob was just freed by a key-change (AI → player on recruit)
       const xfer = net._xfer && net._xfer.get(a.c);
       if (xfer) {
-        g = { blob: xfer, wp: '', data: cd, p: a.p, walk: 0 };
+        g = { blob: xfer, wp: '', data: cd, p: a.p, walk: 0, walkPhase: Math.random() * 9 };
         net._xfer.delete(a.c);
         if (!net._xfer.size) net._xfer = null;
         // keep it in scene — it was never removed
       } else {
-        g = { blob: buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right', hands: cousinHands(a.c) }), wp: '', data: cd, p: a.p, walk: 0 };
+        // walkPhase MUST be seeded here: the idle-breathing wobble (netClientWorldTick)
+        // reads g.walkPhase with no fallback, so an unset value goes NaN the instant this
+        // actor stops moving (g.mv false) and the whole blob's scale collapses to NaN —
+        // reading in-game as the host/an NPC silently going invisible only while idle.
+        g = { blob: buildBlob({ color: cd.color, gunHand: a.c === 'blondie' ? 'left' : 'right', hands: cousinHands(a.c) }), wp: '', data: cd, p: a.p, walk: 0, walkPhase: Math.random() * 9 };
         scene.add(g.blob.root);
       }
       net.actors.set(key, g);
@@ -14052,7 +14072,7 @@ function netClientWorldTick(dt) {
     const swing = Math.sin(g.walk) * (g.mv ? 0.85 : 0.06) + (g.mv ? 0 : Math.sin(performance.now() * 0.0011) * 0.05);
     b.legs[0].rotation.x = swing; b.legs[1].rotation.x = -swing;
     // idle breathing wobble — same squash-and-stretch as the local player
-    const breathe = Math.sin(performance.now() * 0.002 + g.walkPhase) * 0.03;
+    const breathe = Math.sin(performance.now() * 0.002 + (g.walkPhase || 0)) * 0.03;
     const wobble = g.mv ? Math.sin(g.walk * 2) * 0.045 : breathe;
     b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
     // both arms ride their own streamed angle (eased over the 10Hz snapshots): a hero aiming
