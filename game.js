@@ -6506,13 +6506,13 @@ function trackedActors() {
   if (net.role === 'host') {
     for (const c of companions) if (c.netP) {
       out.push({ key: 'p' + c.netP, label: 'P' + c.netP, color: c.data.color,
-        x: c.pos.x, y: c.y || 0, z: c.pos.z, downed: !!c.downed, boss: false });
+        x: c.pos.x, y: c.y || 0, z: c.pos.z, downed: !!c.downed, boss: false, scale: c.netGs || 1 });
     }
   } else if (net.role === 'client') {
     for (const [, g] of net.actors) if (g.p) {
       const p = g.blob.root.position;
       out.push({ key: 'p' + g.p, label: 'P' + g.p, color: g.data.color,
-        x: p.x, y: p.y, z: p.z, downed: !!g.dn, boss: false });
+        x: p.x, y: p.y, z: p.z, downed: !!g.dn, boss: false, scale: g.blob.root.scale.x || 1 });
     }
   }
   // the last ten of a clear-the-block hunt wear a small green chevron each, so nobody
@@ -13989,7 +13989,10 @@ function netClientWorldTick(dt) {
     }
     b.root.position.x = lerp(b.root.position.x, g.tx ?? b.root.position.x, k);
     b.root.position.z = lerp(b.root.position.z, g.tz ?? b.root.position.z, k);
-    b.root.position.y = g.ty ?? b.root.position.y;
+    // eased like x/z instead of snapping — snapping to each 10Hz update is what made
+    // jumps read as laggy/stepped on other screens
+    const yk = 1 - Math.exp(-16 * dt);
+    b.root.position.y = lerp(b.root.position.y, g.ty ?? b.root.position.y, yk);
     b.root.rotation.y = angLerp(b.root.rotation.y, g.tyw || 0, k);
     g.walk += dt * (g.mv ? 10 : 2);
     const swing = Math.sin(g.walk) * (g.mv ? 0.85 : 0.06) + (g.mv ? 0 : Math.sin(performance.now() * 0.0011) * 0.05);
@@ -14003,7 +14006,9 @@ function netClientWorldTick(dt) {
     // hero aiming at the sky here aims at the sky on every screen — not a levelled prop
     g.arS = lerp(g.arS ?? -Math.PI / 2, g.tar ?? -Math.PI / 2, 1 - Math.exp(-14 * dt));
     g.azS = lerp(g.azS ?? 0, g.taz ?? 0, 1 - Math.exp(-14 * dt));
-    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? -swing * 0.8 : g.arS;
+    // fists: match the local player's alternating pace (offArm/gunArm swing opposite),
+    // not both arms pumping the same direction
+    b.arms[b.gunArm].rotation.x = g.wp === 'fists' ? swing * 0.8 : g.arS;
     if (g.wp !== 'fists') b.arms[b.gunArm].rotation.z = g.azS;
     if (g.dn) {
       // downed players crawl on their belly, same read as the host's own view of them
@@ -14016,7 +14021,7 @@ function netClientWorldTick(dt) {
     } else if (g.sl) { b.wob.rotation.x = -0.85; }
     else { b.wob.rotation.x = 0; }
     if (g.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
-    if (!g.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
+    if (!g.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; b.arms[b.gunArm].rotation.x = -2.4; }
     // chili giants on other screens: ease the ghost toward the streamed scale, wearing the
     // splash-melt blur while the size is actually changing (grow AND the shrink back)
     const gsNow = b.root.scale.x, gsTgt = g.tgs || 1;
@@ -14335,7 +14340,10 @@ function netPoseCompanion(c, dt) {
     const k = 1 - Math.exp(-12 * dt);
     c.pos.x = lerp(c.pos.x, p.x, k);
     c.pos.z = lerp(c.pos.z, p.z, k);
-    c.y = p.y; c.yaw = p.yw;
+    // eased like x/z instead of snapping straight to the streamed height — the snap is
+    // what made a client's jump look laggy/stepped on the host's screen
+    c.y = lerp(c.y ?? p.y, p.y, 1 - Math.exp(-16 * dt));
+    c.yaw = p.yw;
     if (p.wp && WEAPONS[p.wp] && (c.weapon || {}).id !== p.wp) setCompanionWeapon(c, p.wp);
     c.walkPhase += dt * (p.mv ? 10 : 2);
   }
@@ -14350,7 +14358,7 @@ function netPoseCompanion(c, dt) {
   // their streamed gun-arm angle, eased over the 15Hz stream: real x/y aim, not a levelled prop
   c.arS = lerp(c.arS ?? -Math.PI / 2, p && p.ar != null ? p.ar : -Math.PI / 2, 1 - Math.exp(-14 * dt));
   c.azS = lerp(c.azS ?? 0, p && p.az != null ? p.az : 0, 1 - Math.exp(-14 * dt));
-  b.arms[b.gunArm].rotation.x = (c.weapon && c.weapon.id === 'fists') ? -swing * 0.8 : c.arS;
+  b.arms[b.gunArm].rotation.x = (c.weapon && c.weapon.id === 'fists') ? swing * 0.8 : c.arS;
   if (!(c.weapon && c.weapon.id === 'fists')) b.arms[b.gunArm].rotation.z = c.azS;
   // downed: mirror their crawl, and drag their beacon along as they haul themselves off
   if (c.downed) {
@@ -14364,7 +14372,7 @@ function netPoseCompanion(c, dt) {
   } else if (p && p.sl) { b.wob.rotation.x = -0.85; }
   else { if (b.wob.rotation.x) b.wob.rotation.x = 0; }
   if (p && p.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
-  if (p && !p.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; }
+  if (p && !p.gr) { b.legs[0].rotation.x = 0.5; b.legs[1].rotation.x = -0.3; b.arms[b.offArm].rotation.x = -2.4; b.arms[b.gunArm].rotation.x = -2.4; }
   // a client that ate the chili: the host's view of them grows/shrinks through the same
   // melt blur, driven off the gs field riding their pose stream
   const cgNow = b.root.scale.x, cgTgt = c.netGs || 1;
