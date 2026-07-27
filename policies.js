@@ -457,20 +457,20 @@ if(location.hash === '#policies') openPolicies();
 // fetch the latest GitHub release to populate the download section on the policies page
 (async function initDownloads() {
   const verEl = document.getElementById('pdownver');
-  const loadedEl = document.getElementById('pdownloaded');
   const btnExe = document.getElementById('pdown-exe');
   const btnApk = document.getElementById('pdown-apk');
   const btnIpa = document.getElementById('pdown-ipa');
   const badgeEl = document.getElementById('pdown-badge');
   if (!verEl || !btnExe || !btnApk) return;
+  // "Latest" (GitHub release) and "Loaded" (this build's own version.json) resolve on
+  // separate, independent async paths — render both into the one line whichever lands first
+  let latestText = null, loadedText = null;
+  const renderVerLine = () => { verEl.textContent = [latestText, loadedText].filter(Boolean).join('  |  ') || 'Checking latest release...'; };
   // game.js fetches version.json (auto-updated by the release workflow) and sets
-  // window.BLINGO_VERSION, dispatching 'blingo-version-ready' when it's set. Show
-  // it right under the "Latest" line so an installed build can be compared at a glance.
-  if (loadedEl) {
-    const showLoaded = v => { loadedEl.textContent = 'Loaded: ' + (String(v).startsWith('v') ? v : 'v' + v); loadedEl.hidden = false; };
-    if (window.BLINGO_VERSION) showLoaded(window.BLINGO_VERSION);
-    else window.addEventListener('blingo-version-ready', e => showLoaded(e.detail), { once: true });
-  }
+  // window.BLINGO_VERSION, dispatching 'blingo-version-ready' when it's set.
+  const showLoaded = v => { loadedText = 'Loaded: ' + (String(v).startsWith('v') ? v : 'v' + v); renderVerLine(); };
+  if (window.BLINGO_VERSION) showLoaded(window.BLINGO_VERSION);
+  else window.addEventListener('blingo-version-ready', e => showLoaded(e.detail), { once: true });
   const CACHE_KEY = 'blingo_release', CACHE_TTL = 300000; // 5 min
   let data = null;
   try {
@@ -484,8 +484,9 @@ if(location.hash === '#policies') openPolicies();
     } catch (_) {}
     if (data) try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
   }
-  if (!data) { verEl.textContent = 'Could not reach GitHub — check back later'; return; }
-  verEl.textContent = 'Latest: ' + (data.tag_name || data.name || '');
+  if (!data) { verEl.textContent = [loadedText, 'Could not reach GitHub — check back later'].filter(Boolean).join('  |  '); return; }
+  latestText = 'Latest: ' + (data.tag_name || data.name || '');
+  renderVerLine();
   const assets = data.assets || [];
   const setup = assets.find(a => /\.exe$/i.test(a.name) && /setup/i.test(a.name));
   const portable = assets.find(a => /\.exe$/i.test(a.name) && !/setup/i.test(a.name));
