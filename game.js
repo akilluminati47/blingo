@@ -13734,7 +13734,7 @@ function netApplySnapshot(m) {
     }
     for (let i = allCrates.length - 1; i >= 0; i--) {
       const c = allCrates[i];
-      if (c.netGhost && !seenC.has(c.nid)) { c.mesh.removeFromParent(); allCrates.splice(i, 1); }
+      if (c.netGhost && !seenC.has(c.nid) && !c.opened) { c.mesh.removeFromParent(); allCrates.splice(i, 1); }
     }
   }
   // the murder, mirrored: same birds, same ledges, same purple glares on every screen.
