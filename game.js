@@ -7202,6 +7202,11 @@ function quitToMenu(keepChain) {
   document.getElementById('startscreen').classList.remove('hidden');
   if (window._resumeTypewriter) window._resumeTypewriter();
   document.body.classList.remove('playing');
+  // the shared cutscene video behind the menus can get suspended/paused by the browser
+  // after sitting backgrounded for the whole run — make sure it's actually running again
+  // now that it's back on screen, same recovery openPolicies() does.
+  const bg = document.getElementById('policybg');
+  if (bg && bg.paused) bg.play().catch(() => {});
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   hideFinalStats(); // grandma's tally never follows you onto the menu
   document.getElementById('deathstats').innerHTML = ''; // and neither does the death sheet
