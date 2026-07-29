@@ -1292,6 +1292,7 @@ const SFX = {
     if (w.id === 'shotgun') { noiseBurst(0.28, 900, 0.9); tone(90, 0.15, 0.4, 'square', 40); }
     else if (w.id === 'sniper') { noiseBurst(0.4, 1400, 0.9); tone(140, 0.3, 0.35, 'sawtooth', 50); }
     else if (w.id === 'magnum') { noiseBurst(0.22, 1100, 0.8); tone(120, 0.16, 0.4, 'square', 45); }
+    else if (w.id === 'pumpshotgun') { this.pumpshoot(); }
     else if (w.melee) {
       if (w.id === 'fists') { noiseBurst(0.08, 500, 0.3); }               // soft whiff
       else { noiseBurst(0.09, 340, 0.42); tone(160, 0.08, 0.18, 'square', 80); } // swing whoosh + thud
@@ -1347,6 +1348,9 @@ const SFX = {
   limb() { noiseBurst(0.2, 360, 0.6); tone(110, 0.16, 0.3, 'square', 60); },
   land() { noiseBurst(0.09, 200, 0.25); },
   slide() { noiseBurst(0.3, 480, 0.32); tone(220, 0.22, 0.12, 'sawtooth', 90); },
+  pumpshoot() { noiseBurst(0.24, 1800, 0.88); tone(110, 0.18, 0.42, 'square', 48); },
+  rpgFire()   { noiseBurst(0.45, 320, 0.95); tone(55, 0.55, 0.55, 'sawtooth', 22); },
+  rpgReload() { tone(280, 0.07, 0.22, 'square'); setTimeout(()=>tone(420, 0.14, 0.28, 'square'), 180); setTimeout(()=>tone(360, 0.1, 0.24, 'square'), 900); setTimeout(()=>tone(480, 0.12, 0.3, 'square'), 1200); },
 };
 
 // ---------- ambience + persona themes ----------
@@ -1617,10 +1621,16 @@ const WEAPONS = {
   shotgun: { id: 'shotgun', name: 'Shotgun',      slot: 'gun', dmg: 2, mag: 10, rpm: 300, auto: false, spread: 0.11,  ammo: 60, pellets: 12, color: 0x6e3d1f, kick: 0.09, rmb: [150, 1, 0.7], cqc: 2.0, dismember: 0.75, gib: true, fRange: 7 },
   magnum:  { id: 'magnum',  name: 'Magnum',       slot: 'gun', dmg: 10, mag: 10, rpm: 160, auto: false, spread: 0.008, ammo: 60,  color: 0x8a8f9a, kick: 0.05, rmb: [140, 1, 0.75],  cqc: 0.6,  dismember: 0.6, gib: true, fRange: 18, oneHand: true },
   sniper:  { id: 'sniper',  name: 'Sniper Rifle', slot: 'gun', dmg: 22,mag: 8,  rpm: 45,  auto: false, spread: 0.002, ammo: 40,  color: 0x2f4a35, kick: 0.11, rmb: [260, 1, 1],  cqc: 0.2,  dismember: 1, gib: true, execute: true },
+  // time-limited drops, both parachuted in over a boss fight (see spawnParachuteCrate).
+  // ammo is a big finite number rather than Infinity — reserves[w.id]|0 is used all over
+  // (tryReload, the touch auto-fire "spent" check) and Infinity|0 coerces to 0 in JS, which
+  // would silently brick the reload the moment the mag ran dry.
+  pumpshotgun: { id:'pumpshotgun', name:'Pump Shotgun', slot:'gun', dmg:4, mag:20, rpm:240, auto:false, spread:0.032, ammo:999, color:0x4a5a3a, kick:0.08, rmb:[140,0.85,0.6], cqc:2.6, dismember:0.9, gib:true, fRange:50, pellets:10, timeLimited:true },
+  rpg:        { id:'rpg',        name:'RPG-7',        slot:'gun', dmg:100,mag:1,  rpm:14,  auto:false, spread:0.012, ammo:999, color:0x3a4a2a, kick:0.22, rmb:[220,1,1],   cqc:0,  dismember:1,   gib:true, fRange:80, blastRadius:6.5, bossDmg:67, selfDmg:35, timeLimited:true },
 };
 // inventory slot order: fists, then the consumables (grandma's jelly, Red's chili), then
 // found melee by weight, then guns by tier
-const SLOT_ORDER = ['fists', 'jelly', 'chili', 'pipe', 'bat', 'machete', 'katana', 'sledge', 'axe', 'pistol', 'smg', 'rifle', 'shotgun', 'magnum', 'sniper'];
+const SLOT_ORDER = ['fists', 'jelly', 'chili', 'pipe', 'bat', 'machete', 'katana', 'sledge', 'axe', 'pistol', 'smg', 'rifle', 'shotgun', 'magnum', 'sniper', 'pumpshotgun', 'rpg'];
 function slotRank(id) { const i = SLOT_ORDER.indexOf(id); return i < 0 ? 99 : i; }
 // point-blank damage multiplier for a hit at distance d
 function closeBonus(w, d) { return 1 + (w.cqc || 0) * clamp(1 - d / 8, 0, 1); }
@@ -1719,6 +1729,24 @@ function buildGunMesh(id) {
     lens.material = new THREE.MeshBasicMaterial({ color: 0x7fb8ff }); g.add(lens);
     const stock = box(0.08, 0.15, 0.3, 0x2a2318); stock.position.set(0, 0.0, 0.28); g.add(stock);
     const grip = box(0.07, 0.16, 0.09, 0x22252b); grip.position.set(0, -0.09, 0.12); grip.rotation.x = 0.25; g.add(grip);
+  } else if (id === 'pumpshotgun') {
+    // Mossberg 590 style with banana mag
+    const body = box(0.12, 0.16, 0.74, c); body.position.set(0, 0.06, -0.24); g.add(body);
+    const barrel = cyl(0.04, 0.045, 0.58, 0x2a2c30); barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.09, -0.76); g.add(barrel);
+    const mag = box(0.09, 0.32, 0.42, 0x3a4a2a); mag.position.set(0, -0.16, -0.1); mag.rotation.x = 0.38; g.add(mag);
+    const grip = box(0.09, 0.19, 0.12, 0x22252b); grip.position.set(0, -0.11, 0.14); grip.rotation.x = 0.25; g.add(grip);
+    const stock = box(0.1, 0.15, 0.34, c); stock.position.set(0, 0.04, 0.3); g.add(stock);
+    const pump = box(0.13, 0.07, 0.32, 0x2a2c30); pump.position.set(0, -0.06, -0.38); g.add(pump);
+    const muz = new THREE.Group(); muz.position.set(0, 0.09, -1.06); g.add(muz); g.userData.muzzle = muz;
+  } else if (id === 'rpg') {
+    const tube = cyl(0.075, 0.075, 1.15, c); tube.rotation.x = Math.PI/2; tube.position.set(0, 0.07, -0.58); g.add(tube);
+    const warhead = cyl(0.1, 0.075, 0.26, 0x8a3a2a); warhead.rotation.x = Math.PI/2; warhead.position.set(0, 0.07, -1.26); g.add(warhead);
+    for (const s of [-1, 1]) {
+      const fin = box(0.035, 0.16, 0.025, 0x2a2c30); fin.position.set(s*0.11, 0.07, 0.04); fin.rotation.z = s*0.35; g.add(fin);
+    }
+    const grip = box(0.1, 0.18, 0.13, 0x22252b); grip.position.set(0, -0.1, 0.1); grip.rotation.x = 0.24; g.add(grip);
+    const sight = box(0.035, 0.07, 0.12, 0x2a2c30); sight.position.set(0, 0.18, -0.22); g.add(sight);
+    g.userData.rocket = warhead; // tracked for fire/reload vis
   } else if (id === 'jelly') {
     // grandma's jar in hand: purple glass under a waxed cap, the family cure-all
     const glass = cyl(0.11, 0.1, 0.24, 0xffffff, 10);
@@ -2198,6 +2226,15 @@ const CHUNK = 40;
 const chunks = new Map();
 const allCrates = [];
 const townColliders = [];
+
+// ---------- parachute supply crates (pump shotgun / RPG) ----------
+const parachuteCrates = [];
+const rpgProjectiles = [];
+let timeLimitedWeapon = null; // { id, timer, maxTime }
+const TL_DURATION = 90;
+const TL_DURATION_BLAZO = 120;
+const PARACHUTE_BEACON_Y = 88;
+const PARACHUTE_FALL_SPEED = 3.2;
 
 // tight collision/hit box. y0..y1 hug the mesh so bullets pass over/around without
 // invisible walls. optional rot = yaw for oriented boxes (cars). tops are standable.
@@ -6959,6 +6996,13 @@ function resetGame() {
   bossState.spawned2 = false; bossState.defeated2 = false;
   bossState.spawned3 = false; bossState.defeated3 = false; // the Infected One resets with his brothers
   bossState.spawned4 = false; bossState.defeated4 = false; // and the Rotten One with all three
+  // clear anything left over from a boss's parachute drop last run
+  for (const cr of parachuteCrates) { scene.remove(cr.mesh); if (cr.chevron) scene.remove(cr.chevron); }
+  parachuteCrates.length = 0;
+  for (const p of rpgProjectiles) scene.remove(p.mesh);
+  rpgProjectiles.length = 0;
+  timeLimitedWeapon = null;
+  const tlEl = document.getElementById('tlweapon'); if (tlEl) tlEl.classList.toggle('show', false);
   // grandma's light + ghost + tally leave with the run they closed
   if (jelly.beacon) { scene.remove(jelly.beacon); jelly.beacon = null; }
   if (jelly.ghost) { scene.remove(jelly.ghost.root); if (jelly.ghost.shadow) scene.remove(jelly.ghost.shadow); jelly.ghost = null; }
@@ -7851,6 +7895,10 @@ function fireWeapon() {
   // gunshots are loud: blind zombies home in on this spot
   game.lastShot.set(player.pos.x, 0, player.pos.z); game.lastShotT = game.time;
   updateAmmoHUD();
+  // the RPG launches a real projectile instead of a hit-scan ray — everything above this
+  // (clip/reserve/reload bookkeeping, shot counter) still applies normally, but the pellet
+  // loop below doesn't apply to it at all
+  if (w.id === 'rpg') { fireRPG(); return; }
   SFX.shoot(w);
   rumble(...w.rmb);
   shakeAmp = Math.max(shakeAmp, w.kick);
@@ -8712,6 +8760,251 @@ function giveWeapon(id) {
   }
   updateAmmoHUD();
 }
+// ---------- parachute supply crates, time-limited weapons, RPG ----------
+// the color-cycling beacon that points you at a still-falling/unopened parachute crate
+// from clear across the block, same idea as the boss beam but worn by the crate itself
+function makeChevronMarker() {
+  const g = new THREE.Group();
+  const s = new THREE.Shape();
+  s.moveTo(0, 0.7); s.lineTo(0.4, 0); s.lineTo(0.16, 0);
+  s.lineTo(0.16, -0.5); s.lineTo(-0.16, -0.5); s.lineTo(-0.16, 0); s.lineTo(-0.4, 0);
+  s.closePath();
+  const m = new THREE.Mesh(new THREE.ExtrudeGeometry(s, {depth:0.1, bevelEnabled:false}),
+    new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.95, depthWrite:false}));
+  m.renderOrder = 15; g.add(m); g.rotation.x = Math.PI;
+  return g;
+}
+// a boss fight drops one of these half the time: a slow parachute crate carrying either
+// the pump shotgun or the RPG, both on a clock (grantTimeLimitedWeapon). Kept OUT of
+// allCrates on purpose — the generic openCrate()/giant-stomp path assumes a glow/loot-roll
+// shape this crate doesn't have, so it runs its own compact open flow below instead.
+function spawnParachuteCrate(bossX, bossZ) {
+  if (net.role === 'client') return;
+  if (Math.random() >= 0.5) return;
+  const ang = Math.random() * TAU;
+  const dist = 28 + Math.random() * 22; // 28–50 out, usually off-screen until you turn
+  const x = bossX + Math.cos(ang)*dist;
+  const z = bossZ + Math.sin(ang)*dist;
+  const g = new THREE.Group();
+  const base = box(1.4, 1.0, 1.4, 0x8a5a2b); base.position.y = 0.5; g.add(base);
+  const trim = box(1.48, 0.2, 1.48, 0xc8a44a, {emissive:0x886600, emissiveIntensity:0.6}); trim.position.y = 1.0; g.add(trim);
+  const lid = box(1.44, 0.2, 1.44, 0x6e451f); lid.position.y = 1.14; g.add(lid);
+  const chute = new THREE.Mesh(new THREE.SphereGeometry(2.4, 14, 10, 0, TAU, 0, Math.PI/2), mat(0xc8a44a, {side:THREE.DoubleSide}));
+  chute.position.y = 3.0; chute.scale.y = 0.42; g.add(chute);
+  for (const [px,pz] of [[0.9,0.9],[-0.9,0.9],[0.9,-0.9],[-0.9,-0.9]]) {
+    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,2.4,4), mat(0x8a7a5a));
+    str.position.set(px*0.5, 1.8, pz*0.5); str.lookAt(px*1.2, 0.5, pz*1.2); g.add(str);
+  }
+  g.scale.setScalar(2); // 2× size
+  g.position.set(x, PARACHUTE_BEACON_Y, z);
+  scene.add(g);
+  const chev = makeChevronMarker(); scene.add(chev);
+  const cr = {
+    mesh:g, lid, trim, chevron:chev, opened:false, shrink:0,
+    pos:new THREE.Vector3(x, PARACHUTE_BEACON_Y, z),
+    velY:-PARACHUTE_FALL_SPEED, t:Math.random()*10,
+    landed:false, weapon:Math.random()<0.5?'pumpshotgun':'rpg',
+    nid:++net.pkid
+  };
+  parachuteCrates.push(cr);
+}
+
+function updateParachuteCrates(dt) {
+  for (let i = parachuteCrates.length-1; i>=0; i--) {
+    const cr = parachuteCrates[i]; cr.t += dt;
+    if (!cr.opened && cr.chevron) {
+      const hue = (cr.t * 0.45) % 1;
+      cr.chevron.children[0].material.color.setHSL(hue, 1, 0.52);
+      cr.chevron.position.set(cr.pos.x, cr.pos.y + 4.2, cr.pos.z);
+      cr.chevron.lookAt(camera.position.x, camera.position.y, camera.position.z);
+      cr.chevron.rotateX(Math.PI);
+    }
+    if (!cr.landed) {
+      // rainy weather drags the chute the same way it drags the raindrops (updateRain):
+      // same wind vector, so the crate visibly drifts and falls at the rain's own slant —
+      // faster and swayier the harder it's coming down, dead calm on a clear day
+      const W = wxWeights();
+      const rainAmt = W.rain;
+      const gustX = Math.sin(windYaw) * windStr * rainAmt * 2.6;
+      const gustZ = Math.cos(windYaw) * windStr * rainAmt * 2.6;
+      cr.pos.x += gustX * dt;
+      cr.pos.z += gustZ * dt;
+      const fallMul = 1 + rainAmt * 0.55;
+      const swayMul = 1 + rainAmt * 0.9;
+      cr.pos.y += cr.velY * fallMul * dt;
+      cr.mesh.position.x = cr.pos.x + Math.sin(cr.t*0.9)*0.4*swayMul;
+      cr.mesh.position.z = cr.pos.z + Math.cos(cr.t*0.7)*0.4*swayMul;
+      cr.mesh.position.y = cr.pos.y;
+      cr.mesh.rotation.y += dt*0.08;
+      // gentle pendulum sway under the canopy; leans harder downwind in the rain so the
+      // whole rig reads as falling at an angle instead of hanging dead straight down
+      const leanAmt = Math.min(0.32, windStr * rainAmt * 0.4);
+      cr.mesh.rotation.z = Math.sin(cr.t*0.9) * 0.05 * swayMul + Math.sin(windYaw) * leanAmt;
+      cr.mesh.rotation.x = Math.cos(cr.t*0.7) * 0.035 * swayMul - Math.cos(windYaw) * leanAmt;
+      const gy = groundHeight(cr.pos.x, cr.pos.z);
+      if (cr.pos.y <= gy + 0.6) {
+        cr.pos.y = gy + 0.6; cr.mesh.position.y = cr.pos.y;
+        cr.mesh.rotation.x = 0; cr.mesh.rotation.z = 0; // settles upright the moment it lands
+        cr.landed = true; cr.velY = 0;
+        cr.col = aabb(cr.pos.x, cr.pos.z, 0.72, 0.72, 1.2, gy-0.02);
+      }
+    }
+    // Interact open
+    if (!cr.opened && cr.landed && Math.hypot(player.pos.x-cr.pos.x, player.pos.z-cr.pos.z) < 2.8 && input.interact) {
+      cr.opened = true;
+      cr.trim.material.emissiveIntensity = 0;
+      if (cr.chevron) { cr.chevron.removeFromParent(); cr.chevron = null; }
+      grantTimeLimitedWeapon(cr.weapon);
+      SFX.crate(); rumble(180, 0.5, 0.5);
+      spawnParticles(cr.pos.x, cr.pos.y+1.2, cr.pos.z, 0xffdc78, 18, 4, 0.9);
+      input.interact = false; // consumed — don't let updatePlayer's own interact pass re-fire on a crate/recruit behind it
+    }
+    if (cr.opened && cr.shrink < 1) {
+      cr.shrink += dt * 1.6;
+      const s = 2 * Math.max(0, 1 - cr.shrink);
+      cr.mesh.scale.setScalar(s);
+      if (cr.shrink >= 1) {
+        cr.mesh.removeFromParent(); parachuteCrates.splice(i,1);
+      }
+    }
+  }
+}
+
+// the chili-style clock: grants id (pumpshotgun/rpg) for TL_DURATION seconds (longer + a
+// perk bump for Blazo), then takes it back the moment the clock runs out
+function grantTimeLimitedWeapon(id) {
+  const dur = selectedCousin === 'blazo' ? TL_DURATION_BLAZO : TL_DURATION;
+  timeLimitedWeapon = { id, timer:dur, maxTime:dur };
+  if (!player.owned.includes(id)) {
+    player.owned.push(id);
+    player.owned.sort((a,b)=>slotRank(a)-slotRank(b));
+  }
+  equipWeapon(id);
+  SFX.pickup(); rumble(200, 0.55, 0.55);
+  toast(id==='rpg' ? 'RPG-7 ACQUIRED .ᐟ LIMITED TIME .ᐟ' : 'PUMP SHOTGUN ACQUIRED .ᐟ LIMITED TIME .ᐟ', true);
+  updateWeaponBtn(); updateAmmoHUD();
+}
+
+function updateTimeLimitedWeapons(dt) {
+  if (!timeLimitedWeapon) return;
+  timeLimitedWeapon.timer -= dt;
+  // HUD chip — add a <div id="tlweapon" class="hudchip"><b>0:00</b><span>LIMITED WEAPON</span></div>
+  // to the page, styled like #gianttimer; this is a no-op until that markup exists
+  const el = document.getElementById('tlweapon');
+  if (el) {
+    el.classList.toggle('show', true);
+    const b = el.querySelector('b'); if (b) b.textContent = fmtTime(Math.max(0, timeLimitedWeapon.timer));
+  }
+  if (timeLimitedWeapon.timer <= 0) {
+    const idx = player.owned.indexOf(timeLimitedWeapon.id);
+    if (idx >= 0) player.owned.splice(idx, 1);
+    if (player.weapon && player.weapon.id === timeLimitedWeapon.id) {
+      equipWeapon(player.owned.includes('fists') ? 'fists' : player.owned[0] || 'fists');
+    }
+    timeLimitedWeapon = null;
+    if (el) el.classList.toggle('show', false);
+    toast('WEAPON EXPIRED .ᐟ', true);
+    updateWeaponBtn(); updateAmmoHUD();
+  }
+}
+
+// ---------- RPG projectile + explosion ----------
+function fireRPG() {
+  if (!gunMesh) return;
+  // Hide the loaded rocket
+  if (gunMesh.userData.rocket) gunMesh.userData.rocket.visible = false;
+  SFX.rpgFire(); rumble(350, 1, 0.85); shakeAmp = Math.max(shakeAmp, 0.18);
+  // true aim direction (camera-based), same as every hit-scan weapon — the visible arms
+  // are cosmetic and don't always match the crosshair's pitch exactly, but the rocket should
+  getAimDir(_aimDir);
+  const dir = _aimDir.clone().normalize();
+  const origin = new THREE.Vector3();
+  (gunMesh.userData.muzzle || gunMesh).getWorldPosition(origin);
+  origin.addScaledVector(dir, 0.9);
+  const rg = cyl(0.075, 0.075, 0.42, 0x8a3a2a);
+  rg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); // cylinder's long axis -> flight direction
+  rg.position.copy(origin);
+  scene.add(rg);
+  rpgProjectiles.push({ mesh:rg, vel:dir.clone().multiplyScalar(52), life:3.5, owner:player });
+  // Reload visual restore
+  setTimeout(()=>{ if (gunMesh && gunMesh.userData.rocket) gunMesh.userData.rocket.visible = true; }, 4200);
+  SFX.rpgReload();
+}
+
+function explodeRPG(x, y, z, owner) {
+  const isBlazo = selectedCousin === 'blazo';
+  const zombieDmg = isBlazo ? 125 : 100;
+  const bossDmg   = isBlazo ? 84  : 67;
+  const radius = 6.5;
+  // Visuals
+  spawnParticles(x, y, z, 0xff6622, 45, 9, 1.6);
+  spawnParticles(x, y, z, 0xffcc44, 30, 7, 1.3);
+  spawnParticles(x, y, z, 0x888888, 20, 5, 1.0); // shrapnel dust
+  shakeAmp = Math.max(shakeAmp, 0.4); rumble(500, 1, 1);
+  play3d(x, z, ()=>{ noiseBurst(0.5, 500, 0.95); tone(70, 0.6, 0.55, 'sawtooth', 24); });
+  // Zombies
+  for (const zb of [...zombies]) {
+    if (zb.state==='dying') continue;
+    const dx = zb.pos.x - x, dy = (zb.pos.y+0.8) - y, dz = zb.pos.z - z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist > radius*1.6) continue;
+    if (dist <= radius) {
+      const dmg = zb.isBoss ? bossDmg : zombieDmg;
+      damageZombie(zb, dmg, dx/(dist||1), dz/(dist||1), 14, {isHead:false, explosive:true});
+    } else {
+      const falloff = 1 - (dist-radius)/(radius*0.6);
+      const dmg = (zb.isBoss ? bossDmg : zombieDmg) * 0.45 * falloff;
+      damageZombie(zb, dmg, dx/(dist||1), dz/(dist||1), 7, {isHead:false, shrapnel:true});
+      // Shrapnel kickback
+      zb.vx += (dx/(dist||1)) * 9 * falloff;
+      zb.vz += (dz/(dist||1)) * 9 * falloff;
+      zb.vy += 2.5 * falloff;
+    }
+  }
+  // Self-damage / knockback
+  if (owner === player) {
+    const pdx = player.pos.x - x, pdy = (player.pos.y+0.9) - y, pdz = player.pos.z - z;
+    const pdist = Math.hypot(pdx, pdy, pdz);
+    if (pdist < radius * 1.3) {
+      const falloff = 1 - pdist/(radius*1.3);
+      const dmg = WEAPONS.rpg.selfDmg * falloff;
+      player.hp -= dmg;
+      flashBlob(playerBlob);
+      player.vx += (pdx/(pdist||1)) * 7 * falloff;
+      player.vz += (pdz/(pdist||1)) * 7 * falloff;
+      player.vy += 4 * falloff;
+      if (player.hp <= 0 && !player.downed) downPlayer();
+    }
+  }
+}
+
+function updateRPGProjectiles(dt) {
+  for (let i = rpgProjectiles.length-1; i>=0; i--) {
+    const p = rpgProjectiles[i];
+    p.life -= dt;
+    const step = p.vel.clone().multiplyScalar(dt);
+    p.mesh.position.add(step);
+    // Trail
+    if (Math.random() < 0.4) spawnParticles(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, 0xff8844, 1, 0.4, 0.25);
+    // Ground collision
+    const gy = groundHeight(p.mesh.position.x, p.mesh.position.z);
+    if (p.mesh.position.y <= gy + 0.25 || p.life <= 0) {
+      explodeRPG(p.mesh.position.x, Math.max(p.mesh.position.y, gy+0.25), p.mesh.position.z, p.owner);
+      p.mesh.removeFromParent(); rpgProjectiles.splice(i,1); continue;
+    }
+    // Zombie direct impact
+    let hit = false;
+    for (const zb of zombies) {
+      if (zb.state==='dying') continue;
+      if (Math.hypot(zb.pos.x-p.mesh.position.x, zb.pos.z-p.mesh.position.z) < 1.3 && Math.abs((zb.pos.y+0.8)-p.mesh.position.y) < 1.6) {
+        explodeRPG(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, p.owner);
+        p.mesh.removeFromParent(); rpgProjectiles.splice(i,1); hit = true; break;
+      }
+    }
+    if (hit) continue;
+  }
+}
+
 let recruitCounter = 0;
 function recruitCousin(c, byP = 1) {
   c.recruited = true;
@@ -8929,6 +9222,11 @@ function stepFrame(dt) {
   if (game.state === 'playing') {
     game.time += dt;
     updateDayNight(dt);
+    // ahead of updatePlayer: its own interact prompt block unconditionally clears
+    // input.interact once handled, so the parachute crate's open-check needs first look
+    updateParachuteCrates(dt);
+    updateRPGProjectiles(dt);
+    updateTimeLimitedWeapons(dt);
     updatePlayer(dt);
     updateTradePact(dt);   // both roles: animate the ACCEPTED sting / fade regardless of who settled it
     if (net.role === 'client') {
@@ -10670,6 +10968,7 @@ function spawnBoss() {
   bossBarEl.classList.remove('show');         // the bar appears once it aggros
   toast('ALL COUSINS FOUND . . SOMETHING STIRS BY THE BANK .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
+  spawnParachuteCrate(bx, bz);
 }
 // the Crimson One: wakes at the church door once the block is scoured. Bites harder
 // than the Two Horned One but shuffles at the same pace, and his waves boil out of
@@ -10706,6 +11005,7 @@ function spawnBoss2() {
   bossBarEl.classList.remove('show');
   toast('BLOCK SCOURED . . BUT THE GRAVES SHIFT BY THE OLD CHURCH .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
+  spawnParachuteCrate(bx, bz);
 }
 // the Infected One: rises out on the floodlit parking lot once the Crimson One is down, and
 // his sickness is in the wiring — the lot's floods stutter the whole time he stands. Matches
@@ -10744,6 +11044,7 @@ function spawnBoss3() {
   bossBarEl.classList.remove('show');
   toast('THE CHURCH IS QUIET . . SOMETHING STIRS UNDER THE LOT LIGHTS .ᐟ', true);
   initAudio(); play3d(bx, bz, () => SFX.groan());
+  spawnParachuteCrate(bx, bz);
 }
 // the Rotten One: the last of them, festering on the jelly park's picnic ground once the
 // Infected One is down. The Infected One's playstyle — big, fast, waves at damage
@@ -10781,6 +11082,7 @@ function spawnBoss4() {
   bossState.beam = beam; bossState.beamFade = false; // fresh pillar, full strength
   bossBarEl.classList.remove('show');
   initAudio(); play3d(bx, bz, () => SFX.groan());
+  spawnParachuteCrate(bx, bz);
 }
 function wakeBoss(z) {
   if (z.state !== 'dormant') return;

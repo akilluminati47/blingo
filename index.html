@@ -236,6 +236,13 @@
   #ammo { font-size:34px; font-weight:700; line-height:1; text-shadow:0 2px 4px #000; }
   #ammo small { font-size:16px; opacity:.6; font-weight:400; }
   #reloadmsg { font-size:11px; color:#ffd24a; opacity:0; }
+  /* limited-time weapon countdown (RPG-7 / Pump Shotgun crate pickups): sits under the
+     ammo readout like reloadmsg, but stays up the whole time the clock is running */
+  #tlweapon { font-size:11px; letter-spacing:1.5px; color:#ffd24a; text-shadow:0 1px 3px #000;
+    opacity:0; transition:opacity .3s; margin-top:2px; }
+  #tlweapon.show { opacity:1; }
+  #tlweapon b { font-size:15px; font-weight:700; margin-right:5px; }
+  #tlweapon span { text-transform:uppercase; }
 
   #prompt { position:absolute; left:50%; top:58%; transform:translateX(-50%); display:flex; align-items:center; gap:8px;
     background:rgba(8,10,14,.7); border:1px solid rgba(255,255,255,.2); border-radius:10px; padding:7px 14px; color:#fff; font-size:14px;
@@ -881,6 +888,7 @@
     <div id="weaponname">Fists</div>
     <div id="ammo"><span id="ammoclip">∞</span><small id="ammores"></small></div>
     <div id="reloadmsg">RELOADING . .</div>
+    <div id="tlweapon"><b>0:00</b><span>LIMITED WEAPON</span></div>
   </div>
 
   <div id="prompt" class="hidden"><img id="promptimg" src="" alt=""><span id="prompttxt">Open Crate</span></div>
