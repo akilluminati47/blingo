@@ -1293,6 +1293,7 @@ const SFX = {
     else if (w.id === 'sniper') { noiseBurst(0.4, 1400, 0.9); tone(140, 0.3, 0.35, 'sawtooth', 50); }
     else if (w.id === 'magnum') { noiseBurst(0.22, 1100, 0.8); tone(120, 0.16, 0.4, 'square', 45); }
     else if (w.id === 'pumpshotgun') { this.pumpshoot(); }
+    else if (w.id === 'rpg') { this.rpgFire(); }
     else if (w.melee) {
       if (w.id === 'fists') { noiseBurst(0.08, 500, 0.3); }               // soft whiff
       else { noiseBurst(0.09, 340, 0.42); tone(160, 0.08, 0.18, 'square', 80); } // swing whoosh + thud
@@ -8778,13 +8779,9 @@ function makeChevronMarker() {
 // the pump shotgun or the RPG, both on a clock (grantTimeLimitedWeapon). Kept OUT of
 // allCrates on purpose — the generic openCrate()/giant-stomp path assumes a glow/loot-roll
 // shape this crate doesn't have, so it runs its own compact open flow below instead.
-function spawnParachuteCrate(bossX, bossZ) {
-  if (net.role === 'client') return;
-  if (Math.random() >= 0.5) return;
-  const ang = Math.random() * TAU;
-  const dist = 28 + Math.random() * 22; // 28–50 out, usually off-screen until you turn
-  const x = bossX + Math.cos(ang)*dist;
-  const z = bossZ + Math.sin(ang)*dist;
+// shared visual builder — the host's own crate and every client's networked ghost of it
+// use this exact same rig, so nobody's screen shows a different-looking drop
+function buildParachuteCrateMesh() {
   const g = new THREE.Group();
   const base = box(1.4, 1.0, 1.4, 0x8a5a2b); base.position.y = 0.5; g.add(base);
   const trim = box(1.48, 0.2, 1.48, 0xc8a44a, {emissive:0x886600, emissiveIntensity:0.6}); trim.position.y = 1.0; g.add(trim);
@@ -8796,6 +8793,15 @@ function spawnParachuteCrate(bossX, bossZ) {
     str.position.set(px*0.5, 1.8, pz*0.5); str.lookAt(px*1.2, 0.5, pz*1.2); g.add(str);
   }
   g.scale.setScalar(2); // 2× size
+  return { g, lid, trim };
+}
+function spawnParachuteCrate(bossX, bossZ) {
+  if (net.role === 'client') return; // the host owns every roll here — clients get it off the stream
+  const ang = Math.random() * TAU;
+  const dist = 28 + Math.random() * 22; // 28–50 out, usually off-screen until you turn
+  const x = bossX + Math.cos(ang)*dist;
+  const z = bossZ + Math.sin(ang)*dist;
+  const { g, lid, trim } = buildParachuteCrateMesh();
   g.position.set(x, PARACHUTE_BEACON_Y, z);
   scene.add(g);
   const chev = makeChevronMarker(); scene.add(chev);
@@ -8807,6 +8813,8 @@ function spawnParachuteCrate(bossX, bossZ) {
     nid:++net.pkid
   };
   parachuteCrates.push(cr);
+  // every screen in the lobby needs to see the same drop — streamed each tick in netHostTick
+  // (base.pc) rather than a one-shot spawn message, so a client who joins mid-fall still gets it
 }
 
 function updateParachuteCrates(dt) {
@@ -8819,7 +8827,27 @@ function updateParachuteCrates(dt) {
       cr.chevron.lookAt(camera.position.x, camera.position.y, camera.position.z);
       cr.chevron.rotateX(Math.PI);
     }
-    if (!cr.landed) {
+    if (cr.netGhost) {
+      // a client's copy: no local physics — just glide toward wherever the host's stream
+      // says it actually is right now (same tx/ty/tz pattern the crow/zombie ghosts use)
+      if (!cr.landed) {
+        const k = Math.min(1, dt * 6);
+        cr.pos.x += (cr.tx - cr.pos.x) * k;
+        cr.pos.y += (cr.ty - cr.pos.y) * k;
+        cr.pos.z += (cr.tz - cr.pos.z) * k;
+        cr.mesh.position.x = cr.pos.x + Math.sin(cr.t*0.9)*0.4;
+        cr.mesh.position.z = cr.pos.z + Math.cos(cr.t*0.7)*0.4;
+        cr.mesh.position.y = cr.pos.y;
+        cr.mesh.rotation.y += dt*0.08;
+        cr.mesh.rotation.z = Math.sin(cr.t*0.9) * 0.05;
+        cr.mesh.rotation.x = Math.cos(cr.t*0.7) * 0.035;
+        if (cr.tlanded) {
+          cr.pos.set(cr.tx, cr.ty, cr.tz); cr.mesh.position.copy(cr.pos);
+          cr.mesh.rotation.x = 0; cr.mesh.rotation.z = 0;
+          cr.landed = true;
+        }
+      }
+    } else if (!cr.landed) {
       // rainy weather drags the chute the same way it drags the raindrops (updateRain):
       // same wind vector, so the crate visibly drifts and falls at the rain's own slant —
       // faster and swayier the harder it's coming down, dead calm on a clear day
@@ -8849,16 +8877,25 @@ function updateParachuteCrates(dt) {
         cr.col = aabb(cr.pos.x, cr.pos.z, 0.72, 0.72, 1.2, gy-0.02);
       }
     }
-    // Interact open
+    // Interact open — a client asks the host and waits for chuteGive; the host (or a
+    // solo/host player) grants it straight away, same as it always did
     if (!cr.opened && cr.landed && Math.hypot(player.pos.x-cr.pos.x, player.pos.z-cr.pos.z) < 2.8 && input.interact) {
-      cr.opened = true;
-      cr.trim.material.emissiveIntensity = 0;
-      if (cr.chevron) { cr.chevron.removeFromParent(); cr.chevron = null; }
-      grantTimeLimitedWeapon(cr.weapon);
-      SFX.crate(); rumble(180, 0.5, 0.5);
-      spawnParticles(cr.pos.x, cr.pos.y+1.2, cr.pos.z, 0xffdc78, 18, 4, 0.9);
-      input.interact = false; // consumed — don't let updatePlayer's own interact pass re-fire on a crate/recruit behind it
+      input.interact = false; // consumed either way — don't let updatePlayer's own interact pass re-fire behind it
+      if (cr.netGhost) {
+        if (!cr._reqT || cr._reqT < -1) { // debounce: one request per press, resend if it goes unanswered
+          cr._reqT = 0;
+          try { net.conns[0].send({ t:'chuteOpen', i:cr.nid }); } catch (e) {}
+        }
+      } else {
+        cr.opened = true;
+        cr.trim.material.emissiveIntensity = 0;
+        if (cr.chevron) { cr.chevron.removeFromParent(); cr.chevron = null; }
+        grantTimeLimitedWeapon(cr.weapon);
+        SFX.crate(); rumble(180, 0.5, 0.5);
+        spawnParticles(cr.pos.x, cr.pos.y+1.2, cr.pos.z, 0xffdc78, 18, 4, 0.9);
+      }
     }
+    if (cr.netGhost && cr._reqT != null) cr._reqT -= dt;
     if (cr.opened && cr.shrink < 1) {
       cr.shrink += dt * 1.6;
       const s = 2 * Math.max(0, 1 - cr.shrink);
@@ -8888,8 +8925,7 @@ function grantTimeLimitedWeapon(id) {
 function updateTimeLimitedWeapons(dt) {
   if (!timeLimitedWeapon) return;
   timeLimitedWeapon.timer -= dt;
-  // HUD chip — add a <div id="tlweapon" class="hudchip"><b>0:00</b><span>LIMITED WEAPON</span></div>
-  // to the page, styled like #gianttimer; this is a no-op until that markup exists
+  // HUD chip — #tlweapon div lives in index.html next to #ammo/#reloadmsg
   const el = document.getElementById('tlweapon');
   if (el) {
     el.classList.toggle('show', true);
@@ -8926,22 +8962,59 @@ function fireRPG() {
   rg.position.copy(origin);
   scene.add(rg);
   rpgProjectiles.push({ mesh:rg, vel:dir.clone().multiplyScalar(52), life:3.5, owner:player });
+  // tell the rest of the lobby a rocket just left the tube — see netRemoteRPG/netApplyRemoteBoom.
+  // Only the launch + eventual boom position ride the wire; each screen flies its OWN copy of
+  // the rocket in between, same lightweight approach as every hit-scan weapon's 'pew'.
+  if (net.role) {
+    const r1 = v => Math.round(v * 20) / 20, r2 = v => Math.round(v * 100) / 100;
+    const pm = { t:'rpgFire', x:r1(origin.x), y:r1(origin.y), z:r1(origin.z), dx:r2(dir.x), dy:r2(dir.y), dz:r2(dir.z) };
+    if (net.role === 'host') netBroadcast({ ...pm, p:1 });
+    else try { net.conns[0].send(pm); } catch (e) {}
+  }
   // Reload visual restore
   setTimeout(()=>{ if (gunMesh && gunMesh.userData.rocket) gunMesh.userData.rocket.visible = true; }, 4200);
   SFX.rpgReload();
 }
+// the lobby's view of someone else's rocket: same mesh, same flight math, but visual-only —
+// it never calls damageZombie itself (that's already resolved, or on its way in, via the
+// shooter's own local explodeRPG → damageZombie/netClientShot). netApplyRemoteBoom below is
+// what actually stops and detonates it, so every screen's explosion lands in the same spot.
+function netRemoteRPG(blob, gunMeshR, ownerP, x, y, z, dx, dy, dz) {
+  const dir = new THREE.Vector3(dx, dy, dz);
+  if (dir.lengthSq() < 0.0001) dir.set(0, 0, 1); else dir.normalize();
+  const rg = cyl(0.075, 0.075, 0.42, 0x8a3a2a);
+  rg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  rg.position.set(x, y, z);
+  scene.add(rg);
+  rpgProjectiles.push({ mesh:rg, vel:dir.multiplyScalar(52), life:3.5, owner:null, ghost:true, ownerP });
+  if (Math.hypot(x - player.pos.x, z - player.pos.z) < 90) play3d(x, z, () => SFX.rpgFire());
+}
+// a boom reported by whoever actually fired the shot (host or client): snap their ghost
+// rocket to the real impact point and let it go off there — visuals/sound only, see explodeRPG
+function netApplyRemoteBoom(ownerP, x, y, z) {
+  const idx = rpgProjectiles.findIndex(p => p.ghost && p.ownerP === ownerP);
+  if (idx >= 0) { rpgProjectiles[idx].mesh.removeFromParent(); rpgProjectiles.splice(idx, 1); }
+  explodeRPG(x, y, z, null, { ghost:true });
+}
 
-function explodeRPG(x, y, z, owner) {
+function explodeRPG(x, y, z, owner, opts = {}) {
+  const ghost = !!opts.ghost; // a lobby-mate's shot, echoed here for show — see netApplyRemoteBoom
+  const radius = 6.5;
+  const distToMe = Math.hypot(x - player.pos.x, z - player.pos.z);
+  // a teammate's rocket two blocks over doesn't need FX spent on it — but our own always does
+  if (!ghost || distToMe < 120) {
+    spawnParticles(x, y, z, 0xff6622, 45, 9, 1.6);
+    spawnParticles(x, y, z, 0xffcc44, 30, 7, 1.3);
+    spawnParticles(x, y, z, 0x888888, 20, 5, 1.0); // shrapnel dust
+    play3d(x, z, ()=>{ noiseBurst(0.5, 500, 0.95); tone(70, 0.6, 0.55, 'sawtooth', 24); });
+    // full shake/rumble for our own blast; a nearby teammate's still thumps, just softer
+    const near = ghost ? clamp(1 - distToMe/45, 0, 1) : 1;
+    if (near > 0) { shakeAmp = Math.max(shakeAmp, 0.4*near); rumble(500*near, near, near); }
+  }
+  if (ghost) return; // damage/self-damage/net-broadcast below only ever run for the REAL shot
   const isBlazo = selectedCousin === 'blazo';
   const zombieDmg = isBlazo ? 125 : 100;
   const bossDmg   = isBlazo ? 84  : 67;
-  const radius = 6.5;
-  // Visuals
-  spawnParticles(x, y, z, 0xff6622, 45, 9, 1.6);
-  spawnParticles(x, y, z, 0xffcc44, 30, 7, 1.3);
-  spawnParticles(x, y, z, 0x888888, 20, 5, 1.0); // shrapnel dust
-  shakeAmp = Math.max(shakeAmp, 0.4); rumble(500, 1, 1);
-  play3d(x, z, ()=>{ noiseBurst(0.5, 500, 0.95); tone(70, 0.6, 0.55, 'sawtooth', 24); });
   // Zombies
   for (const zb of [...zombies]) {
     if (zb.state==='dying') continue;
@@ -8950,11 +9023,11 @@ function explodeRPG(x, y, z, owner) {
     if (dist > radius*1.6) continue;
     if (dist <= radius) {
       const dmg = zb.isBoss ? bossDmg : zombieDmg;
-      damageZombie(zb, dmg, dx/(dist||1), dz/(dist||1), 14, {isHead:false, explosive:true});
+      damageZombie(zb, dmg, dx/(dist||1), dz/(dist||1), 14, {isHead:false, explosive:true, weapon:WEAPONS.rpg});
     } else {
       const falloff = 1 - (dist-radius)/(radius*0.6);
       const dmg = (zb.isBoss ? bossDmg : zombieDmg) * 0.45 * falloff;
-      damageZombie(zb, dmg, dx/(dist||1), dz/(dist||1), 7, {isHead:false, shrapnel:true});
+      damageZombie(zb, dmg, dx/(dist||1), dz/(dist||1), 7, {isHead:false, shrapnel:true, weapon:WEAPONS.rpg});
       // Shrapnel kickback
       zb.vx += (dx/(dist||1)) * 9 * falloff;
       zb.vz += (dz/(dist||1)) * 9 * falloff;
@@ -8976,6 +9049,14 @@ function explodeRPG(x, y, z, owner) {
       if (player.hp <= 0 && !player.downed) downPlayer();
     }
   }
+  // tell the rest of the lobby exactly where this went off, so their ghost rocket (see
+  // netRemoteRPG) detonates in the same spot instead of guessing from its own flight sim
+  if (net.role) {
+    const r1 = v => Math.round(v * 20) / 20;
+    const bm = { t:'rpgBoom', x:r1(x), y:r1(y), z:r1(z) };
+    if (net.role === 'host') netBroadcast({ ...bm, p:1 });
+    else try { net.conns[0].send(bm); } catch (e) {}
+  }
 }
 
 function updateRPGProjectiles(dt) {
@@ -8986,6 +9067,17 @@ function updateRPGProjectiles(dt) {
     p.mesh.position.add(step);
     // Trail
     if (Math.random() < 0.4) spawnParticles(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, 0xff8844, 1, 0.4, 0.25);
+    if (p.ghost) {
+      // a lobby-mate's rocket: it detonates when THEIR screen tells us where (netApplyRemoteBoom),
+      // not from what we see here — this fallback only fires if that message never shows up
+      // (dropped connection etc.), so it doesn't just fly off into the skybox forever
+      const gy2 = groundHeight(p.mesh.position.x, p.mesh.position.z);
+      if (p.mesh.position.y <= gy2 + 0.25 || p.life <= 0) {
+        explodeRPG(p.mesh.position.x, Math.max(p.mesh.position.y, gy2+0.25), p.mesh.position.z, null, {ghost:true});
+        p.mesh.removeFromParent(); rpgProjectiles.splice(i,1);
+      }
+      continue;
+    }
     // Ground collision
     const gy = groundHeight(p.mesh.position.x, p.mesh.position.z);
     if (p.mesh.position.y <= gy + 0.25 || p.life <= 0) {
@@ -13390,6 +13482,22 @@ function wireHostConn(conn) {
         scareCrows(m.x, m.z, 12);
         for (const o of net.conns) if (o !== conn) { try { o.send({ t: 'pew', p: c.netP, x: m.x, y: m.y, z: m.z, h: m.h }); } catch (e) {} }
       }
+    } else if (m.t === 'rpgFire') {
+      // same idea as 'pew', but for the RPG's own projectile: draw+hear the launch here on
+      // the host's screen, then relay it on to everyone else
+      const c = cousinByConn(conn);
+      if (c) {
+        netRemoteRPG(c.blob, c.gunMesh, c.netP, m.x, m.y, m.z, m.dx, m.dy, m.dz);
+        for (const o of net.conns) if (o !== conn) { try { o.send({ t:'rpgFire', p:c.netP, x:m.x, y:m.y, z:m.z, dx:m.dx, dy:m.dy, dz:m.dz }); } catch (e) {} }
+      }
+    } else if (m.t === 'rpgBoom') {
+      // and the matching detonation report, so the host's echo of a client's rocket goes off
+      // in the exact same spot as the client's own (already-resolved) explosion
+      const c = cousinByConn(conn);
+      if (c) {
+        netApplyRemoteBoom(c.netP, m.x, m.y, m.z);
+        for (const o of net.conns) if (o !== conn) { try { o.send({ t:'rpgBoom', p:c.netP, x:m.x, y:m.y, z:m.z }); } catch (e) {} }
+      }
     } else if (m.t === 'emote') {
       const c = cousinByConn(conn);
       if (c) {
@@ -13457,6 +13565,19 @@ function wireHostConn(conn) {
         const loot = rollCrateLoot(Math.random, cr2);
         const code = loot === 'sniperammo' ? 'sa' : loot === 'ammo' ? 'am' : loot === 'medkit' ? 'hp' : loot;
         try { conn.send({ t: 'crateGive', k: code }); } catch(e) {}
+      }
+    } else if (m.t === 'chuteOpen') {
+      // a client reached the boss's parachute drop first: the host owns the roll (it was
+      // already decided at spawn, riding the crate itself), so just confirm proximity and
+      // hand it over — dropping it from the stream on the next tick clears it everywhere else
+      const cr3 = parachuteCrates.find(c => c.nid === m.i && !c.opened && c.landed);
+      const pc3 = cousinByConn(conn);
+      if (cr3 && pc3 && Math.hypot(pc3.pos.x - cr3.pos.x, pc3.pos.z - cr3.pos.z) < 4) {
+        cr3.opened = true; cr3.trim.material.emissiveIntensity = 0;
+        if (cr3.chevron) { cr3.chevron.removeFromParent(); cr3.chevron = null; }
+        play3d(cr3.pos.x, cr3.pos.z, () => SFX.crate());
+        spawnParticles(cr3.pos.x, cr3.pos.y + 1.2, cr3.pos.z, 0xffdc78, 18, 4, 0.9);
+        try { conn.send({ t: 'chuteGive', w: cr3.weapon }); } catch(e) {}
       }
     } else if (m.t === 'crowShot') {
       // a client's round found a bird: the host lands the kill — the gore plays here, the
@@ -13643,6 +13764,12 @@ function netHostTick(dt) {
     k: p.kind === 'ammo' ? 0 : p.kind === 'medkit' ? 1 : 2, x: R(p.pos.x), z: R(p.pos.z) }));
   // host-owned crates: stream every unopened crate so all screens see and can loot them
   const cr = allCrates.filter(c => !c.opened && !c.netGhost).map(c => ({ i: c.nid, x: R(c.pos.x), z: R(c.pos.z) }));
+  // boss parachute drops (RPG/Pump Shotgun): there's only ever one or two of these live at
+  // once, so stream the lot unfiltered rather than gating on INTEREST like the general crate
+  // list above — a joiner should see it falling from wherever they are on the map
+  base.pc = parachuteCrates.filter(c => !c.netGhost).map(c => ({ i: c.nid,
+    x: R(c.pos.x), y: R(c.pos.y), z: R(c.pos.z),
+    w: c.weapon === 'rpg' ? 1 : 0, ld: c.landed ? 1 : 0, op: c.opened ? 1 : 0 }));
   // the murder streams whole (it's small): same birds on the same ledges on every screen,
   // so when Blomba picks one out of the sky, everyone watches the SAME crow drop
   base.cw = crows.map(c => ({ i: c.nid, x: R(c.g.position.x), y: R(c.g.position.y), z: R(c.g.position.z),
@@ -13907,6 +14034,11 @@ function netClientData(m, conn, peer, code) {
     // their ghost's muzzle so the whole lobby sees who is shooting at what
     const g = net.actors.get('p' + m.p);
     if (g) netRemotePew(g.blob, g.gunMesh, WEAPONS[g.wp], m.x, m.y, m.z, m.h);
+  } else if (m.t === 'rpgFire') {
+    const g = net.actors.get('p' + m.p);
+    netRemoteRPG(g && g.blob, g && g.gunMesh, m.p, m.x, m.y, m.z, m.dx, m.dy, m.dz);
+  } else if (m.t === 'rpgBoom') {
+    netApplyRemoteBoom(m.p, m.x, m.y, m.z);
   } else if (m.t === 'emote') {
     const a = net.actors.get(m.p ? 'p' + m.p : null);
     if (a) spawnBubble(() => ({ x: a.blob.root.position.x, y: a.blob.root.position.y + 2.2 * 1, z: a.blob.root.position.z }), EMOTES[m.e] || '', a);
@@ -13967,6 +14099,8 @@ function netClientData(m, conn, peer, code) {
       setTimeout(() => toast('REMEMBER THE JELLY .ᐟ BEST JELLY STOPS THE ROT .ᐟ', true), 2800);
       setTimeout(() => toast('AHA, TO THE OLD JELLY HOUSE .ᐟ', true), 7400);
     }
+  } else if (m.t === 'chuteGive') {
+    grantTimeLimitedWeapon(m.w);   // the host confirmed we reached the drop first
   } else if (m.t === 'jellyGive') {
     grantJelly();   // the host honoured our jar: it lands in the hand
   } else if (m.t === 'chiliGive') {
@@ -14140,6 +14274,39 @@ function netApplySnapshot(m) {
     for (let i = allCrates.length - 1; i >= 0; i--) {
       const c = allCrates[i];
       if (c.netGhost && !seenC.has(c.nid) && !c.opened) { c.mesh.removeFromParent(); allCrates.splice(i, 1); }
+    }
+  }
+  // the boss parachute drop, mirrored: same crate falling at the same spot on every screen —
+  // built from the exact same rig the host's own copy uses (buildParachuteCrateMesh), so it
+  // never looks like a different prop. Position rides tx/ty/tz (see updateParachuteCrates'
+  // netGhost lerp); opening it is a request (chuteOpen) the host answers with chuteGive.
+  if (m.pc) {
+    const seenPC = new Set();
+    for (const e of m.pc) {
+      seenPC.add(e.i);
+      let g = parachuteCrates.find(c => c.nid === e.i);
+      if (!g) {
+        const built = buildParachuteCrateMesh();
+        built.g.position.set(e.x, e.y, e.z);
+        scene.add(built.g);
+        const chev = makeChevronMarker(); scene.add(chev);
+        g = { mesh: built.g, lid: built.lid, trim: built.trim, chevron: chev, opened: false, shrink: 0,
+          pos: new THREE.Vector3(e.x, e.y, e.z), landed: false, weapon: e.w ? 'rpg' : 'pumpshotgun',
+          nid: e.i, t: Math.random() * 10, netGhost: true };
+        parachuteCrates.push(g);
+      }
+      g.tx = e.x; g.ty = e.y; g.tz = e.z; g.tlanded = !!e.ld;
+      if (e.op && !g.opened) {
+        g.opened = true; g.trim.material.emissiveIntensity = 0;
+        if (g.chevron) { g.chevron.removeFromParent(); g.chevron = null; }
+      }
+    }
+    for (let i = parachuteCrates.length - 1; i >= 0; i--) {
+      const c = parachuteCrates[i];
+      if (c.netGhost && !seenPC.has(c.nid) && !c.opened) {
+        c.mesh.removeFromParent(); if (c.chevron) c.chevron.removeFromParent();
+        parachuteCrates.splice(i, 1);
+      }
     }
   }
   // the murder, mirrored: same birds, same ledges, same purple glares on every screen.
