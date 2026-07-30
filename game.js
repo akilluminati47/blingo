@@ -3124,6 +3124,7 @@ function buildChunk(cx, cz) {
     }
   }
 
+  group.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   scene.add(group);
   return { group, colliders, crates: crateList, buildings, pads, cx, cz };
 }
@@ -3216,6 +3217,7 @@ const clipLevels = []; // {panels, group, cell, sink, ox, oz}
       geo.rotateX(-Math.PI / 2);
       geo.translate((x0 + x1) / 2, 0, (z0 + z1) / 2);
       const mesh = new THREE.Mesh(geo, clipMat);
+      mesh.frustumCulled = false;
       group.add(mesh);
       panels.push(mesh);
     }
@@ -3492,6 +3494,7 @@ let fountainFx = null; // animated water on the plaza fountain — filled in bui
 // now, sliding it below the horizon instead of popping it, so the stand-ins had
 // nothing left to stand in for)
 scene.add(townGroup);
+townGroup.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
 
 // civic building: colonnaded facade on the faceDir side (+1 = faces +z, -1 = faces -z)
 function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
@@ -7271,6 +7274,7 @@ function resumeGame() {
 // the hardcoded Bluga-less classic town again, the distance ladder reset.
 function quitToMenu(keepChain) {
   game.state = 'menu';
+  deathFadeEl.style.opacity = 0;
   pauseScreen.classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
   if (window._resumeTypewriter) window._resumeTypewriter();
@@ -15362,6 +15366,11 @@ function splashDismiss() {
   initAudio();          // the user gesture audio was waiting on — ambience rises with it
   SFX.tradePing();      // the confirm ping for the input itself
   playOpeningTheme();   // six motifs in one march, at the volume the settings remember
+  // the shared cutscene video was loading behind the splash — ensure it's actually
+  // playing now that the splash is about to fade, since autoplay can still be blocked
+  // by the browser before a user gesture
+  const bg = document.getElementById('policybg');
+  if (bg && bg.paused) bg.play().catch(() => {});
   splashEl.classList.add('hide');
   setTimeout(() => {
     splash.active = false;
