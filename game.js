@@ -1121,16 +1121,30 @@ const _decalTex = canvasTex(32, 32, ctx => {
   ctx.fillStyle = g; ctx.fillRect(0, 0, 32, 32);
 });
 const _holeDecals = [];
+const _decalPlaneGeo = new THREE.PlaneGeometry(1, 1);
+// flat decal, painted flush against whatever it hit — a wall face gets a hole lying IN
+// the wall, not a paper cutout that spins to keep facing you. nx/nz is the surface's
+// outward normal (horizontal — every wall + car panel here stands vertical); with no
+// normal to go on (e.g. a networked shot that didn't send one) it just lies flat on the
+// ground, which reads fine for the rare case that slips through with (0,0).
 function spawnBulletHole(x, y, z, nx, nz, caliber) {
   while (_holeDecals.length > 80) {
     const old = _holeDecals.shift();
     if (old.mesh) { old.mesh.removeFromParent(); old.mesh.material.dispose(); }
   }
-  const mat = new THREE.SpriteMaterial({ map: _decalTex, transparent: true, depthWrite: false, blending: THREE.NormalBlending, rotation: Math.random() * Math.PI * 2 });
-  const s = new THREE.Sprite(mat);
+  const mat = new THREE.MeshBasicMaterial({ map: _decalTex, transparent: true, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide });
+  const s = new THREE.Mesh(_decalPlaneGeo, mat);
   const sz = (caliber || 0.18) * (0.65 + Math.random() * 0.7);
   s.scale.setScalar(sz);
   s.position.set(x + (nx || 0) * 0.03, y, z + (nz || 0) * 0.03);
+  const nlen = Math.hypot(nx || 0, nz || 0);
+  if (nlen > 0.001) {
+    s.up.set(0, 1, 0);
+    s.lookAt(s.position.x + nx / nlen, s.position.y, s.position.z + nz / nlen);
+  } else {
+    s.rotation.x = -Math.PI / 2; // no normal to go on — lie flat like a ground scorch mark
+  }
+  s.rotateZ(Math.random() * Math.PI * 2); // vary the look without tilting it off the surface
   s.renderOrder = 5;
   scene.add(s);
   _holeDecals.push({ mesh: s, life: 12 + Math.random() * 14 });
@@ -1349,7 +1363,13 @@ const SFX = {
   limb() { noiseBurst(0.2, 360, 0.6); tone(110, 0.16, 0.3, 'square', 60); },
   land() { noiseBurst(0.09, 200, 0.25); },
   slide() { noiseBurst(0.3, 480, 0.32); tone(220, 0.22, 0.12, 'sawtooth', 90); },
-  pumpshoot() { noiseBurst(0.24, 1800, 0.88); tone(110, 0.18, 0.42, 'square', 48); },
+  pumpshoot() {
+    noiseBurst(0.24, 1800, 0.88); tone(110, 0.18, 0.42, 'square', 48);
+    // the rack: a mechanical click as the slide pulls back, a heavier clack as it seats a
+    // fresh shell — lands well inside the .42s gap before the next shot's allowed
+    setTimeout(() => noiseBurst(0.045, 1100, 0.4), 150);
+    setTimeout(() => noiseBurst(0.06, 550, 0.5), 230);
+  },
   rpgFire()   { noiseBurst(0.45, 320, 0.95); tone(55, 0.55, 0.55, 'sawtooth', 22); },
   rpgReload() { tone(280, 0.07, 0.22, 'square'); setTimeout(()=>tone(420, 0.14, 0.28, 'square'), 180); setTimeout(()=>tone(360, 0.1, 0.24, 'square'), 900); setTimeout(()=>tone(480, 0.12, 0.3, 'square'), 1200); },
 };
@@ -6894,8 +6914,13 @@ function updateAmmoHUD() {
   else if (player.weapon.melee) { hud.clip.textContent = '∞'; hud.res.textContent = ''; }
   else {
     const unlim = player.fbiOutfit && (player.weapon.id === 'pistol' || player.weapon.id === 'smg');
+    // the pump shotgun and RPG's reserve pool (999) is a stand-in for "unlimited while the
+    // clock's running" — show it as the same ∞ the FBI outfit's pistol/smg wear, instead of
+    // an oddly finite-looking three-digit number. Clip still counts down normally (they still
+    // reload) — only the reserve figure changes.
+    const unlimRes = unlim || player.weapon.id === 'rpg' || player.weapon.id === 'pumpshotgun';
     hud.clip.textContent = unlim ? '∞' : player.clip;
-    hud.res.textContent = unlim ? '' : ' / ' + (reserves[player.weapon.id] | 0);
+    hud.res.textContent = unlim ? '' : ' / ' + (unlimRes ? '∞' : (reserves[player.weapon.id] | 0));
   }
   // holding Red's bowl, the reload button becomes RED'S: pressing it is the meal
   const rb = document.getElementById('btnReload');
@@ -6998,7 +7023,10 @@ function resetGame() {
   bossState.spawned3 = false; bossState.defeated3 = false; // the Infected One resets with his brothers
   bossState.spawned4 = false; bossState.defeated4 = false; // and the Rotten One with all three
   // clear anything left over from a boss's parachute drop last run
-  for (const cr of parachuteCrates) { scene.remove(cr.mesh); if (cr.chevron) scene.remove(cr.chevron); }
+  for (const cr of parachuteCrates) {
+    scene.remove(cr.mesh);
+    if (cr.col && cr.colList) { const ci = cr.colList.indexOf(cr.col); if (ci >= 0) cr.colList.splice(ci, 1); }
+  }
   parachuteCrates.length = 0;
   for (const p of rpgProjectiles) scene.remove(p.mesh);
   rpgProjectiles.length = 0;
@@ -8080,7 +8108,13 @@ function netRemotePew(blob, gunMeshR, weapon, ex, ey, ez, holeSize) {
   spawnTracer(from, new THREE.Vector3(ex, ey, ez));
   if (weapon && !weapon.melee && Math.hypot(from.x - player.pos.x, from.z - player.pos.z) < 30)
     play3d(from.x, from.z, () => SFX.shoot(weapon));
-  if (holeSize) spawnBulletHole(ex, ey, ez, 0, 0, holeSize);
+  if (holeSize) {
+    // the normal isn't sent over the wire (bandwidth) — approximate it as straight back
+    // along the shot's own line, which lies flush enough on the near-perpendicular hits
+    // that make up almost every wall shot
+    const ddx = ex - from.x, ddz = ez - from.z, dl = Math.hypot(ddx, ddz) || 1;
+    spawnBulletHole(ex, ey, ez, -ddx / dl, -ddz / dl, holeSize);
+  }
 }
 // death bookkeeping: kills counter, gore burst, optional head-pop, loot drop
 function killZombie(z, kx, kz, headPop) {
@@ -8762,19 +8796,6 @@ function giveWeapon(id) {
   updateAmmoHUD();
 }
 // ---------- parachute supply crates, time-limited weapons, RPG ----------
-// the color-cycling beacon that points you at a still-falling/unopened parachute crate
-// from clear across the block, same idea as the boss beam but worn by the crate itself
-function makeChevronMarker() {
-  const g = new THREE.Group();
-  const s = new THREE.Shape();
-  s.moveTo(0, 0.7); s.lineTo(0.4, 0); s.lineTo(0.16, 0);
-  s.lineTo(0.16, -0.5); s.lineTo(-0.16, -0.5); s.lineTo(-0.16, 0); s.lineTo(-0.4, 0);
-  s.closePath();
-  const m = new THREE.Mesh(new THREE.ExtrudeGeometry(s, {depth:0.1, bevelEnabled:false}),
-    new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.95, depthWrite:false}));
-  m.renderOrder = 15; g.add(m); g.rotation.x = Math.PI;
-  return g;
-}
 // a boss fight drops one of these half the time: a slow parachute crate carrying either
 // the pump shotgun or the RPG, both on a clock (grantTimeLimitedWeapon). Kept OUT of
 // allCrates on purpose — the generic openCrate()/giant-stomp path assumes a glow/loot-roll
@@ -8783,30 +8804,59 @@ function makeChevronMarker() {
 // use this exact same rig, so nobody's screen shows a different-looking drop
 function buildParachuteCrateMesh() {
   const g = new THREE.Group();
+  // the crate itself — half the footprint it used to carry. The canopy above is left
+  // exactly as it was; only the box shrank.
   const base = box(1.4, 1.0, 1.4, 0x8a5a2b); base.position.y = 0.5; g.add(base);
   const trim = box(1.48, 0.2, 1.48, 0xc8a44a, {emissive:0x886600, emissiveIntensity:0.6}); trim.position.y = 1.0; g.add(trim);
   const lid = box(1.44, 0.2, 1.44, 0x6e451f); lid.position.y = 1.14; g.add(lid);
+  // the same dressed-up find-me glow every regular crate wears at its feet, sized to suit
+  // — only lit up once it's actually down on the ground (see updateParachuteCrates)
+  const glow = makeLootGlow(0xffdc78, { r: 1.1, y: 1.7, s: 2.4 });
+  glow.visible = false;
+  g.add(glow);
+  // the parachute: a sub-group carrying the old 2× scale on its own, so the canopy keeps
+  // its original size and height above the now-smaller crate instead of shrinking with it
+  const chuteGrp = new THREE.Group();
   const chute = new THREE.Mesh(new THREE.SphereGeometry(2.4, 14, 10, 0, TAU, 0, Math.PI/2), mat(0xc8a44a, {side:THREE.DoubleSide}));
-  chute.position.y = 3.0; chute.scale.y = 0.42; g.add(chute);
-  for (const [px,pz] of [[0.9,0.9],[-0.9,0.9],[0.9,-0.9],[-0.9,-0.9]]) {
-    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,2.4,4), mat(0x8a7a5a));
-    str.position.set(px*0.5, 1.8, pz*0.5); str.lookAt(px*1.2, 0.5, pz*1.2); g.add(str);
+  chute.position.y = 3.0; chute.scale.y = 0.42; chuteGrp.add(chute);
+  chuteGrp.scale.setScalar(2);
+  g.add(chuteGrp);
+  // shroud lines: each one runs from the lid's own outer corner straight to the point on
+  // the canopy's rim directly above it, so every strap actually meets both ends instead of
+  // floating near them.
+  const rimY = chute.position.y * chuteGrp.scale.y, rimR = 2.4 * chuteGrp.scale.x;
+  const cornerY = 1.24, cornerR = 0.74 * Math.SQRT2;
+  const upAxis = new THREE.Vector3(0, 1, 0);
+  for (const [sx, sz] of [[1,1],[-1,1],[1,-1],[-1,-1]]) {
+    const dirx = sx / Math.SQRT2, dirz = sz / Math.SQRT2;
+    const p1 = new THREE.Vector3(dirx * cornerR, cornerY, dirz * cornerR);
+    const p2 = new THREE.Vector3(dirx * rimR, rimY, dirz * rimR);
+    const len = p1.distanceTo(p2);
+    const str = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, len, 4), mat(0x8a7a5a));
+    str.position.copy(p1).add(p2).multiplyScalar(0.5);
+    str.quaternion.setFromUnitVectors(upAxis, p2.clone().sub(p1).normalize());
+    g.add(str);
   }
-  g.scale.setScalar(2); // 2× size
-  return { g, lid, trim };
+  return { g, lid, trim, glow };
 }
 function spawnParachuteCrate(bossX, bossZ) {
   if (net.role === 'client') return; // the host owns every roll here — clients get it off the stream
-  const ang = Math.random() * TAU;
-  const dist = 28 + Math.random() * 22; // 28–50 out, usually off-screen until you turn
-  const x = bossX + Math.cos(ang)*dist;
-  const z = bossZ + Math.sin(ang)*dist;
-  const { g, lid, trim } = buildParachuteCrateMesh();
+  // try a handful of angles/distances for one that's clear of whatever's already loaded
+  // nearby (buildings, cars, rocks); falls back to the last try if the whole ring keeps
+  // coming up occupied — the final landing spot still gets double-checked on touchdown
+  let x = bossX, z = bossZ;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const ang = Math.random() * TAU;
+    const dist = 28 + Math.random() * 22; // 28–50 out, usually off-screen until you turn
+    const tx = bossX + Math.cos(ang) * dist, tz = bossZ + Math.sin(ang) * dist;
+    x = tx; z = tz;
+    if (spotClearOf(tx, tz, 2.2, nearbyColliders(tx, tz))) break;
+  }
+  const { g, lid, trim, glow } = buildParachuteCrateMesh();
   g.position.set(x, PARACHUTE_BEACON_Y, z);
   scene.add(g);
-  const chev = makeChevronMarker(); scene.add(chev);
   const cr = {
-    mesh:g, lid, trim, chevron:chev, opened:false, shrink:0,
+    mesh:g, lid, trim, glow, opened:false, shrink:0,
     pos:new THREE.Vector3(x, PARACHUTE_BEACON_Y, z),
     velY:-PARACHUTE_FALL_SPEED, t:Math.random()*10,
     landed:false, weapon:Math.random()<0.5?'pumpshotgun':'rpg',
@@ -8820,13 +8870,6 @@ function spawnParachuteCrate(bossX, bossZ) {
 function updateParachuteCrates(dt) {
   for (let i = parachuteCrates.length-1; i>=0; i--) {
     const cr = parachuteCrates[i]; cr.t += dt;
-    if (!cr.opened && cr.chevron) {
-      const hue = (cr.t * 0.45) % 1;
-      cr.chevron.children[0].material.color.setHSL(hue, 1, 0.52);
-      cr.chevron.position.set(cr.pos.x, cr.pos.y + 4.2, cr.pos.z);
-      cr.chevron.lookAt(camera.position.x, camera.position.y, camera.position.z);
-      cr.chevron.rotateX(Math.PI);
-    }
     if (cr.netGhost) {
       // a client's copy: no local physics — just glide toward wherever the host's stream
       // says it actually is right now (same tx/ty/tz pattern the crow/zombie ghosts use)
@@ -8845,6 +8888,7 @@ function updateParachuteCrates(dt) {
           cr.pos.set(cr.tx, cr.ty, cr.tz); cr.mesh.position.copy(cr.pos);
           cr.mesh.rotation.x = 0; cr.mesh.rotation.z = 0;
           cr.landed = true;
+          if (cr.glow) cr.glow.visible = true;
         }
       }
     } else if (!cr.landed) {
@@ -8871,40 +8915,89 @@ function updateParachuteCrates(dt) {
       cr.mesh.rotation.x = Math.cos(cr.t*0.7) * 0.035 * swayMul - Math.cos(windYaw) * leanAmt;
       const gy = groundHeight(cr.pos.x, cr.pos.z);
       if (cr.pos.y <= gy + 0.6) {
-        cr.pos.y = gy + 0.6; cr.mesh.position.y = cr.pos.y;
+        // settle onto a clear patch of ground: if the spot it drifted down onto turns out
+        // to be inside a building, car or other object by touchdown, nudge sideways to the
+        // nearest open ground instead of landing clipped into it
+        let lx = cr.pos.x, lz = cr.pos.z;
+        if (!spotClearOf(lx, lz, 1.4, nearbyColliders(lx, lz))) {
+          for (let attempt = 0; attempt < 16; attempt++) {
+            const tx = cr.pos.x + (Math.random()*2-1) * (3 + attempt*1.2);
+            const tz = cr.pos.z + (Math.random()*2-1) * (3 + attempt*1.2);
+            if (spotClearOf(tx, tz, 1.4, nearbyColliders(tx, tz))) { lx = tx; lz = tz; break; }
+          }
+        }
+        const gy2 = groundHeight(lx, lz);
+        cr.pos.x = lx; cr.pos.z = lz; cr.pos.y = gy2; // flush on the ground, not floating above it
+        cr.mesh.position.copy(cr.pos);
         cr.mesh.rotation.x = 0; cr.mesh.rotation.z = 0; // settles upright the moment it lands
         cr.landed = true; cr.velY = 0;
-        cr.col = aabb(cr.pos.x, cr.pos.z, 0.72, 0.72, 1.2, gy-0.02);
+        if (cr.glow) cr.glow.visible = true;
+        // real collision now that it's actually sitting somewhere — registered on the chunk
+        // it landed in, exactly like every other crate's collider
+        const ccx = Math.round(lx / CHUNK), ccz = Math.round(lz / CHUNK);
+        const ch = chunks.get(chunkKey(ccx, ccz));
+        if (ch) {
+          cr.col = aabb(lx, lz, 0.76, 0.76, 1.3, gy2 - 0.02);
+          cr.colList = ch.colliders;
+          ch.colliders.push(cr.col);
+        }
       }
     }
-    // Interact open — a client asks the host and waits for chuteGive; the host (or a
-    // solo/host player) grants it straight away, same as it always did
-    if (!cr.opened && cr.landed && Math.hypot(player.pos.x-cr.pos.x, player.pos.z-cr.pos.z) < 2.8 && input.interact) {
-      input.interact = false; // consumed either way — don't let updatePlayer's own interact pass re-fire behind it
-      if (cr.netGhost) {
-        if (!cr._reqT || cr._reqT < -1) { // debounce: one request per press, resend if it goes unanswered
-          cr._reqT = 0;
-          try { net.conns[0].send({ t:'chuteOpen', i:cr.nid }); } catch (e) {}
+    if (!cr.opened) {
+      // same breathing glow + trim pulse every regular crate wears, once it's actually down
+      if (cr.landed && cr.glow) {
+        const p = animateLootGlow(cr.glow, game.time);
+        cr.trim.material.emissiveIntensity = 0.32 + p * 0.22;
+      }
+    } else {
+      // open lid, then shrink away — identical beat to a regular crate's open animation
+      if (cr.lid.rotation.x > -1.8) {
+        cr.lid.rotation.x -= dt * 6;
+      } else if (cr.shrink < 1) {
+        cr.shrink = Math.min(1, cr.shrink + dt * 1.8);
+        const s = Math.max(0.001, 1 - cr.shrink);
+        cr.mesh.scale.setScalar(s);
+        cr.mesh.rotation.y += dt * 6;
+        if (cr.shrink >= 1) {
+          cr.mesh.removeFromParent();
+          if (cr.col && cr.colList) {
+            const ci = cr.colList.indexOf(cr.col);
+            if (ci >= 0) cr.colList.splice(ci, 1);
+          }
+          parachuteCrates.splice(i,1);
         }
-      } else {
-        cr.opened = true;
-        cr.trim.material.emissiveIntensity = 0;
-        if (cr.chevron) { cr.chevron.removeFromParent(); cr.chevron = null; }
-        grantTimeLimitedWeapon(cr.weapon);
-        SFX.crate(); rumble(180, 0.5, 0.5);
-        spawnParticles(cr.pos.x, cr.pos.y+1.2, cr.pos.z, 0xffdc78, 18, 4, 0.9);
       }
     }
     if (cr.netGhost && cr._reqT != null) cr._reqT -= dt;
-    if (cr.opened && cr.shrink < 1) {
-      cr.shrink += dt * 1.6;
-      const s = 2 * Math.max(0, 1 - cr.shrink);
-      cr.mesh.scale.setScalar(s);
-      if (cr.shrink >= 1) {
-        cr.mesh.removeFromParent(); parachuteCrates.splice(i,1);
-      }
-    }
   }
+}
+// closest still-landed, unopened parachute drop in interact range — same 2.8m reach the
+// crate used to gate its own touch on, now fed through the shared prompt/interact chain
+// so it gets the same "X Open Big Crate" button every regular crate shows.
+function findNearChuteCrate() {
+  let best = null, bestD = 2.8;
+  for (const cr of parachuteCrates) {
+    if (cr.opened || !cr.landed) continue;
+    const d = Math.hypot(cr.pos.x - player.pos.x, cr.pos.z - player.pos.z);
+    if (d < bestD) { bestD = d; best = cr; }
+  }
+  return best;
+}
+// a client asks the host and waits for chuteGive; the host (or a solo/host player) grants
+// it straight away
+function openChuteCrate(cr) {
+  if (cr.netGhost) {
+    if (!cr._reqT || cr._reqT < -1) { // debounce: one request per press, resend if it goes unanswered
+      cr._reqT = 0;
+      try { net.conns[0].send({ t:'chuteOpen', i:cr.nid }); } catch (e) {}
+    }
+    return;
+  }
+  cr.opened = true;
+  cr.trim.material.emissiveIntensity = 0;
+  grantTimeLimitedWeapon(cr.weapon);
+  SFX.crate(); rumble(180, 0.5, 0.5);
+  spawnParticles(cr.pos.x, cr.pos.y+1.2, cr.pos.z, 0xffdc78, 18, 4, 0.9);
 }
 
 // the chili-style clock: grants id (pumpshotgun/rpg) for TL_DURATION seconds (longer + a
@@ -9010,6 +9103,9 @@ function explodeRPG(x, y, z, owner, opts = {}) {
     // full shake/rumble for our own blast; a nearby teammate's still thumps, just softer
     const near = ghost ? clamp(1 - distToMe/45, 0, 1) : 1;
     if (near > 0) { shakeAmp = Math.max(shakeAmp, 0.4*near); rumble(500*near, near, near); }
+    // a rocket that goes off against a wall leaves a MASSIVE scorched hole, flat against
+    // that surface — same decal every bullet leaves, just several times the size
+    if (opts.wallHit) spawnBulletHole(x, y, z, opts.nx || 0, opts.nz || 0, 2.6);
   }
   if (ghost) return; // damage/self-damage/net-broadcast below only ever run for the REAL shot
   const isBlazo = selectedCousin === 'blazo';
@@ -9063,7 +9159,27 @@ function updateRPGProjectiles(dt) {
   for (let i = rpgProjectiles.length-1; i>=0; i--) {
     const p = rpgProjectiles[i];
     p.life -= dt;
+    const from = p.mesh.position;
     const step = p.vel.clone().multiplyScalar(dt);
+    const segLen = step.length();
+    // Wall / building / vehicle collision: the same box test bullets run against
+    // nearbyColliders, swept across this tick's travel so a fast rocket can't tunnel
+    // through a thin wall between frames — it detonates right where it hit, wall included.
+    if (!p.ghost && segLen > 0.0001) {
+      const dirx = step.x / segLen, diry = step.y / segLen, dirz = step.z / segLen;
+      let wallT = Infinity;
+      for (const c of nearbyColliders(from.x, from.z)) {
+        const t = c.roof ? rayRoof(from.x, from.y, from.z, dirx, diry, dirz, c)
+                         : rayAABB(from.x, from.y, from.z, dirx, diry, dirz, c);
+        if (t < wallT) wallT = t;
+      }
+      if (wallT <= segLen) {
+        const hx = from.x + dirx * wallT, hy = from.y + diry * wallT, hz = from.z + dirz * wallT;
+        explodeRPG(hx, hy, hz, p.owner, { wallHit: true, nx: -dirx, nz: -dirz });
+        p.mesh.removeFromParent(); rpgProjectiles.splice(i, 1);
+        continue;
+      }
+    }
     p.mesh.position.add(step);
     // Trail
     if (Math.random() < 0.4) spawnParticles(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, 0xff8844, 1, 0.4, 0.25);
@@ -9277,7 +9393,7 @@ let camDist = 4.9;
 // lens state for the ground-cam flare (see updateCamera). lookFov is the FOV *before*
 // the flare widens it, so craning at the sky never speeds the look up.
 let lensStretched = false, lookFov = 70;
-let nearCrate = null, nearRecruit = null;
+let nearCrate = null, nearRecruit = null, nearChuteCrate = null;
 
 function animate() {
   requestAnimationFrame(animate);
@@ -9528,7 +9644,9 @@ function updatePlayer(dt) {
   // A live drop kick locks everything out until it lands.
   if ((wantShoot || (w.melee && input.shootPressed)) && player.shootCd <= 0 && !player.dropKick && !player.downed) {
     fireWeapon();
-    player.shootCd = 60 / w.rpm;
+    // the pump needs an honest rack between shots — a fixed .42s beat rather than an
+    // rpm-derived gap, so it lines up with the click-clack in SFX.pumpshoot
+    player.shootCd = w.id === 'pumpshotgun' ? 0.42 : 60 / w.rpm;
   }
   input.shootPressed = false;
 
@@ -9555,6 +9673,10 @@ function updatePlayer(dt) {
   const blockLower = nearDowned || nearNetDowned;
   // a chili giant never opens a crate by hand — the stomp bursts them instead (giantStomp)
   nearCrate = (blockLower || playerGiantAny()) ? null : findNearCrate();
+  // the boss's parachute drop outranks an ordinary crate — it's rare, it's a big deal, and
+  // it's never standing close enough to one to actually need a tie-break
+  nearChuteCrate = (blockLower || playerGiantAny()) ? null : findNearChuteCrate();
+  if (nearChuteCrate) nearCrate = null;
   nearRecruit = blockLower ? null : findNearRecruit();
   // a client can sign up the streamed recruit-beacon cousins too (host owns the squad, so
   // it's a request) — treated exactly like a local recruit for prompt + priority
@@ -9573,7 +9695,7 @@ function updatePlayer(dt) {
   // behind the two-sided consent pact, so no human's kit moves without their held agreement.
   // A chili giant trades with NOBODY: no skin swaps, no weapon deals, until small again.
   let nearTrade = null, nearNpcTrade = null, nearNetPlayer = null;
-  if (!blockLower && !nearCrate && !nearRecruit && !nearNetRecruit && !playerGiantAny()) {
+  if (!blockLower && !nearCrate && !nearChuteCrate && !nearRecruit && !nearNetRecruit && !playerGiantAny()) {
     nearTrade = findNearTrade();
     if (!nearTrade && net.role === 'client') nearNpcTrade = netFindNearNpcTrade();
     if (!nearTrade && !nearNpcTrade) nearNetPlayer = net.role === 'client' ? netFindNearPlayerAny()
@@ -9581,12 +9703,13 @@ function updatePlayer(dt) {
   }
   // grandma's ghost outranks everything: at the end of the trek there is nothing else to do
   const nearGrandma = findNearGrandma();
-  const showPrompt = !!(nearGrandma || nearDowned || nearNetDowned || nearCrate || nearJelly || nearChili || nearRecruit || nearNetRecruit || nearTrade || nearNpcTrade || nearNetPlayer);
+  const showPrompt = !!(nearGrandma || nearDowned || nearNetDowned || nearCrate || nearChuteCrate || nearJelly || nearChili || nearRecruit || nearNetRecruit || nearTrade || nearNpcTrade || nearNetPlayer);
   const bareHand = player.weapon.id === 'fists'; // fists out: the trade on offer is your skin
   hud.prompttxt.textContent = nearGrandma ? 'Remember Grandma Blingo'
     : nearDowned ? 'Pick up ' + nearDowned.data.name
     : nearNetDowned ? `Revive P${nearNetDowned.p} ${nearNetDowned.data.name}`
     : nearCrate ? 'Open Crate'
+    : nearChuteCrate ? 'Open Big Crate'
     : nearJelly ? 'Take the GOOD JELLY'
     : nearChili ? "Take RED'S CHILI"
     : nearRecruit ? 'Recruit ' + nearRecruit.data.name
@@ -9606,6 +9729,7 @@ function updatePlayer(dt) {
     else if (nearDowned) reviveCousin(nearDowned);
     else if (nearNetDowned) { try { net.conns[0].send({ t: 'reviveReq', p: nearNetDowned.p }); } catch (e) {} }
     else if (nearCrate) openCrate(nearCrate);
+    else if (nearChuteCrate) openChuteCrate(nearChuteCrate);
     else if (nearJelly) lootJelly();
     else if (nearChili) lootChili();
     else if (nearRecruit) recruitCousin(nearRecruit);
@@ -13574,7 +13698,6 @@ function wireHostConn(conn) {
       const pc3 = cousinByConn(conn);
       if (cr3 && pc3 && Math.hypot(pc3.pos.x - cr3.pos.x, pc3.pos.z - cr3.pos.z) < 4) {
         cr3.opened = true; cr3.trim.material.emissiveIntensity = 0;
-        if (cr3.chevron) { cr3.chevron.removeFromParent(); cr3.chevron = null; }
         play3d(cr3.pos.x, cr3.pos.z, () => SFX.crate());
         spawnParticles(cr3.pos.x, cr3.pos.y + 1.2, cr3.pos.z, 0xffdc78, 18, 4, 0.9);
         try { conn.send({ t: 'chuteGive', w: cr3.weapon }); } catch(e) {}
@@ -14289,8 +14412,7 @@ function netApplySnapshot(m) {
         const built = buildParachuteCrateMesh();
         built.g.position.set(e.x, e.y, e.z);
         scene.add(built.g);
-        const chev = makeChevronMarker(); scene.add(chev);
-        g = { mesh: built.g, lid: built.lid, trim: built.trim, chevron: chev, opened: false, shrink: 0,
+        g = { mesh: built.g, lid: built.lid, trim: built.trim, glow: built.glow, opened: false, shrink: 0,
           pos: new THREE.Vector3(e.x, e.y, e.z), landed: false, weapon: e.w ? 'rpg' : 'pumpshotgun',
           nid: e.i, t: Math.random() * 10, netGhost: true };
         parachuteCrates.push(g);
@@ -14298,13 +14420,12 @@ function netApplySnapshot(m) {
       g.tx = e.x; g.ty = e.y; g.tz = e.z; g.tlanded = !!e.ld;
       if (e.op && !g.opened) {
         g.opened = true; g.trim.material.emissiveIntensity = 0;
-        if (g.chevron) { g.chevron.removeFromParent(); g.chevron = null; }
       }
     }
     for (let i = parachuteCrates.length - 1; i >= 0; i--) {
       const c = parachuteCrates[i];
       if (c.netGhost && !seenPC.has(c.nid) && !c.opened) {
-        c.mesh.removeFromParent(); if (c.chevron) c.chevron.removeFromParent();
+        c.mesh.removeFromParent();
         parachuteCrates.splice(i, 1);
       }
     }
