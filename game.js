@@ -2636,11 +2636,18 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
   if (!colliders) return null;
   roofSlope(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
   const roofBox = colliders[colliders.length - 1]; // main roof body — covers the full footprint for peek
-  // Gable end colliders — bullet-stopping triangles at each end of the roof
+  // Gable end colliders — bullet-stopping triangles at each end of the roof. These reuse
+  // the pitched-roof tent math (rayRoof) instead of a flat rectangular box, so a shot aimed
+  // above the gable's sloped edge — near the eaves, where the box used to still be full
+  // height — passes clean over it instead of clipping an invisible wall. `gable: true`
+  // keeps resolveCollision treating this as an ordinary solid side wall: real walkable
+  // roofs skip side collision there (their standing surface is handled by colTop instead),
+  // but a gable end is a wall you walk INTO, not a roof you walk on top of.
   for (const s of [-1, 1]) {
     const gx = bx + s * w / 2 - s * gdepth / 2; // centred on the gable body, flush with wall face
     const c = aabb(gx, bz, gdepth / 2 + 0.05, d / 2, rh, by);
-    c.slope = { gx: 0, gz: s * rh / (w / 2), rh };
+    c.roof = { axis: 'x', rh, slopeHalf: d / 2 }; // apex runs along x (the gable's thin axis), slopes fall away in z — matches the extruded triangle shape exactly
+    c.gable = true;
     colliders.push(c);
   }
   return { mats: [roofMat, gmat, ceilMat], box: roofBox, op: 1, want: 1 };
@@ -3375,8 +3382,11 @@ function resolveCollision(x, z, r, y) {
       // real sloped surface. That used to fall into the tunnelling rescue below, which
       // ejects through the nearest face of the box — for a roof this size, an instant
       // snap clear across the footprint (read as a teleport). Skip roofs outright here;
-      // the on-top check above already keeps their surface standable and solid.
-      if (c.roof) continue;
+      // the on-top check above already keeps their surface standable and solid. Gable-end
+      // and pediment triangles borrow the same tent math for their bullet ray-hits (see
+      // addRoof/grandBuilding) but are still ordinary vertical walls, not something anyone
+      // stands on top of — they keep going through the side-collision check below.
+      if (c.roof && !c.gable) continue;
     }
     if (c.rot) {
       // oriented box: work in the collider's local frame
@@ -3616,9 +3626,14 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   const ped = new THREE.Mesh(pedGeo, new THREE.MeshLambertMaterial({ color: 0xcfc9ba, side: THREE.DoubleSide }));
   ped.position.set(x, y0 + h + 0.28, fz + faceDir * 1.1);
   townGroup.add(ped); peekKit.push(ped);
-  // a box standing in for the triangle — slightly generous near the base, where the slab
-  // is actually widest — so rockets and bullets can collide with it like every other solid
-  townColliders.push(aabb(x, fz + faceDir * 1.1, w * 0.4 + 0.15, pedDepth / 2 + 0.1, 2.2, y0 + h + 0.28));
+  // a triangular collider (not a flat box standing in for one) — reuses the same pitched-
+  // roof tent math a house gable gets (rayRoof), so a shot clearing the pediment's sloped
+  // cornice passes over it instead of clipping the old rectangular bounding box. `gable:
+  // true` keeps it a normal solid wall for player/zombie movement — see resolveCollision.
+  const pedC = aabb(x, fz + faceDir * 1.1, w * 0.4 + 0.15, pedDepth / 2 + 0.1, 2.2, y0 + h + 0.28);
+  pedC.roof = { axis: 'z', rh: 2.2, slopeHalf: w * 0.4 }; // apex runs along z (front-to-back), slopes fall away in x
+  pedC.gable = true;
+  townColliders.push(pedC);
   // Steps climb TOWARD the building: you meet the low wide one out front off the road, then
   // the taller one tucked behind it against the columns. They used to run backwards — the
   // tall one sat outermost, so you stepped up onto it and then back down to reach the door.
