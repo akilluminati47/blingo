@@ -2153,7 +2153,11 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   root.scale.setScalar(scale);
   // collect skin meshes for red damage flash
   const skinList = [];
-  root.traverse(o => { if (o.isMesh) skinList.push({ mesh: o, mat: o.material }); });
+  // frustumCulled off for every part: Three's per-mesh culling was popping limbs out early
+  // as a tall body crossed the frustum's top plane (each small piece culls off its own
+  // bounding sphere, so the topmost parts blink out a beat before the body's actually
+  // offscreen). Characters despawn on real world distance anyway — no need to double up.
+  root.traverse(o => { if (o.isMesh) { skinList.push({ mesh: o, mat: o.material }); o.frustumCulled = false; } });
   return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, pupils, mouth, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
 }
@@ -5773,8 +5777,10 @@ const companions = []; // {data, blob, beacon, pos, recruited, shootCd, walkPhas
 const BEACON_GEO = new THREE.CylinderGeometry(0.85, 0.85, 120, 10, 1, true);
 const BEACON_Y = 60; // centre height: base on the dirt, crown in the clouds
 function makeBeacon(color, opacity) {
-  return new THREE.Mesh(BEACON_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity,
+  const m = new THREE.Mesh(BEACON_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity,
     blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
+  m.frustumCulled = false; // 60 units tall, base to crown — same top-of-frustum pop as crows
+  return m;
 }
 
 // true when nothing solid overlaps a character-sized circle at (x,z): keeps spawns out
@@ -8948,6 +8954,7 @@ function buildParachuteCrateMesh() {
     str.quaternion.setFromUnitVectors(upAxis, p2.clone().sub(p1).normalize());
     chuteRig.add(str);
   }
+  g.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   return { g, lid, trim, glow, chuteRig };
 }
 function spawnParachuteCrate(bossX, bossZ) {
@@ -12084,6 +12091,7 @@ function buildFbiBlob(faceColor, big) {
   // clear of the torso ellipsoid (z extent ~0.42 at chest height) — rides the
   // wobble so it breathes with the body, but sits close enough it doesn't float off
   back.position.set(0, 0.95, -0.42); back.rotation.y = Math.PI; blob.wob.add(back);
+  face.frustumCulled = false; back.frustumCulled = false;
   return blob;
 }
 // stand up one black-ops blob in the zombie list (so the whole hitscan / damage / death /
@@ -12604,6 +12612,10 @@ function buildCrow(x, y, z, roost) {
   g.scale.setScalar(1 + Math.random() * 0.35);
   g.position.set(x, y, z);
   g.rotation.y = Math.random() * TAU;
+  // crows fly highest of anything in the game — most likely to cross the frustum's top
+  // plane and blink out mid-flight before they've actually left the screen (see buildBlob
+  // for the same fix on characters)
+  g.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   scene.add(g);
   const c = { g, wingL, wingR, rollL: wl.roll, rollR: wr.roll, tipL: wl.tip, tipR: wr.tip,
     legL, legR, breast, beak, eyes, purple, peckT: 0,
