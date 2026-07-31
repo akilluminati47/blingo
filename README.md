@@ -123,6 +123,7 @@ Each boss spawns with a colored beam pillar marking their location. Beating them
 - Shotgun pellets tear through close-range kills
 - Magnum rounds pop skulls and keep going
 - Crows (1hp) never stop a heavy round — one blast can pick apart a whole murder
+- Loot an air-dropped big crate for a classic RPG or tactical Pump Shotgun .ᐟ
 
 **Melee:**
 - Every cousin's signature weapon with infinite swings
