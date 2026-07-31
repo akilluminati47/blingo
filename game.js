@@ -1134,9 +1134,17 @@ function spawnBulletHole(x, y, z, nx, nz, caliber) {
   }
   // nx/nz coming in is only ever an approximation (the shot's own reversed direction) —
   // snap it to whichever nearby collider face the point is actually resting against, so a
-  // grazing hit still lies dead flat on the real wall instead of tilted to the shot's angle
-  const face = wallFaceNormal(x, z, nx, nz);
-  nx = face[0]; nz = face[1];
+  // grazing hit still lies dead flat on the real wall instead of tilted to the shot's angle.
+  // But a hit sitting right at ground level is always a ground decal, even though nx/nz
+  // never carries a real vertical normal — without this check wallFaceNormal's own fallback
+  // (the same reversed shot direction) would hand it right back, and the decal would stand
+  // up on its edge to match the shot's angle instead of lying flat on the terrain.
+  if (Math.abs(y - groundHeight(x, z)) < 0.15) {
+    nx = 0; nz = 0;
+  } else {
+    const face = wallFaceNormal(x, z, nx, nz);
+    nx = face[0]; nz = face[1];
+  }
   const mat = new THREE.MeshBasicMaterial({ map: _decalTex, transparent: true, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide });
   const s = new THREE.Mesh(_decalPlaneGeo, mat);
   const sz = (caliber || 0.18) * (0.65 + Math.random() * 0.7);
@@ -1766,14 +1774,15 @@ function buildGunMesh(id) {
     const pump = box(0.13, 0.07, 0.32, 0x1c1e22); pump.position.set(0, -0.06, -0.38); g.add(pump);
 
     // curved box mag: profile drawn as (depth, height) so the bow reads correctly from
-    // the side — front edge sweeps back down to a flat toe, back edge bows out to meet it,
-    // same silhouette as a STANAG mag, just stretched long like the Mossberg's factory one
+    // the side. Only the back (shooter-side) edge bows outward — the front (muzzle-side)
+    // edge curves inward toward it as it drops, which is what actually makes it read as a
+    // banana curve instead of a symmetrical bulge on both sides.
     const mShape = new THREE.Shape();
     mShape.moveTo(0.15, 0.03);          // top-front, at the mag well
     mShape.lineTo(-0.06, 0.03);         // top-back, at the mag well
-    mShape.quadraticCurveTo(-0.15, -0.16, -0.11, -0.34); // back edge bows out, sweeps in toward the toe
-    mShape.lineTo(0.03, -0.38);         // flat toe (bottom of the mag)
-    mShape.quadraticCurveTo(0.15, -0.32, 0.15, -0.14);   // front edge curves back up to the well
+    mShape.quadraticCurveTo(-0.15, -0.16, -0.11, -0.34); // back edge bows outward, sweeps in toward the toe
+    mShape.lineTo(0.015, -0.37);        // flat toe (bottom of the mag)
+    mShape.quadraticCurveTo(-0.07, -0.16, 0.15, 0.03);   // front edge curves INWARD back up to the well
     mShape.closePath();
     const mGeo = new THREE.ExtrudeGeometry(mShape, { depth: 0.1, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 1 });
     mGeo.translate(0, 0, -0.05); // centre the mag's width on the gun's midline
@@ -8906,12 +8915,16 @@ function buildParachuteCrateMesh() {
   glow.visible = false;
   g.add(glow);
   // the parachute: a sub-group carrying the old 2× scale on its own, so the canopy keeps
-  // its original size and height above the now-smaller crate instead of shrinking with it
+  // its original size and height above the now-smaller crate instead of shrinking with it.
+  // Canopy + shroud lines all live under chuteRig so they can fade out together shortly
+  // after touchdown (see updateParachuteCrates) without touching the crate itself.
+  const chuteRig = new THREE.Group(); g.add(chuteRig);
   const chuteGrp = new THREE.Group();
   const chute = new THREE.Mesh(new THREE.SphereGeometry(2.4, 14, 10, 0, TAU, 0, Math.PI/2), mat(0xc8a44a, {side:THREE.DoubleSide}));
+  ownMat(chute).transparent = true; // private material — fading this one crate's chute can't bleed into another's
   chute.position.y = 3.0; chute.scale.y = 0.42; chuteGrp.add(chute);
   chuteGrp.scale.setScalar(2);
-  g.add(chuteGrp);
+  chuteRig.add(chuteGrp);
   // shroud lines: each one runs from the lid's own outer corner straight to the point on
   // the canopy's rim directly above it, so every strap actually meets both ends instead of
   // floating near them.
@@ -8924,11 +8937,12 @@ function buildParachuteCrateMesh() {
     const p2 = new THREE.Vector3(dirx * rimR, rimY, dirz * rimR);
     const len = p1.distanceTo(p2);
     const str = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, len, 4), mat(0x8a7a5a));
+    ownMat(str).transparent = true; // same private-material treatment as the canopy
     str.position.copy(p1).add(p2).multiplyScalar(0.5);
     str.quaternion.setFromUnitVectors(upAxis, p2.clone().sub(p1).normalize());
-    g.add(str);
+    chuteRig.add(str);
   }
-  return { g, lid, trim, glow };
+  return { g, lid, trim, glow, chuteRig };
 }
 function spawnParachuteCrate(bossX, bossZ) {
   if (net.role === 'client') return; // the host owns every roll here — clients get it off the stream
@@ -8943,11 +8957,11 @@ function spawnParachuteCrate(bossX, bossZ) {
     x = tx; z = tz;
     if (spotClearOf(tx, tz, 2.2, nearbyColliders(tx, tz))) break;
   }
-  const { g, lid, trim, glow } = buildParachuteCrateMesh();
+  const { g, lid, trim, glow, chuteRig } = buildParachuteCrateMesh();
   g.position.set(x, PARACHUTE_BEACON_Y, z);
   scene.add(g);
   const cr = {
-    mesh:g, lid, trim, glow, opened:false, shrink:0,
+    mesh:g, lid, trim, glow, chuteRig, opened:false, shrink:0,
     pos:new THREE.Vector3(x, PARACHUTE_BEACON_Y, z),
     velY:-PARACHUTE_FALL_SPEED, t:Math.random()*10,
     landed:false, weapon:Math.random()<0.5?'pumpshotgun':'rpg',
@@ -9039,6 +9053,17 @@ function updateParachuteCrates(dt) {
       if (cr.landed && cr.glow) {
         const p = animateLootGlow(cr.glow, game.time);
         cr.trim.material.emissiveIntensity = 0.32 + p * 0.22;
+      }
+      // the canopy + its shroud lines have done their job once the crate is sitting still —
+      // fade them out 420ms after touchdown instead of leaving them draped over the crate
+      // for however long it sits there unopened
+      if (cr.landed && cr.chuteRig && cr.chuteRig.visible) {
+        cr.landedT = (cr.landedT || 0) + dt;
+        if (cr.landedT > 0.42) {
+          const op = Math.max(0, 1 - (cr.landedT - 0.42) * 4); // ~0.25s fade once past the 420ms mark
+          cr.chuteRig.traverse(o => { if (o.material) o.material.opacity = op; });
+          if (op <= 0) cr.chuteRig.visible = false;
+        }
       }
     } else {
       // open lid, then shrink away — identical beat to a regular crate's open animation
@@ -14569,7 +14594,7 @@ function netApplySnapshot(m) {
         const built = buildParachuteCrateMesh();
         built.g.position.set(e.x, e.y, e.z);
         scene.add(built.g);
-        g = { mesh: built.g, lid: built.lid, trim: built.trim, glow: built.glow, opened: false, shrink: 0,
+        g = { mesh: built.g, lid: built.lid, trim: built.trim, glow: built.glow, chuteRig: built.chuteRig, opened: false, shrink: 0,
           pos: new THREE.Vector3(e.x, e.y, e.z), landed: false, weapon: e.w ? 'rpg' : 'pumpshotgun',
           nid: e.i, t: Math.random() * 10, netGhost: true };
         parachuteCrates.push(g);
