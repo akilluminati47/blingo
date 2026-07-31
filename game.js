@@ -1651,7 +1651,7 @@ const WEAPONS = {
   // ammo is a big finite number rather than Infinity — reserves[w.id]|0 is used all over
   // (tryReload, the touch auto-fire "spent" check) and Infinity|0 coerces to 0 in JS, which
   // would silently brick the reload the moment the mag ran dry.
-  pumpshotgun: { id:'pumpshotgun', name:'Pump Shotgun', slot:'gun', dmg:4, mag:20, rpm:240, auto:false, spread:0.032, ammo:999, color:0x4a5a3a, kick:0.08, rmb:[140,0.85,0.6], cqc:2.6, dismember:0.9, gib:true, fRange:50, pellets:10, timeLimited:true },
+  pumpshotgun: { id:'pumpshotgun', name:'Pump Shotgun', slot:'gun', dmg:4, mag:20, rpm:240, auto:false, spread:0.032, ammo:999, color:0x1b1d21, kick:0.08, rmb:[140,0.85,0.6], cqc:2.6, dismember:0.9, gib:true, fRange:50, pellets:10, timeLimited:true },
   rpg:        { id:'rpg',        name:'RPG-7',        slot:'gun', dmg:100,mag:1,  rpm:14,  auto:false, spread:0.012, ammo:999, color:0x3a4a2a, kick:0.22, rmb:[220,1,1],   cqc:0,  dismember:1,   gib:true, fRange:80, blastRadius:6.5, bossDmg:67, selfDmg:35, timeLimited:true },
 };
 // inventory slot order: fists, then the consumables (grandma's jelly, Red's chili), then
@@ -1756,23 +1756,62 @@ function buildGunMesh(id) {
     const stock = box(0.08, 0.15, 0.3, 0x2a2318); stock.position.set(0, 0.0, 0.28); g.add(stock);
     const grip = box(0.07, 0.16, 0.09, 0x22252b); grip.position.set(0, -0.09, 0.12); grip.rotation.x = 0.25; g.add(grip);
   } else if (id === 'pumpshotgun') {
-    // Mossberg 590 style with banana mag
+    // Mossberg 590 Mag-Fed silhouette: long black synthetic receiver/stock, long pump
+    // forend and barrel, and a long curved box magazine (an AR mag's bow, not a straight
+    // tube) hanging just ahead of the trigger guard.
     const body = box(0.12, 0.16, 0.74, c); body.position.set(0, 0.06, -0.24); g.add(body);
-    const barrel = cyl(0.04, 0.045, 0.58, 0x2a2c30); barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.09, -0.76); g.add(barrel);
-    const mag = box(0.09, 0.32, 0.42, 0x3a4a2a); mag.position.set(0, -0.16, -0.1); mag.rotation.x = 0.38; g.add(mag);
-    const grip = box(0.09, 0.19, 0.12, 0x22252b); grip.position.set(0, -0.11, 0.14); grip.rotation.x = 0.25; g.add(grip);
+    const barrel = cyl(0.04, 0.045, 0.58, 0x1c1e22); barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.09, -0.76); g.add(barrel);
+    const grip = box(0.09, 0.19, 0.12, 0x1a1c20); grip.position.set(0, -0.11, 0.14); grip.rotation.x = 0.25; g.add(grip);
     const stock = box(0.1, 0.15, 0.34, c); stock.position.set(0, 0.04, 0.3); g.add(stock);
-    const pump = box(0.13, 0.07, 0.32, 0x2a2c30); pump.position.set(0, -0.06, -0.38); g.add(pump);
+    const pump = box(0.13, 0.07, 0.32, 0x1c1e22); pump.position.set(0, -0.06, -0.38); g.add(pump);
+
+    // curved box mag: profile drawn as (depth, height) so the bow reads correctly from
+    // the side — front edge sweeps back down to a flat toe, back edge bows out to meet it,
+    // same silhouette as a STANAG mag, just stretched long like the Mossberg's factory one
+    const mShape = new THREE.Shape();
+    mShape.moveTo(0.15, 0.03);          // top-front, at the mag well
+    mShape.lineTo(-0.06, 0.03);         // top-back, at the mag well
+    mShape.quadraticCurveTo(-0.15, -0.16, -0.11, -0.34); // back edge bows out, sweeps in toward the toe
+    mShape.lineTo(0.03, -0.38);         // flat toe (bottom of the mag)
+    mShape.quadraticCurveTo(0.15, -0.32, 0.15, -0.14);   // front edge curves back up to the well
+    mShape.closePath();
+    const mGeo = new THREE.ExtrudeGeometry(mShape, { depth: 0.1, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 1 });
+    mGeo.translate(0, 0, -0.05); // centre the mag's width on the gun's midline
+    const mag = new THREE.Mesh(mGeo, mat(0x17181c));
+    mag.castShadow = true; mag.receiveShadow = true;
+    mag.rotation.y = Math.PI / 2; // swing the drawn (depth,height) profile onto the real x/z plane
+    mag.position.set(0, -0.02, -0.16); // hangs down just ahead of the grip, matching the reference photo
+    g.add(mag);
+
     const muz = new THREE.Group(); muz.position.set(0, 0.09, -1.06); g.add(muz); g.userData.muzzle = muz;
   } else if (id === 'rpg') {
-    const tube = cyl(0.075, 0.075, 1.15, c); tube.rotation.x = Math.PI/2; tube.position.set(0, 0.07, -0.58); g.add(tube);
-    const warhead = cyl(0.1, 0.075, 0.26, 0x8a3a2a); warhead.rotation.x = Math.PI/2; warhead.position.set(0, 0.07, -1.26); g.add(warhead);
-    for (const s of [-1, 1]) {
-      const fin = box(0.035, 0.16, 0.025, 0x2a2c30); fin.position.set(s*0.11, 0.07, 0.04); fin.rotation.z = s*0.35; g.add(fin);
+    // RPG-7: black steel tube, a wood-grain handguard sleeve banded at both ends, the
+    // rocket riding slightly proud of the tube on its own thin sustainer stick, and a
+    // genuinely open, flared venturi at the rear instead of flat fin blades.
+    const tube = cyl(0.075, 0.075, 1.15, 0x1c1e22); tube.rotation.x = Math.PI/2; tube.position.set(0, 0.07, -0.58); g.add(tube);
+
+    // wood-grain handguard sleeved over the tube, capped with a darker strap band at each end
+    const wood = cyl(0.086, 0.086, 0.44, 0x9c6a35, 12); wood.rotation.x = Math.PI/2; wood.position.set(0, 0.07, -0.27); g.add(wood);
+    for (const wz of [-0.47, -0.07]) {
+      const band = cyl(0.09, 0.09, 0.03, 0x1a1c20, 12); band.rotation.x = Math.PI/2; band.position.set(0, 0.07, wz); g.add(band);
     }
+
+    // the rocket assembly: a thin sustainer rod pokes out of the tube first, then the
+    // olive-drab warhead — grouped together so firing hides both in one shot
+    const rocketGroup = new THREE.Group(); g.add(rocketGroup);
+    const stick = cyl(0.024, 0.026, 0.12, 0x24262a, 8); stick.rotation.x = Math.PI/2; stick.position.set(0, 0.07, -1.215); rocketGroup.add(stick);
+    const warhead = cyl(0.1, 0.075, 0.26, 0x47563a); warhead.rotation.x = Math.PI/2; warhead.position.set(0, 0.07, -1.405); rocketGroup.add(warhead);
+    g.userData.rocket = rocketGroup; // tracked for fire/reload vis
+
+    // rear venturi: an actually-hollow flared bell (openEnded cylinder) instead of the old
+    // fin blades — narrow end seats into the tube, wide end is a true see-through opening
+    const flareGeo = new THREE.CylinderGeometry(0.15, 0.078, 0.22, 12, 1, true);
+    const flare = new THREE.Mesh(flareGeo, mat(0x15171b, { side: THREE.DoubleSide }));
+    flare.castShadow = true; flare.receiveShadow = true;
+    flare.rotation.x = Math.PI/2; flare.position.set(0, 0.07, 0.09); g.add(flare);
+
     const grip = box(0.1, 0.18, 0.13, 0x22252b); grip.position.set(0, -0.1, 0.1); grip.rotation.x = 0.24; g.add(grip);
     const sight = box(0.035, 0.07, 0.12, 0x2a2c30); sight.position.set(0, 0.18, -0.22); g.add(sight);
-    g.userData.rocket = warhead; // tracked for fire/reload vis
   } else if (id === 'jelly') {
     // grandma's jar in hand: purple glass under a waxed cap, the family cure-all
     const glass = cyl(0.11, 0.1, 0.24, 0xffffff, 10);
