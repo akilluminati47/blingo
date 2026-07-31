@@ -2282,6 +2282,18 @@ function addRotGore(blob, { hangEye = false, ribs = false, ribsR = false, belly 
   for (const m of rotFlash) blob.skinList.push({ mesh: m, mat: m.material });
 }
 function placeShadow(blob, x, z, y) { /* dynamic sun shadows replace the old blob circles */ }
+// shadow LOD: a blob only casts its self-shadow within this range of the camera. Past it the
+// shadow is a couple of pixels at most — invisible — but the shadow-map depth pass still has
+// to draw every one of a body's ~20-40 parts for it. With a full horde on screen that's the
+// single biggest cost of running shadows always-on, so distant bodies just skip the cast; they
+// still receive (dirt cheap, no extra draw calls) so nothing looks flat up close either way.
+const SHADOW_LOD_DIST = 28;
+function updateBlobShadowLOD(blob, x, z) {
+  const on = (camera.position.x - x) ** 2 + (camera.position.z - z) ** 2 < SHADOW_LOD_DIST * SHADOW_LOD_DIST;
+  if (blob.shadowCastOn === on) return; // nothing changed — skip the sweep over its parts
+  blob.shadowCastOn = on;
+  for (const s of blob.skinList) s.mesh.castShadow = on;
+}
 // fold a mesh added AFTER buildBlob's skinList sweep (horns, blood stains, boss dressing)
 // into the flash list, so every feature flashes with the body when the blob is shot
 function foldSkin(blob, m) { blob.skinList.push({ mesh: m, mat: m.material }); return m; }
@@ -9962,6 +9974,7 @@ function updatePlayer(dt) {
   updateFlash(b, dt);
   // shadow stays flat, projected onto whatever we're above (ground, car roofs...)
   placeShadow(b, player.pos.x, player.pos.z, player.pos.y);
+  updateBlobShadowLOD(b, player.pos.x, player.pos.z);
 
   // aim/zoom: hold to focus. third-person tightens over the shoulder & raises the weapon;
   // first-person eases over the sights (or raises the melee weapon). fpv is the view toggle.
@@ -10247,6 +10260,7 @@ function updateCompanions(dt) {
     const still = lead.still;
     updateFlash(b, dt);
     placeShadow(b, c.pos.x, c.pos.z, c.y);
+    updateBlobShadowLOD(b, c.pos.x, c.pos.z);
     if (!c.recruited) {
       c.y = gy;
       // if the world generated something solid on top of this waiting cousin, step clear
@@ -10848,6 +10862,7 @@ function updateZombies(dt) {
       continue;
     }
     const pDist = Math.hypot(player.pos.x - z.pos.x, player.pos.z - z.pos.z);
+    updateBlobShadowLOD(b, z.pos.x, z.pos.z);
     // the leash scales with the live fog line, so a zombie only ever winks out well
     // inside the haze — never in front of you on a clear long-draw day. In a lobby it's the
     // NEAREST player that holds the leash, not just the host, so a client roaming off on
