@@ -22,12 +22,11 @@ fetch('./version.json').then(r => r.json()).then(d => {
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.shadowMap.enabled = false; // only at max draw distance
-// hard single-tap shadows: a pixel is either lit or blocked, no PCF blur sampled across a
-// disk of texels. That disk is what made distant shadows read as a faint, half-resolved
-// edge that only went fully dark once you were close enough for the whole sample kernel to
-// sit inside the shadow — binary lookups are full-strength at any distance, and cheaper too.
-renderer.shadowMap.type = THREE.BasicShadowMap;
+renderer.shadowMap.enabled = true; // always on now — self-shadowing scoped to blob bodies only (see box/ball/cyl + buildBlob), so it's light enough to run at every draw-distance setting
+// soft shadows again: this is the look that made the blob bodies' curves pop. Restricting
+// which meshes cast/receive (blob bodies only — see box/ball/cyl defaults + buildBlob's
+// traverse) keeps the softness affordable without needing the hard single-tap map.
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 
@@ -86,20 +85,20 @@ const hemi = new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 0.9);
 scene.add(hemi);
 const sunLight = new THREE.DirectionalLight(0xffeccb, 0.9);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.mapSize.set(1024, 1024);
 sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 200;
 sunLight.shadow.camera.left = -60; sunLight.shadow.camera.right = 60;
 sunLight.shadow.camera.top = 60; sunLight.shadow.camera.bottom = -60;
-sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05;
+sunLight.shadow.bias = -0.0004; sunLight.shadow.normalBias = 0.02;
 sunLight.position.set(50, 60, -40);
 scene.add(sunLight);
 const moonLight = new THREE.DirectionalLight(0xaec8ff, 0.5);
 moonLight.castShadow = true;
-moonLight.shadow.mapSize.set(1024, 1024);
+moonLight.shadow.mapSize.set(512, 512);
 moonLight.shadow.camera.near = 1; moonLight.shadow.camera.far = 200;
 moonLight.shadow.camera.left = -60; moonLight.shadow.camera.right = 60;
 moonLight.shadow.camera.top = 60; moonLight.shadow.camera.bottom = -60;
-moonLight.shadow.bias = -0.0005; moonLight.shadow.normalBias = 0.05;
+moonLight.shadow.bias = -0.0003; moonLight.shadow.normalBias = 0.02;
 moonLight.position.set(-30, 50, -20);
 moonLight.intensity = 0;
 moonLight.castShadow = false;
@@ -355,9 +354,9 @@ function ownMat(mesh) {
 }
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const SPHERE = new THREE.SphereGeometry(1, 14, 12);
-function box(w, h, d, color, opts) { const m = new THREE.Mesh(BOX, mat(color, opts)); m.scale.set(w, h, d); m.castShadow = true; m.receiveShadow = true; return m; }
-function ball(r, color, opts) { const m = new THREE.Mesh(SPHERE, mat(color, opts)); m.scale.setScalar(r); m.castShadow = true; m.receiveShadow = true; return m; }
-function cyl(r1, r2, h, color, sides = 8) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, sides), mat(color)); m.castShadow = true; m.receiveShadow = true; return m; }
+function box(w, h, d, color, opts) { const m = new THREE.Mesh(BOX, mat(color, opts)); m.scale.set(w, h, d); return m; }
+function ball(r, color, opts) { const m = new THREE.Mesh(SPHERE, mat(color, opts)); m.scale.setScalar(r); return m; }
+function cyl(r1, r2, h, color, sides = 8) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, sides), mat(color)); return m; }
 
 // canvas texture helpers
 function canvasTex(w, h, draw) {
@@ -1791,7 +1790,6 @@ function buildGunMesh(id) {
     const mGeo = new THREE.ExtrudeGeometry(mShape, { depth: 0.1, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.006, bevelSegments: 1 });
     mGeo.translate(0, 0, -0.05); // centre the mag's width on the gun's midline
     const mag = new THREE.Mesh(mGeo, mat(0x17181c));
-    mag.castShadow = true; mag.receiveShadow = true;
     mag.rotation.y = Math.PI / 2; // swing the drawn (depth,height) profile onto the real x/z plane
     mag.position.set(0, -0.02, -0.16); // hangs down just ahead of the grip, matching the reference photo
     g.add(mag);
@@ -1820,7 +1818,6 @@ function buildGunMesh(id) {
     // fin blades — narrow end seats into the tube, wide end is a true see-through opening
     const flareGeo = new THREE.CylinderGeometry(0.15, 0.078, 0.22, 12, 1, true);
     const flare = new THREE.Mesh(flareGeo, mat(0x15171b, { side: THREE.DoubleSide }));
-    flare.castShadow = true; flare.receiveShadow = true;
     flare.rotation.x = Math.PI/2; flare.position.set(0, 0.07, 0.09); g.add(flare);
 
     const grip = box(0.1, 0.18, 0.13, 0x22252b); grip.position.set(0, -0.1, 0.1); grip.rotation.x = 0.24; g.add(grip);
@@ -2153,11 +2150,10 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   root.scale.setScalar(scale);
   // collect skin meshes for red damage flash
   const skinList = [];
-  // frustumCulled off for every part: Three's per-mesh culling was popping limbs out early
-  // as a tall body crossed the frustum's top plane (each small piece culls off its own
-  // bounding sphere, so the topmost parts blink out a beat before the body's actually
-  // offscreen). Characters despawn on real world distance anyway — no need to double up.
-  root.traverse(o => { if (o.isMesh) { skinList.push({ mesh: o, mat: o.material }); o.frustumCulled = false; } });
+  // frustumCulled off for every part (see top-of-screen note below), and shadows ON: blob
+  // bodies are the only thing in the world that casts/receives now (see box/ball/cyl,
+  // which default both off) — the self-shadowing between limbs is what makes the curves pop.
+  root.traverse(o => { if (o.isMesh) { skinList.push({ mesh: o, mat: o.material }); o.frustumCulled = false; o.castShadow = true; o.receiveShadow = true; } });
   return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, pupils, mouth, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
 }
@@ -2365,7 +2361,7 @@ function terrainPlane(w, d, segW, segD, cx, cz, material, lift = 0) {
   geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, material);
   m.position.set(cx, 0, cz);
-  m.receiveShadow = true; m.castShadow = false;
+  m.receiveShadow = false; m.castShadow = false;
   return m;
 }
 // same ground-following approach as terrainPlane, but a fan disc instead of a grid — for round
@@ -2384,7 +2380,7 @@ function terrainDisc(r, segs, cx, cz, material, lift = 0, rings = 0) {
   geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, material);
   m.position.set(cx, 0, cz);
-  m.receiveShadow = true; m.castShadow = false;
+  m.receiveShadow = false; m.castShadow = false;
   return m;
 }
 
@@ -12092,6 +12088,7 @@ function buildFbiBlob(faceColor, big) {
   // wobble so it breathes with the body, but sits close enough it doesn't float off
   back.position.set(0, 0.95, -0.42); back.rotation.y = Math.PI; blob.wob.add(back);
   face.frustumCulled = false; back.frustumCulled = false;
+  face.castShadow = true; face.receiveShadow = true; back.castShadow = true; back.receiveShadow = true;
   return blob;
 }
 // stand up one black-ops blob in the zombie list (so the whole hitscan / damage / death /
@@ -13309,19 +13306,19 @@ function updateCamera(dt) {
   skyDome.position.copy(camera.position); // the sky rides along so it never has edges
   cloudDome.position.copy(camera.position); // drift lives in the shader's uTime, wind-paced
   updateCelestial(dt); // arc the sun + moon, dress the clouds' uniforms, drift the motes
-  // twin directional shadow lights: sun by day, moon by night — only at max draw distance
-  const shadowsOn = notches.drawDist >= 5;
-  if (renderer.shadowMap.enabled !== shadowsOn) renderer.shadowMap.enabled = shadowsOn;
+  // twin directional lights: sun by day, moon by night — always on now. Shadow-casting used
+  // to gate behind max draw distance because shadows hit everything; now they're scoped to
+  // blob bodies only (see box/ball/cyl + buildBlob), so there's no cost reason to gate them.
   const dayW = clamp((_sunDir.y + 0.05) / 0.1, 0, 1);
   const sd = _sunDir, md = _moonDir;
   sunLight.position.set(player.pos.x + sd.x * 80, player.pos.y + sd.y * 80, player.pos.z + sd.z * 80);
   sunLight.target.position.copy(player.pos); sunLight.target.updateMatrixWorld();
-  sunLight.intensity = shadowsOn ? (0.8 + dayW * 0.4) * (dayW > 0.05 ? 1 : 0) : 0;
-  sunLight.castShadow = shadowsOn && dayW > 0.05;
+  sunLight.intensity = (0.8 + dayW * 0.4) * (dayW > 0.05 ? 1 : 0);
+  sunLight.castShadow = dayW > 0.05;
   moonLight.position.set(player.pos.x + md.x * 80, player.pos.y + md.y * 80, player.pos.z + md.z * 80);
   moonLight.target.position.copy(player.pos); moonLight.target.updateMatrixWorld();
-  moonLight.intensity = shadowsOn ? 0.35 + (1 - dayW) * 0.25 : 0;
-  moonLight.castShadow = shadowsOn && dayW < 0.95;
+  moonLight.intensity = 0.35 + (1 - dayW) * 0.25;
+  moonLight.castShadow = dayW < 0.95;
 }
 
 // ---- see-through house ----
