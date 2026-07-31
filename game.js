@@ -23,7 +23,11 @@ fetch('./version.json').then(r => r.json()).then(d => {
 const canvas = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.shadowMap.enabled = false; // only at max draw distance
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// hard single-tap shadows: a pixel is either lit or blocked, no PCF blur sampled across a
+// disk of texels. That disk is what made distant shadows read as a faint, half-resolved
+// edge that only went fully dark once you were close enough for the whole sample kernel to
+// sit inside the shadow — binary lookups are full-strength at any distance, and cheaper too.
+renderer.shadowMap.type = THREE.BasicShadowMap;
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 
@@ -82,20 +86,20 @@ const hemi = new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 0.9);
 scene.add(hemi);
 const sunLight = new THREE.DirectionalLight(0xffeccb, 0.9);
 sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(1024, 1024);
+sunLight.shadow.mapSize.set(2048, 2048);
 sunLight.shadow.camera.near = 1; sunLight.shadow.camera.far = 200;
 sunLight.shadow.camera.left = -60; sunLight.shadow.camera.right = 60;
 sunLight.shadow.camera.top = 60; sunLight.shadow.camera.bottom = -60;
-sunLight.shadow.bias = -0.0004; sunLight.shadow.normalBias = 0.02;
+sunLight.shadow.bias = -0.0006; sunLight.shadow.normalBias = 0.05;
 sunLight.position.set(50, 60, -40);
 scene.add(sunLight);
 const moonLight = new THREE.DirectionalLight(0xaec8ff, 0.5);
 moonLight.castShadow = true;
-moonLight.shadow.mapSize.set(512, 512);
+moonLight.shadow.mapSize.set(1024, 1024);
 moonLight.shadow.camera.near = 1; moonLight.shadow.camera.far = 200;
 moonLight.shadow.camera.left = -60; moonLight.shadow.camera.right = 60;
 moonLight.shadow.camera.top = 60; moonLight.shadow.camera.bottom = -60;
-moonLight.shadow.bias = -0.0003; moonLight.shadow.normalBias = 0.02;
+moonLight.shadow.bias = -0.0005; moonLight.shadow.normalBias = 0.05;
 moonLight.position.set(-30, 50, -20);
 moonLight.intensity = 0;
 moonLight.castShadow = false;
@@ -7516,25 +7520,12 @@ function refreshRow(key) {
     if (on && !p.classList.contains('on')) { p.classList.remove('pop'); void p.offsetWidth; p.classList.add('pop'); }
     p.classList.toggle('on', on);
   });
-  if (key === 'drawDist') row.classList.toggle('live', notches.drawDist >= 5);
 }
 function syncSettingsUI() { for (const [key] of SETTING_DEFS) refreshRow(key); updateGoreHordeUI(); }
-// light the Zombies pips when the gore horde is on (zombieSpawn maxed). The owner gets the
-// hero-coloured throb; a mirroring client gets grey — they see the horde, but it isn't theirs.
-function updateGoreHordeUI() {
-  const localMax = goreHordeLocal();
-  const clientForced = net.role === 'client' && net.hostGoreHorde;
-  const grey = clientForced && !localMax;
-  for (const key of ['zombieSpawn', 'drawDist']) {
-    const row = rowEls[key];
-    if (!row) continue;
-    const rowOn = key === 'drawDist' ? notches.drawDist >= 5 : (localMax || clientForced);
-    row.classList.toggle('gorehorde', rowOn);
-    row.classList.toggle('greygore', rowOn && grey);
-    if (key === 'drawDist') row.classList.toggle('live', rowOn);
-  }
-  if (rowEls.zombieSpawn) rowEls.zombieSpawn.classList.toggle('live', localMax);
-}
+// Maxing Zombies or Draw Dist still unlocks their real perks (goreHordeLocal() drives the
+// spawner; drawDist's viewR/fogFar bump is unconditional in syncDerived) — but the menu no
+// longer tells on it. No pip glow, no label colour change, no "live" class. Secret stays secret.
+function updateGoreHordeUI() {}
 syncSettingsUI();
 
 // ---------- host-owned spawn settings + host pause (multiplayer) ----------
