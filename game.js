@@ -1132,6 +1132,11 @@ function spawnBulletHole(x, y, z, nx, nz, caliber) {
     const old = _holeDecals.shift();
     if (old.mesh) { old.mesh.removeFromParent(); old.mesh.material.dispose(); }
   }
+  // nx/nz coming in is only ever an approximation (the shot's own reversed direction) —
+  // snap it to whichever nearby collider face the point is actually resting against, so a
+  // grazing hit still lies dead flat on the real wall instead of tilted to the shot's angle
+  const face = wallFaceNormal(x, z, nx, nz);
+  nx = face[0]; nz = face[1];
   const mat = new THREE.MeshBasicMaterial({ map: _decalTex, transparent: true, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide });
   const s = new THREE.Mesh(_decalPlaneGeo, mat);
   const sz = (caliber || 0.18) * (0.65 + Math.random() * 0.7);
@@ -3391,6 +3396,41 @@ function rayAABB(ox, oy, oz, dx, dy, dz, c) {
   }
   return tmin;
 }
+// the true face normal of whichever nearby collider's surface a point is actually resting
+// against — flush with the wall itself, not an approximation of the shot's own angle. Used
+// to lay bullet-hole decals flat on the real geometry instead of tilted to match a grazing
+// hit's incoming direction. Falls back to (fdx,fdz) — the old reversed-ray approximation —
+// when nothing solid is actually there (a body, a rounded prop, anything this box check
+// doesn't cover), so it never regresses those cases.
+function wallFaceNormal(x, z, fdx, fdz) {
+  let best = null, bestD = 0.4; // must be genuinely touching a face, not just "somewhere nearby"
+  for (const c of nearbyColliders(x, z)) {
+    if (c.hw == null || c.hd == null) continue; // skip anything that isn't a box (spheres etc.)
+    let px = x - c.x, pz = z - c.z;
+    if (c.rot) {
+      const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
+      const tx = px * cs - pz * sn; pz = px * sn + pz * cs; px = tx;
+    }
+    // outside the footprint (even padded by the tolerance): this box isn't the one the
+    // point is resting against
+    if (px < -c.hw - bestD || px > c.hw + bestD || pz < -c.hd - bestD || pz > c.hd + bestD) continue;
+    const dPX = Math.abs(px - c.hw), dNX = Math.abs(px + c.hw);
+    const dPZ = Math.abs(pz - c.hd), dNZ = Math.abs(pz + c.hd);
+    const m = Math.min(dPX, dNX, dPZ, dNZ);
+    if (m >= bestD) continue;
+    bestD = m;
+    let lnx = 0, lnz = 0;
+    if (m === dPX) lnx = 1; else if (m === dNX) lnx = -1; else if (m === dPZ) lnz = 1; else lnz = -1;
+    if (c.rot) {
+      // local -> world is the inverse (transpose) of the world -> local rotation above
+      const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
+      best = [cs * lnx + sn * lnz, -sn * lnx + cs * lnz];
+    } else best = [lnx, lnz];
+  }
+  if (best) return best;
+  const dl = Math.hypot(fdx || 0, fdz || 0) || 1;
+  return [(fdx || 0) / dl, (fdz || 0) / dl];
+}
 // ray vs a pitched roof's ACTUAL shingle surface (its two slope planes), not the crude
 // bounding box the collider carries. A round that clears the roofline passes over instead
 // of being swallowed by the box — that's what lets a crow perched on the ridge get shot.
@@ -3520,9 +3560,17 @@ function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
   townColliders.push(aabb(x, z + faceDir * 0.8, (w + 1) / 2, (d + 2.6) / 2, 0.3, y0 + h));
   const pedShape = new THREE.Shape();
   pedShape.moveTo(-w * 0.4, 0); pedShape.lineTo(w * 0.4, 0); pedShape.lineTo(0, 2.2); pedShape.closePath();
-  const ped = new THREE.Mesh(new THREE.ShapeGeometry(pedShape), new THREE.MeshLambertMaterial({ color: 0xcfc9ba, side: THREE.DoubleSide }));
+  // a real slab now, not a paper-thin cutout — extruded front-to-back and centred on the
+  // same plane the flat version used to sit on, so it doesn't shift the roofline
+  const pedDepth = 0.6;
+  const pedGeo = new THREE.ExtrudeGeometry(pedShape, { depth: pedDepth, bevelEnabled: false });
+  pedGeo.translate(0, 0, -pedDepth / 2);
+  const ped = new THREE.Mesh(pedGeo, new THREE.MeshLambertMaterial({ color: 0xcfc9ba, side: THREE.DoubleSide }));
   ped.position.set(x, y0 + h + 0.28, fz + faceDir * 1.1);
   townGroup.add(ped); peekKit.push(ped);
+  // a box standing in for the triangle — slightly generous near the base, where the slab
+  // is actually widest — so rockets and bullets can collide with it like every other solid
+  townColliders.push(aabb(x, fz + faceDir * 1.1, w * 0.4 + 0.15, pedDepth / 2 + 0.1, 2.2, y0 + h + 0.28));
   // Steps climb TOWARD the building: you meet the low wide one out front off the road, then
   // the taller one tucked behind it against the columns. They used to run backwards — the
   // tall one sat outermost, so you stepped up onto it and then back down to reach the door.
@@ -7274,7 +7322,7 @@ function resumeGame() {
 // the hardcoded Bluga-less classic town again, the distance ladder reset.
 function quitToMenu(keepChain) {
   game.state = 'menu';
-  deathFadeEl.style.opacity = 0;
+  deathFx.on = false; deathFadeEl.style.opacity = 0; // don't let a quit mid-fade leave the screen black
   pauseScreen.classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
   if (window._resumeTypewriter) window._resumeTypewriter();
@@ -9042,6 +9090,15 @@ function updateTimeLimitedWeapons(dt) {
 }
 
 // ---------- RPG projectile + explosion ----------
+// two unit vectors perpendicular to a flight direction (and to each other) — the plane a
+// rocket's cosmetic spiral rides around its own straight-line path
+const _rpgUp = new THREE.Vector3(0, 1, 0), _rpgAlt = new THREE.Vector3(1, 0, 0);
+function perpBasis(dir) {
+  const upRef = Math.abs(dir.y) > 0.98 ? _rpgAlt : _rpgUp;
+  const a = new THREE.Vector3().crossVectors(dir, upRef).normalize();
+  const b = new THREE.Vector3().crossVectors(dir, a).normalize();
+  return [a, b];
+}
 function fireRPG() {
   if (!gunMesh) return;
   // Hide the loaded rocket
@@ -9058,7 +9115,9 @@ function fireRPG() {
   rg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); // cylinder's long axis -> flight direction
   rg.position.copy(origin);
   scene.add(rg);
-  rpgProjectiles.push({ mesh:rg, vel:dir.clone().multiplyScalar(52), life:3.5, owner:player });
+  const [spA, spB] = perpBasis(dir);
+  rpgProjectiles.push({ mesh:rg, vel:dir.clone().multiplyScalar(52), life:3.5, owner:player,
+    core: origin.clone(), t: 0, spiralA: spA, spiralB: spB, spiralPh: Math.random() * TAU });
   // tell the rest of the lobby a rocket just left the tube — see netRemoteRPG/netApplyRemoteBoom.
   // Only the launch + eventual boom position ride the wire; each screen flies its OWN copy of
   // the rocket in between, same lightweight approach as every hit-scan weapon's 'pew'.
@@ -9083,7 +9142,9 @@ function netRemoteRPG(blob, gunMeshR, ownerP, x, y, z, dx, dy, dz) {
   rg.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   rg.position.set(x, y, z);
   scene.add(rg);
-  rpgProjectiles.push({ mesh:rg, vel:dir.multiplyScalar(52), life:3.5, owner:null, ghost:true, ownerP });
+  const [spA, spB] = perpBasis(dir);
+  rpgProjectiles.push({ mesh:rg, vel:dir.multiplyScalar(52), life:3.5, owner:null, ghost:true, ownerP,
+    core: new THREE.Vector3(x, y, z), t: 0, spiralA: spA, spiralB: spB, spiralPh: Math.random() * TAU });
   if (Math.hypot(x - player.pos.x, z - player.pos.z) < 90) play3d(x, z, () => SFX.rpgFire());
 }
 // a boom reported by whoever actually fired the shot (host or client): snap their ghost
@@ -9100,9 +9161,9 @@ function explodeRPG(x, y, z, owner, opts = {}) {
   const distToMe = Math.hypot(x - player.pos.x, z - player.pos.z);
   // a teammate's rocket two blocks over doesn't need FX spent on it — but our own always does
   if (!ghost || distToMe < 120) {
-    spawnParticles(x, y, z, 0xff6622, 45, 9, 1.6);
-    spawnParticles(x, y, z, 0xffcc44, 30, 7, 1.3);
-    spawnParticles(x, y, z, 0x888888, 20, 5, 1.0); // shrapnel dust
+    spawnParticles(x, y, z, 0xff6622, 70, 10, 1.7);
+    spawnParticles(x, y, z, 0xffcc44, 48, 8, 1.4);
+    spawnParticles(x, y, z, 0x888888, 34, 6, 1.1); // shrapnel dust
     play3d(x, z, ()=>{ noiseBurst(0.5, 500, 0.95); tone(70, 0.6, 0.55, 'sawtooth', 24); });
     // full shake/rumble for our own blast; a nearby teammate's still thumps, just softer
     const near = ghost ? clamp(1 - distToMe/45, 0, 1) : 1;
@@ -9123,7 +9184,14 @@ function explodeRPG(x, y, z, owner, opts = {}) {
     if (dist > radius*1.6) continue;
     if (dist <= radius) {
       const dmg = zb.isBoss ? bossDmg : zombieDmg;
+      const wasDying = zb.state === 'dying';
       damageZombie(zb, dmg, dx/(dist||1), dz/(dist||1), 14, {isHead:false, explosive:true, weapon:WEAPONS.rpg});
+      // caught square in the blast and it killed them: burst the body the same way a
+      // giant's boot does — gibs flying, a real blood pool on the ground, not just the
+      // ordinary splash killZombie already throws
+      if (!zb.isBoss && !zb.netGhost && zb.state === 'dying' && !wasDying && zb.blob && !zb.blob.bodyGone) {
+        popChest(zb, dx/(dist||1), dz/(dist||1), 1.4);
+      }
     } else {
       const falloff = 1 - (dist-radius)/(radius*0.6);
       const dmg = (zb.isBoss ? bossDmg : zombieDmg) * 0.45 * falloff;
@@ -9134,13 +9202,34 @@ function explodeRPG(x, y, z, owner, opts = {}) {
       zb.vy += 2.5 * falloff;
     }
   }
+  // Crows — a blast anywhere near the murder scatters feathers same as a direct shot would.
+  // The host owns every bird: a client's own rocket asks for the kill (crowShot, the exact
+  // same request a client's bullet hit already sends) instead of killing it locally.
+  for (const cw of [...crows]) {
+    const cp = cw.g.position;
+    const dx = cp.x - x, dy = cp.y - y, dz = cp.z - z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist > radius) continue;
+    if (net.role === 'client') {
+      if (!cw.shotPending) {
+        cw.shotPending = true;
+        spawnParticles(cp.x, cp.y + 0.35, cp.z, CROW_FEATHER, 4, 2, 0.5);
+        try { net.conns[0].send({ t: 'crowShot', i: cw.nid }); } catch (e) {}
+      }
+    } else {
+      killCrow(cw, dx/(dist||1), dz/(dist||1), isBlazo ? 84 : 67);
+    }
+  }
   // Self-damage / knockback
   if (owner === player) {
     const pdx = player.pos.x - x, pdy = (player.pos.y+0.9) - y, pdz = player.pos.z - z;
     const pdist = Math.hypot(pdx, pdy, pdz);
     if (pdist < radius * 1.3) {
       const falloff = 1 - pdist/(radius*1.3);
-      const dmg = WEAPONS.rpg.selfDmg * falloff;
+      // shooting your own feet gets punished harder than the ordinary falloff alone would —
+      // this bonus is near its max under ~2.5m and fades out by there, on top of the falloff
+      const feetBonus = 1 + clamp(1 - pdist/2.5, 0, 1) * 0.9;
+      const dmg = WEAPONS.rpg.selfDmg * falloff * feetBonus;
       player.hp -= dmg;
       flashBlob(playerBlob);
       player.vx += (pdx/(pdist||1)) * 7 * falloff;
@@ -9162,13 +9251,15 @@ function explodeRPG(x, y, z, owner, opts = {}) {
 function updateRPGProjectiles(dt) {
   for (let i = rpgProjectiles.length-1; i>=0; i--) {
     const p = rpgProjectiles[i];
-    p.life -= dt;
-    const from = p.mesh.position;
+    p.life -= dt; p.t += dt;
+    if (!p.core) p.core = p.mesh.position.clone(); // safety net for any older/edge-case spawn
+    const from = p.core;
     const step = p.vel.clone().multiplyScalar(dt);
     const segLen = step.length();
     // Wall / building / vehicle collision: the same box test bullets run against
     // nearbyColliders, swept across this tick's travel so a fast rocket can't tunnel
     // through a thin wall between frames — it detonates right where it hit, wall included.
+    // Always resolved against the CORE straight-line path, never the cosmetic spiral below.
     if (!p.ghost && segLen > 0.0001) {
       const dirx = step.x / segLen, diry = step.y / segLen, dirz = step.z / segLen;
       let wallT = Infinity;
@@ -9184,32 +9275,55 @@ function updateRPGProjectiles(dt) {
         continue;
       }
     }
-    p.mesh.position.add(step);
-    // Trail
+    p.core.add(step);
+    // A slight corkscrew as it flies — purely cosmetic, riding a plane perpendicular to
+    // the actual (straight) flight line, so it never actually steers off the aimed target.
+    // Eases in over the first beat so it doesn't look like it clips sideways out of the tube.
+    if (p.spiralA) {
+      const amp = Math.min(0.4, p.t * 2.2);
+      const ang = p.t * 11 + p.spiralPh;
+      p.mesh.position.copy(p.core)
+        .addScaledVector(p.spiralA, Math.cos(ang) * amp)
+        .addScaledVector(p.spiralB, Math.sin(ang) * amp);
+    } else {
+      p.mesh.position.copy(p.core);
+    }
+    // Trail: the fire/spark burst plus a proper billowing smoke trail behind it
     if (Math.random() < 0.4) spawnParticles(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, 0xff8844, 1, 0.4, 0.25);
+    if (Math.random() < 0.6) spawnParticles(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, 0x8a887e, 1, 0.55, 0.85);
     if (p.ghost) {
       // a lobby-mate's rocket: it detonates when THEIR screen tells us where (netApplyRemoteBoom),
       // not from what we see here — this fallback only fires if that message never shows up
       // (dropped connection etc.), so it doesn't just fly off into the skybox forever
-      const gy2 = groundHeight(p.mesh.position.x, p.mesh.position.z);
-      if (p.mesh.position.y <= gy2 + 0.25 || p.life <= 0) {
-        explodeRPG(p.mesh.position.x, Math.max(p.mesh.position.y, gy2+0.25), p.mesh.position.z, null, {ghost:true});
+      const gy2 = groundHeight(p.core.x, p.core.z);
+      if (p.core.y <= gy2 + 0.25 || p.life <= 0) {
+        explodeRPG(p.core.x, Math.max(p.core.y, gy2+0.25), p.core.z, null, {ghost:true});
         p.mesh.removeFromParent(); rpgProjectiles.splice(i,1);
       }
       continue;
     }
     // Ground collision
-    const gy = groundHeight(p.mesh.position.x, p.mesh.position.z);
-    if (p.mesh.position.y <= gy + 0.25 || p.life <= 0) {
-      explodeRPG(p.mesh.position.x, Math.max(p.mesh.position.y, gy+0.25), p.mesh.position.z, p.owner);
+    const gy = groundHeight(p.core.x, p.core.z);
+    if (p.core.y <= gy + 0.25 || p.life <= 0) {
+      explodeRPG(p.core.x, Math.max(p.core.y, gy+0.25), p.core.z, p.owner);
       p.mesh.removeFromParent(); rpgProjectiles.splice(i,1); continue;
     }
     // Zombie direct impact
     let hit = false;
     for (const zb of zombies) {
       if (zb.state==='dying') continue;
-      if (Math.hypot(zb.pos.x-p.mesh.position.x, zb.pos.z-p.mesh.position.z) < 1.3 && Math.abs((zb.pos.y+0.8)-p.mesh.position.y) < 1.6) {
-        explodeRPG(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, p.owner);
+      if (Math.hypot(zb.pos.x-p.core.x, zb.pos.z-p.core.z) < 1.3 && Math.abs((zb.pos.y+0.8)-p.core.y) < 1.6) {
+        explodeRPG(p.core.x, p.core.y, p.core.z, p.owner);
+        p.mesh.removeFromParent(); rpgProjectiles.splice(i,1); hit = true; break;
+      }
+    }
+    if (hit) continue;
+    // Crow direct impact — a rocket clips a bird clean out of the sky same as a bullet
+    // would; explodeRPG's own blast radius below still catches anything else nearby
+    for (const cw of crows) {
+      const cp = cw.g.position;
+      if (Math.hypot(cp.x-p.core.x, cp.z-p.core.z) < 1.1 && Math.abs(cp.y-p.core.y) < 1.3) {
+        explodeRPG(p.core.x, p.core.y, p.core.z, p.owner);
         p.mesh.removeFromParent(); rpgProjectiles.splice(i,1); hit = true; break;
       }
     }
