@@ -12192,15 +12192,45 @@ function resetBluga() {
   bluga.camT = 0; bluga.camDone = false; bluga.wave = 0; bluga.appearT = 0; bluga.smokeT = 0;
 }
 let fbiBackTex = null;
+function drawFbiBackTex(ctx) {
+  ctx.clearRect(0, 0, 96, 64);
+  ctx.fillStyle = '#f2c21a';
+  ctx.font = `bold 44px ${SIGN_FONT}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('FBI', 48, 36);
+}
 function getFbiBackTex() {
-  if (!fbiBackTex) fbiBackTex = canvasTex(96, 64, ctx => {
-    ctx.clearRect(0, 0, 96, 64);
-    ctx.fillStyle = '#f2c21a';
-    ctx.font = "bold 44px 'OpenDyslexic','Comic Sans MS','Comic Sans',cursive";
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('FBI', 48, 36);
-  });
+  if (!fbiBackTex) fbiBackTex = canvasTex(96, 64, drawFbiBackTex);
   return fbiBackTex;
+}
+// canvas text bakes in whatever font is loaded the instant it's drawn, and this texture
+// gets baked once, well before a webfont necessarily crosses the wire — same problem the
+// town signage solves above. Ask for the real face, then redraw once it actually lands.
+if (document.fonts && document.fonts.load) {
+  Promise.all([document.fonts.load(`bold 44px ${SIGN_FONT}`), document.fonts.ready])
+    .then(() => { if (fbiBackTex) { drawFbiBackTex(fbiBackTex.image.getContext('2d')); fbiBackTex.needsUpdate = true; } })
+    .catch(() => {}); // no webfont: the Comic Sans fallback baked in is fine
+}
+// a flat decal only touches a curved body at one point (wherever it's tangent) and drifts
+// away from the surface everywhere else — which is exactly why the old flat FBI plane
+// "hovered" off the back near its edges instead of hugging the torso. This bakes the
+// torso's own ellipsoid curve into the decal's vertices instead, riding a hair proud of
+// the true surface everywhere (not just at the centre) so it reads as painted onto the
+// body rather than a card floating behind it. a/b/c are the torso ellipsoid's own x/y/z
+// radii (see buildBlob's body scale) and centerYOffset is the decal's centre height
+// relative to the torso's own centre.
+function curvedBodyDecal(w, h, a, b, c, centerYOffset, proud = 0.015) {
+  const geo = new THREE.PlaneGeometry(w, h, 10, 6);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const lx = pos.getX(i), ly = pos.getY(i);
+    const nx = lx / a, ny = (centerYOffset + ly) / b;
+    const rem = Math.max(0, 1 - nx * nx - ny * ny);
+    pos.setZ(i, c * Math.sqrt(rem) + proud);
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
 }
 // the black-ops body: all-black blob + black mitts, a band of a cousin's colour around the
 // eyes (the ski-mask opening), and FBI up the back in the goopy yellow font
@@ -12211,13 +12241,13 @@ function buildFbiBlob(faceColor, big) {
   // frame both eyes — which still poke through in front of it
   const face = ball(1, faceColor); face.scale.set(0.3, 0.15, 0.055); face.position.set(0, 0.05, 0.355);
   blob.head.add(face);
-  const back = new THREE.Mesh(new THREE.PlaneGeometry(0.66, 0.44),
-    new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false }));
-  // clear of the torso ellipsoid (z extent ~0.42 at chest height) — at -0.31 the letters
-  // sat buried INSIDE the body and never showed
-  // clear of the torso ellipsoid (z extent ~0.42 at chest height) — rides the
-  // wobble so it breathes with the body, but sits close enough it doesn't float off
-  back.position.set(0, 0.95, -0.42); back.rotation.y = Math.PI; blob.wob.add(back);
+  const back = new THREE.Mesh(
+    curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0),
+    new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false })
+  );
+  // centred on the torso's own vertical middle (0.62) — the widest part of the back and
+  // clear of the shoulder line (0.95), where it used to sit and read too high/cramped
+  back.position.set(0, 0.62, 0); back.rotation.y = Math.PI; blob.wob.add(back);
   face.frustumCulled = false; back.frustumCulled = false;
   face.castShadow = true; face.receiveShadow = true; back.castShadow = true; back.receiveShadow = true;
   return blob;
