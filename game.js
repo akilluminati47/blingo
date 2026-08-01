@@ -656,6 +656,17 @@ const _cFillW = new THREE.Color(), _cFillR = new THREE.Color();
 const _cloudSweep = { cover: 0.3, cirrus: 0.5 };
 // storm-flash blending colours (reused every frame so the flash is visible)
 const _flashFill = new THREE.Color(0xd8e4f0), _flashBelly = new THREE.Color(0xc8d8e8), _flashWhite = new THREE.Color(0xffffff);
+// day/night pairs for the cloudy/rain cloud-dome colours — these used to swap on a hard
+// nightW > 0.4 threshold, popping straight from the pale day set to the dark night set
+// the instant dusk crossed that line. _cloudNightMix eases toward the target instead, so
+// the storm/night clouds fade in over ~10s rather than snapping dark over the sky.
+const _cGreyDay = new THREE.Color('#c6ccd8'), _cGreyNight = new THREE.Color('#272e46');
+const _cGreyDayB = new THREE.Color('#a9b0bf'), _cGreyNightB = new THREE.Color('#1d2338');
+const _cRainDay = new THREE.Color('#6d7484'), _cRainNight = new THREE.Color('#1a1f30');
+const _cRainDayB = new THREE.Color('#565e6c'), _cRainNightB = new THREE.Color('#141827');
+const _cGreyMix = new THREE.Color(), _cGreyMixB = new THREE.Color();
+const _cRainMix = new THREE.Color(), _cRainMixB = new THREE.Color();
+let _cloudNightMix = 0;
 // ---------- 3D sun, its lens glare, the dark overhead cloud it ducks behind, and air motes ----------
 // The old sun was a flat stamp baked into the sky canvas. Now it's a sprite that ARCS across
 // the sky in real time off game.clock: it lifts off the horizon at dawn, slides up behind a
@@ -877,10 +888,14 @@ function updateCelestial(dt) {
   moonHalo.scale.setScalar(64 + 30 * (p.nightW || 0));
   // feed the FBM cloud dome: cover tracks the weather, colours track the (blended)
   // phase palette greyed down by the front rolling in — same dressing rules the old
-  // canvas puffs followed — and the drift speed leans on the live wind
-  const night = (p.nightW || 0) > 0.4;
-  const gf = night ? '#272e46' : '#c6ccd8', gb = night ? '#1d2338' : '#a9b0bf';
-  const rf = night ? '#1a1f30' : '#6d7484', rb = night ? '#141827' : '#565e6c';
+  // canvas puffs followed — and the drift speed leans on the live wind. The dark
+  // (night/storm) cloud colours ease in over ~10s instead of popping in the instant
+  // nightW crosses a threshold.
+  _cloudNightMix += ((p.nightW || 0) - _cloudNightMix) * (1 - Math.exp(-dt / 10));
+  const gf = _cGreyMix.copy(_cGreyDay).lerp(_cGreyNight, _cloudNightMix);
+  const gb = _cGreyMixB.copy(_cGreyDayB).lerp(_cGreyNightB, _cloudNightMix);
+  const rf = _cRainMix.copy(_cRainDay).lerp(_cRainNight, _cloudNightMix);
+  const rb = _cRainMixB.copy(_cRainDayB).lerp(_cRainNightB, _cloudNightMix);
   cloudUni.uTime.value += dt * (0.5 + windStr * 1.4);
   const coverTarget = 0.3 * W.sunny + 0.88 * W.cloudy + 1.0 * W.rain;
   const cirrusTarget = 0.55 * W.sunny + 0.3 * W.cloudy;
@@ -888,8 +903,8 @@ function updateCelestial(dt) {
   _cloudSweep.cirrus = lerp(_cloudSweep.cirrus, cirrusTarget, 1 - Math.exp(-0.55 * dt));
   cloudUni.uCover.value = _cloudSweep.cover;
   cloudUni.uCirrus.value = _cloudSweep.cirrus;
-  cloudUni.uFill.value.set(p.cloudC).lerp(_cFillW.set(gf), W.cloudy).lerp(_cFillR.set(rf), W.rain);
-  cloudUni.uBelly.value.set(p.cloudB).lerp(_cFillW.set(gb), W.cloudy).lerp(_cFillR.set(rb), W.rain);
+  cloudUni.uFill.value.set(p.cloudC).lerp(_cFillW.copy(gf), W.cloudy).lerp(_cFillR.copy(rf), W.rain);
+  cloudUni.uBelly.value.set(p.cloudB).lerp(_cFillW.copy(gb), W.cloudy).lerp(_cFillR.copy(rb), W.rain);
   if (stormActive()) {
     const flash = mild(stormT / lightningT);
     _flashFill.set(0xd8e4f0).lerp(_flashWhite, 0.7);
@@ -1126,39 +1141,52 @@ const _decalTex = canvasTex(32, 32, ctx => {
 const _holeDecals = [];
 const _decalPlaneGeo = new THREE.PlaneGeometry(1, 1);
 // flat decal, painted flush against whatever it hit — a wall face gets a hole lying IN
-// the wall, not a paper cutout that spins to keep facing you. nx/nz is the surface's
-// outward normal (horizontal — every wall + car panel here stands vertical); with no
-// normal to go on (e.g. a networked shot that didn't send one) it just lies flat on the
-// ground, which reads fine for the rare case that slips through with (0,0).
+// the wall, not a paper cutout that spins to keep facing you. nx/nz is only ever an
+// approximation (the shot's own reversed horizontal direction); the real 3D normal —
+// including any tilt for a pitched roof or a flat lip's top/underside — is looked up
+// below. With nothing solid to go on (e.g. a networked shot with no useful direction)
+// it just lies flat on the ground, which reads fine for the rare case that slips
+// through with (0,0).
 function spawnBulletHole(x, y, z, nx, nz, caliber) {
   while (_holeDecals.length > 80) {
     const old = _holeDecals.shift();
     if (old.mesh) { old.mesh.removeFromParent(); old.mesh.material.dispose(); }
   }
-  // nx/nz coming in is only ever an approximation (the shot's own reversed direction) —
-  // snap it to whichever nearby collider face the point is actually resting against, so a
-  // grazing hit still lies dead flat on the real wall instead of tilted to the shot's angle.
-  // But a hit sitting right at ground level is always a ground decal, even though nx/nz
-  // never carries a real vertical normal — without this check wallFaceNormal's own fallback
-  // (the same reversed shot direction) would hand it right back, and the decal would stand
-  // up on its edge to match the shot's angle instead of lying flat on the terrain.
+  // snap the incoming approximation to whichever nearby collider surface the point is
+  // actually resting against, so a grazing hit still lies dead flat on the real geometry
+  // — sloped roof, gable/pediment wall, or a flat lip's top/underside — instead of
+  // tilted to just the shot's own horizontal angle. A hit sitting right at ground level
+  // is always a flat ground decal, even though nx/nz never carries a real vertical
+  // normal — without this check wallFaceNormal's own fallback (the same reversed shot
+  // direction, still with no vertical component) would hand it right back, and the
+  // decal would stand up on its edge instead of lying flat on the terrain.
+  let ny = 0, flatGround = false;
   if (Math.abs(y - groundHeight(x, z)) < 0.15) {
-    nx = 0; nz = 0;
+    nx = 0; nz = 0; flatGround = true;
   } else {
-    const face = wallFaceNormal(x, z, nx, nz);
-    nx = face[0]; nz = face[1];
+    const face = wallFaceNormal(x, y, z, nx, nz);
+    nx = face[0]; ny = face[1]; nz = face[2];
   }
   const mat = new THREE.MeshBasicMaterial({ map: _decalTex, transparent: true, depthWrite: false, blending: THREE.NormalBlending, side: THREE.DoubleSide });
   const s = new THREE.Mesh(_decalPlaneGeo, mat);
   const sz = (caliber || 0.18) * (0.65 + Math.random() * 0.7);
   s.scale.setScalar(sz);
-  s.position.set(x + (nx || 0) * 0.03, y, z + (nz || 0) * 0.03);
-  const nlen = Math.hypot(nx || 0, nz || 0);
-  if (nlen > 0.001) {
-    s.up.set(0, 1, 0);
-    s.lookAt(s.position.x + nx / nlen, s.position.y, s.position.z + nz / nlen);
+  s.position.set(x + (nx || 0) * 0.03, y + (ny || 0) * 0.03, z + (nz || 0) * 0.03);
+  if (flatGround) {
+    s.rotation.x = -Math.PI / 2; // lie flat like a ground scorch mark
   } else {
-    s.rotation.x = -Math.PI / 2; // no normal to go on — lie flat like a ground scorch mark
+    const nlen = Math.hypot(nx || 0, ny || 0, nz || 0);
+    if (nlen > 0.001) {
+      // a near-vertical normal (a roof pitch close to the ridge, or a flat top/underside
+      // face) leaves the default up-reference parallel to the look direction, which
+      // gives lookAt no valid basis to build a rotation from — swap to a reference
+      // that's never parallel to the surface normal.
+      const steep = Math.abs(ny / nlen) > 0.99;
+      s.up.set(steep ? 1 : 0, steep ? 0 : 1, 0);
+      s.lookAt(s.position.x + nx / nlen, s.position.y + ny / nlen, s.position.z + nz / nlen);
+    } else {
+      s.rotation.x = -Math.PI / 2; // no normal to go on — lie flat like a ground scorch mark
+    }
   }
   s.rotateZ(Math.random() * Math.PI * 2); // vary the look without tilting it off the surface
   s.renderOrder = 5;
@@ -2617,6 +2645,10 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
   // would ghost roofs chunks away
   const roofMat = roofMats[(rng() * roofMats.length) | 0].clone();
   roofMat.userData.owned = true;
+  // DoubleSide so the underside of the pitched shingles — what you see looking up at
+  // the roof while standing inside — shows the SAME material/colour as the outside,
+  // instead of going invisible (backface culled) and needing a separate filler plane.
+  roofMat.side = THREE.DoubleSide;
   const slopeLen = Math.hypot(d / 2 + 0.5, rh);
   const ang = Math.atan2(rh, d / 2 + 0.5);
   for (const s of [-1, 1]) {
@@ -2639,16 +2671,9 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
     gable.position.set(bx + s * w / 2, by, bz);
     group.add(gable);
   }
-  // inner ceiling — a thin DoubleSide plane inside the roofline visible from below,
-  // so bulletholes shot while standing in the house show against a surface instead of
-  // floating in empty air. Fades with the rest of the shell during the house peek.
-  const ceilMat = new THREE.MeshLambertMaterial({ color: 0x524840, side: THREE.DoubleSide, transparent: true, depthWrite: false });
-  ceilMat.userData.owned = true;
-  ceilMat.userData.noDepthWrite = true; // keep depthWrite off so bulletholes show through the ceiling
-  const ceilMesh = new THREE.Mesh(BOX, ceilMat);
-  ceilMesh.scale.set(w - 0.6, 0.06, d - 0.6);
-  ceilMesh.position.set(bx, by, bz);
-  group.add(ceilMesh);
+  // (the old flat brown "drop ceiling" filler plane is gone — the pitched shingle
+  // slabs above are DoubleSide now, so looking up from inside the house shows the
+  // roof's own true angle and material instead of a hardcoded flat brown patch.)
   if (!colliders) return null;
   roofSlope(colliders, bx, by, bz, 'x', w / 2 + 0.45, d / 2 + 0.5, rh);
   const roofBox = colliders[colliders.length - 1]; // main roof body — covers the full footprint for peek
@@ -2666,7 +2691,7 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
     c.gable = true;
     colliders.push(c);
   }
-  return { mats: [roofMat, gmat, ceilMat], box: roofBox, op: 1, want: 1 };
+  return { mats: [roofMat, gmat], box: roofBox, op: 1, want: 1 };
 }
 
 function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
@@ -3473,10 +3498,12 @@ function rayAABB(ox, oy, oz, dx, dy, dz, c) {
 // the true face normal of whichever nearby collider's surface a point is actually resting
 // against — flush with the wall itself, not an approximation of the shot's own angle. Used
 // to lay bullet-hole decals flat on the real geometry instead of tilted to match a grazing
-// hit's incoming direction. Falls back to (fdx,fdz) — the old reversed-ray approximation —
+// hit's incoming direction. Falls back to (fdx,fdy,fdz) — the old reversed-ray approximation —
 // when nothing solid is actually there (a body, a rounded prop, anything this box check
-// doesn't cover), so it never regresses those cases.
-function wallFaceNormal(x, z, fdx, fdz) {
+// doesn't cover), so it never regresses those cases. Returns [nx, ny, nz]: ny is 0 for an
+// ordinary vertical wall, but a real pitched roof or a flat horizontal lip (a box's top or
+// underside) now hands back a proper tilted/vertical normal too.
+function wallFaceNormal(x, y, z, fdx, fdz, fdy = 0) {
   let best = null, bestD = 0.4; // must be genuinely touching a face, not just "somewhere nearby"
   for (const c of nearbyColliders(x, z)) {
     if (c.hw == null || c.hd == null) continue; // skip anything that isn't a box (spheres etc.)
@@ -3488,22 +3515,50 @@ function wallFaceNormal(x, z, fdx, fdz) {
     // outside the footprint (even padded by the tolerance): this box isn't the one the
     // point is resting against
     if (px < -c.hw - bestD || px > c.hw + bestD || pz < -c.hd - bestD || pz > c.hd + bestD) continue;
+    // a genuinely tilted shingle surface (NOT a gable/pediment — those are solid vertical
+    // walls whose top edge just happens to follow the same diagonal, and are handled by
+    // the ordinary box-edge test below): measure distance to the ACTUAL sloped plane at
+    // this (x,z), not the footprint edges, so the hole lies flush against the pitch.
+    if (c.roof && !c.gable) {
+      const top = roofTopAt(c, x, z);
+      const dY = Math.abs(y - top);
+      if (dY >= bestD) continue;
+      bestD = dY;
+      best = roofSlopeNormal(c, x, z);
+      continue;
+    }
     const dPX = Math.abs(px - c.hw), dNX = Math.abs(px + c.hw);
     const dPZ = Math.abs(pz - c.hd), dNZ = Math.abs(pz + c.hd);
-    const m = Math.min(dPX, dNX, dPZ, dNZ);
+    // top/bottom faces too: a hole shot into the flat underside of a slab (the portico
+    // "lip" below the pediment, say) or down onto its top needs a vertical normal instead
+    // of being forced flush against whichever side edge happened to be nearest.
+    const dTop = c.y1 != null ? Math.abs(y - c.y1) : Infinity;
+    const dBot = c.y0 != null ? Math.abs(y - c.y0) : Infinity;
+    const m = Math.min(dPX, dNX, dPZ, dNZ, dTop, dBot);
     if (m >= bestD) continue;
     bestD = m;
-    let lnx = 0, lnz = 0;
-    if (m === dPX) lnx = 1; else if (m === dNX) lnx = -1; else if (m === dPZ) lnz = 1; else lnz = -1;
-    if (c.rot) {
+    let lnx = 0, lny = 0, lnz = 0;
+    if (m === dPX) lnx = 1; else if (m === dNX) lnx = -1;
+    else if (m === dPZ) lnz = 1; else if (m === dNZ) lnz = -1;
+    else if (m === dTop) lny = 1; else lny = -1;
+    if (c.rot && lny === 0) {
       // local -> world is the inverse (transpose) of the world -> local rotation above
       const cs = Math.cos(c.rot), sn = Math.sin(c.rot);
-      best = [cs * lnx + sn * lnz, -sn * lnx + cs * lnz];
-    } else best = [lnx, lnz];
+      best = [cs * lnx + sn * lnz, 0, -sn * lnx + cs * lnz];
+    } else best = [lnx, lny, lnz];
   }
   if (best) return best;
-  const dl = Math.hypot(fdx || 0, fdz || 0) || 1;
-  return [(fdx || 0) / dl, (fdz || 0) / dl];
+  const dl = Math.hypot(fdx || 0, fdy || 0, fdz || 0) || 1;
+  return [(fdx || 0) / dl, (fdy || 0) / dl, (fdz || 0) / dl];
+}
+// the outward normal of a real pitched-roof slab at (x,z): tilted up and away from the
+// ridge by the same angle the visible mesh is rotated to, on whichever side of the ridge
+// the point falls — matches addRoof's slab.rotation.x = s*ang exactly.
+function roofSlopeNormal(c, x, z) {
+  const alongX = c.roof.axis === 'x';
+  const ang = Math.atan2(c.roof.rh, c.roof.slopeHalf);
+  const s = Math.sign(alongX ? (z - c.z) : (x - c.x)) || 1;
+  return alongX ? [0, Math.cos(ang), s * Math.sin(ang)] : [s * Math.sin(ang), Math.cos(ang), 0];
 }
 // ray vs a pitched roof's ACTUAL shingle surface (its two slope planes), not the crude
 // bounding box the collider carries. A round that clears the roofline passes over instead
@@ -3527,6 +3582,31 @@ function rayRoof(ox, oy, oz, dx, dy, dz, c) {
     best = t;
   }
   return best;
+}
+// gable ends and pediment triangles are SOLID vertical walls whose top edge happens to
+// be cut on a diagonal (the roofline) — unlike a real pitched roof, which is a thin
+// sloped plane. rayRoof alone only finds hits that graze that exact diagonal plane, so
+// a shot aimed dead-on at the solid middle of the wall (little/no drift along the ray's
+// "along" axis) never crosses it and sails straight through. Fix: test the ordinary
+// full-height box first: if the ray enters the box at a point already below the local
+// roofline (i.e. in the solid part), that's the hit. Only if it enters through the
+// cut-away sliver above the roofline do we fall back to rayRoof to see if it dips back
+// down into the solid triangle before exiting.
+function rayGableWall(ox, oy, oz, dx, dy, dz, c) {
+  const tEnter = rayAABB(ox, oy, oz, dx, dy, dz, c);
+  if (tEnter === Infinity) return Infinity;
+  const hx = ox + dx * tEnter, hy = oy + dy * tEnter, hz = oz + dz * tEnter;
+  const profY = roofTopAt(c, hx, hz);
+  if (hy <= profY + 1e-4) return tEnter; // entered straight into the solid triangle
+  const tSlope = rayRoof(ox, oy, oz, dx, dy, dz, c);
+  return (tSlope >= tEnter) ? tSlope : Infinity;
+}
+// single entry point for "does this collider stop a bullet, and where": routes gable/
+// pediment triangles, real pitched roofs, and ordinary boxes to the right test each.
+function rayCollider(ox, oy, oz, dx, dy, dz, c) {
+  if (c.gable) return rayGableWall(ox, oy, oz, dx, dy, dz, c);
+  if (c.roof) return rayRoof(ox, oy, oz, dx, dy, dz, c);
+  return rayAABB(ox, oy, oz, dx, dy, dz, c);
 }
 function raySphere(ox, oy, oz, dx, dy, dz, sx, sy, sz, r) {
   const lx = sx - ox, ly = sy - oy, lz = sz - oz;
@@ -7217,6 +7297,10 @@ function startRun() {
   deathFx.on = false; deathFadeEl.style.opacity = 0; // the fade never follows you into a fresh run
   document.getElementById('waitmsg').classList.add('hidden');
   document.body.classList.add('playing');
+  // the cutscene video behind the menus/pause screen has nothing to show during actual
+  // gameplay — pause it here so it isn't decoding frames the whole run, then resumeGame()
+  // leaving the pause menu does the same, and pauseGame() plays it again behind the menu.
+  { const bg = document.getElementById('policybg'); if (bg && !bg.paused) bg.pause(); }
   resetGame();
   game.state = 'playing';
   // the black stage lifts and the world's own audio rises with it (the veil fade is CSS,
@@ -7380,6 +7464,10 @@ function pauseGame() {
   if (input.device === 'xbox' || input.device === 'ps' || input.device === 'switch') setPadFocus(0);
   else clearPadFocus();
   updateHostPauseLock();
+  // pause menu keeps the same shared cutscene video behind it as the main menu — bring
+  // it back to life (it can get suspended while backgrounded through a whole run) so it's
+  // actually playing behind the fade, not a frozen frame
+  { const bg = document.getElementById('policybg'); if (bg && bg.paused) bg.play().catch(() => {}); }
   // the host's pause stops the world, so it stops the lobby: everyone sees the settings
   // screen together and waits on the host's resume
   if (net.role === 'host') netBroadcast({ t: 'hpause', on: 1 });
@@ -7390,6 +7478,9 @@ function resumeGame() {
   pauseScreen.classList.add('hidden');
   document.body.classList.add('playing');
   game.state = 'playing';
+  // back into gameplay — the cutscene video behind the pause menu has nothing to show
+  // now, so pause it again rather than let it keep decoding frames off-screen
+  { const bg = document.getElementById('policybg'); if (bg && !bg.paused) bg.pause(); }
   stopTheme();                       // drop the pause-menu persona beat...
   startGameMusic(selectedCousin);    // ...and pick the looping track back up
   if (input.device === 'kbm') grabPointer();
@@ -8087,8 +8178,7 @@ function fireWeapon() {
       // ridge (poking above the roofline) is hittable instead of the box eating the shot.
       // Lifted per-collider like the bodies: the round stops where the wall is DRAWN
       const fyC = _from.y + curveDrop(c.x, c.z);
-      const t = c.roof ? rayRoof(_from.x, fyC, _from.z, rdx, rdy, rdz, c)
-                       : rayAABB(_from.x, fyC, _from.z, rdx, rdy, rdz, c);
+      const t = rayCollider(_from.x, fyC, _from.z, rdx, rdy, rdz, c);
       if (t > tSelf && t < tWall) tWall = t;
     }
     const tMax = Math.min(tWall, REACH);
@@ -8938,29 +9028,46 @@ function buildParachuteCrateMesh() {
   // its original size and height above the now-smaller crate instead of shrinking with it.
   // Canopy + shroud lines all live under chuteRig so they can fade out together shortly
   // after touchdown (see updateParachuteCrates) without touching the crate itself.
+  // Taller overall, with the lines gathered through a convergence ring above the box before
+  // splaying back out to the canopy rim (Garnerin-style rigging) instead of running straight
+  // from the box corners to the rim — that pinch point is what keeps the load stable and
+  // level under the canopy instead of swinging loose on four independent lines.
   const chuteRig = new THREE.Group(); g.add(chuteRig);
   const chuteGrp = new THREE.Group();
   const chute = new THREE.Mesh(new THREE.SphereGeometry(2.4, 14, 10, 0, TAU, 0, Math.PI/2), mat(0xc8a44a, {side:THREE.DoubleSide}));
   ownMat(chute).transparent = true; // private material — fading this one crate's chute can't bleed into another's
-  chute.position.y = 3.0; chute.scale.y = 0.42; chuteGrp.add(chute);
-  chuteGrp.scale.setScalar(2);
+  chute.position.y = 3.6; chute.scale.y = 0.42; chuteGrp.add(chute);
+  chuteGrp.scale.setScalar(2.2);
   chuteRig.add(chuteGrp);
-  // shroud lines: each one runs from the lid's own outer corner straight to the point on
-  // the canopy's rim directly above it, so every strap actually meets both ends instead of
-  // floating near them.
+  // shroud lines: box corner -> pinch ring -> canopy rim. The pinch ring is a small point
+  // roughly a third of the way up, directly above the box's centre; the rim points sit
+  // above the canopy's own rim, same as before.
   const rimY = chute.position.y * chuteGrp.scale.y, rimR = 2.4 * chuteGrp.scale.x;
   const cornerY = 1.24, cornerR = 0.74 * Math.SQRT2;
+  const pinchY = cornerY + (rimY - cornerY) * 0.32, pinchR = 0.16;
   const upAxis = new THREE.Vector3(0, 1, 0);
-  for (const [sx, sz] of [[1,1],[-1,1],[1,-1],[-1,-1]]) {
-    const dirx = sx / Math.SQRT2, dirz = sz / Math.SQRT2;
-    const p1 = new THREE.Vector3(dirx * cornerR, cornerY, dirz * cornerR);
-    const p2 = new THREE.Vector3(dirx * rimR, rimY, dirz * rimR);
+  // a small ring mesh marks the pinch point itself — the physical swivel/collar the real
+  // rigging gathers through
+  const pinchRing = new THREE.Mesh(new THREE.TorusGeometry(pinchR, 0.03, 6, 12), mat(0x8a7a5a));
+  ownMat(pinchRing).transparent = true;
+  pinchRing.rotation.x = Math.PI / 2;
+  pinchRing.position.y = pinchY;
+  chuteRig.add(pinchRing);
+  const strand = (p1, p2) => {
     const len = p1.distanceTo(p2);
     const str = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.036, len, 4), mat(0x8a7a5a));
     ownMat(str).transparent = true; // same private-material treatment as the canopy
     str.position.copy(p1).add(p2).multiplyScalar(0.5);
     str.quaternion.setFromUnitVectors(upAxis, p2.clone().sub(p1).normalize());
     chuteRig.add(str);
+  };
+  for (const [sx, sz] of [[1,1],[-1,1],[1,-1],[-1,-1]]) {
+    const dirx = sx / Math.SQRT2, dirz = sz / Math.SQRT2;
+    const corner = new THREE.Vector3(dirx * cornerR, cornerY, dirz * cornerR);
+    const pinch = new THREE.Vector3(dirx * pinchR, pinchY, dirz * pinchR);
+    const rim = new THREE.Vector3(dirx * rimR, rimY, dirz * rimR);
+    strand(corner, pinch);
+    strand(pinch, rim);
   }
   g.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   return { g, lid, trim, glow, chuteRig };
@@ -9349,8 +9456,7 @@ function updateRPGProjectiles(dt) {
       const dirx = step.x / segLen, diry = step.y / segLen, dirz = step.z / segLen;
       let wallT = Infinity;
       for (const c of nearbyColliders(from.x, from.z)) {
-        const t = c.roof ? rayRoof(from.x, from.y, from.z, dirx, diry, dirz, c)
-                         : rayAABB(from.x, from.y, from.z, dirx, diry, dirz, c);
+        const t = rayCollider(from.x, from.y, from.z, dirx, diry, dirz, c);
         if (t < wallT) wallT = t;
       }
       if (wallT <= segLen) {
@@ -10712,8 +10818,7 @@ function biteBlocked(z, tx, ty, tz) {
   const dl = Math.hypot(dx, dy, dz2) || 1;
   dx /= dl; dy /= dl; dz2 /= dl;
   for (const c of nearbyColliders(z.pos.x, z.pos.z)) {
-    const t = c.roof ? rayRoof(z.pos.x, oy, z.pos.z, dx, dy, dz2, c)
-                     : rayAABB(z.pos.x, oy, z.pos.z, dx, dy, dz2, c);
+    const t = rayCollider(z.pos.x, oy, z.pos.z, dx, dy, dz2, c);
     if (t < dl - 0.15) return true;
   }
   return false;
@@ -10728,8 +10833,7 @@ function companionSees(c, z, d) {
   const dl = Math.hypot(dx, dy, dz2) || 1;
   dx /= dl; dy /= dl; dz2 /= dl;
   for (const col of nearbyColliders(c.pos.x, c.pos.z)) {
-    const t = col.roof ? rayRoof(c.pos.x, sy, c.pos.z, dx, dy, dz2, col)
-                       : rayAABB(c.pos.x, sy, c.pos.z, dx, dy, dz2, col);
+    const t = rayCollider(c.pos.x, sy, c.pos.z, dx, dy, dz2, col);
     if (t < dl - 0.35) return false;
   }
   return true;
@@ -11760,6 +11864,10 @@ function updateCelebration(dt) {
 function finishFinale() {
   game.state = 'finale';
   document.body.classList.remove('playing');
+  // losing 'playing' is what the menu cutscene's CSS keys off to reappear — keep it dark
+  // and paused here instead, so the tally screen never shows the cutscene behind it
+  deathFadeEl.style.opacity = 1;
+  { const bg = document.getElementById('policybg'); if (bg && !bg.paused) bg.pause(); }
   stopGameMusic();
   if (document.pointerLockElement === canvas) document.exitPointerLock();
   // everything is already in the DOM — set button states BEFORE .done so the
@@ -11929,6 +12037,11 @@ function startFinale() {
     { label: 'TIME', icon: 'survived', v: Math.round(game.time), fmt: fmtTime },
   ];
   jelly.statT = 0;
+  // read against plain dark, the same way the death screen does — not the menu's looping
+  // cutscene — so the tally is what holds your attention. Stays up until a button is
+  // chosen; nothing here auto-dismisses it.
+  deathFadeEl.style.opacity = 1;
+  { const bg = document.getElementById('policybg'); if (bg && !bg.paused) bg.pause(); }
   buildFinalStats();
 }
 const finalStatsEl = document.getElementById('finalstats');
@@ -11969,9 +12082,12 @@ function buildFinalStats() {
   btns.appendChild(playBtn);
   btns.appendChild(quitBtn);
   finalStatsEl.appendChild(btns);
-  // client wait message slot
+  // client wait message slot — starts hidden; finishFinale() is the only place that
+  // reveals it, and only when this really is a multiplayer client waiting on the host.
+  // Left visible by default it briefly flashed for solo players too, since it sits in
+  // the DOM as soon as the tally screen appears, well before finishFinale() runs.
   const wait = document.createElement('p');
-  wait.className = 'fswait';
+  wait.className = 'fswait hidden';
   wait.textContent = '. . waiting for Player 1 .ᐟ';
   finalStatsEl.appendChild(wait);
   finalStatsEl.classList.remove('hidden');
@@ -12155,8 +12271,7 @@ function fbiSees(z, tx, ty, tz) {
   if (dl < 2.2) return true;
   dx /= dl; dy /= dl; dz2 /= dl;
   for (const c of nearbyColliders(z.pos.x, z.pos.z)) {
-    const t = c.roof ? rayRoof(z.pos.x, oy, z.pos.z, dx, dy, dz2, c)
-                     : rayAABB(z.pos.x, oy, z.pos.z, dx, dy, dz2, c);
+    const t = rayCollider(z.pos.x, oy, z.pos.z, dx, dy, dz2, c);
     if (t < dl - 0.35) return false;
   }
   return true;
@@ -12184,8 +12299,7 @@ function fbiShoot(z, tx, ty, tz, target, td) {
     dx /= dl; dy /= dl; dz2 /= dl;
     let tWall = rayGround(_fbiFrom.x, _fbiFrom.y, _fbiFrom.z, dx, dy, dz2, dl + 4);
     for (const col of nearbyColliders(z.pos.x, z.pos.z)) {
-      const t = col.roof ? rayRoof(_fbiFrom.x, _fbiFrom.y, _fbiFrom.z, dx, dy, dz2, col)
-                         : rayAABB(_fbiFrom.x, _fbiFrom.y, _fbiFrom.z, dx, dy, dz2, col);
+      const t = rayCollider(_fbiFrom.x, _fbiFrom.y, _fbiFrom.z, dx, dy, dz2, col);
       if (t < tWall) tWall = t;
     }
     if (tWall < dl - 0.35) {
@@ -13503,7 +13617,7 @@ function updateFx(dt) {
       // flare must read the same line the round will fly, or touch auto-fire goes blind
       // the moment the camera backs into a building
       const fyC = oy + curveDrop(c.x, c.z);
-      const t = c.roof ? rayRoof(ox, fyC, oz, dx, dy, dz, c) : rayAABB(ox, fyC, oz, dx, dy, dz, c);
+      const t = rayCollider(ox, fyC, oz, dx, dy, dz, c);
       if (t > tSelf && t < tWall) tWall = t;
     }
     for (const z of zombies) {
