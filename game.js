@@ -12245,18 +12245,95 @@ function getFaceOvalTex() {
 // body rather than a card floating behind it. a/b/c are the torso ellipsoid's own x/y/z
 // radii (see buildBlob's body scale) and centerYOffset is the decal's centre height
 // relative to the torso's own centre.
-function curvedBodyDecal(w, h, a, b, c, centerYOffset, proud = 0.015) {
+// Pass a `thickness` (and the decal's own `tex`) and the sheet stops being paper-thin: a
+// back cap is sunk `thickness` INTO the body (the true surface sits between the two caps,
+// so nothing floats off it) and side walls are traced around the texture's opaque outline
+// — the skin oval, the letterforms — sampling a couple of pixels inside the edge so they
+// render in the decal's own colour. The proud band of wall above the body surface is what
+// reads as the skin/letters being set INTO the blob rather than stuck on it.
+function curvedBodyDecal(w, h, a, b, c, centerYOffset, proud = 0.015, thickness = 0, tex = null) {
   const geo = new THREE.PlaneGeometry(w, h, 10, 6);
   const pos = geo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
+  const cnt = pos.count;
+  const zs = new Float32Array(cnt);
+  for (let i = 0; i < cnt; i++) {
     const lx = pos.getX(i), ly = pos.getY(i);
     const nx = lx / a, ny = (centerYOffset + ly) / b;
     const rem = Math.max(0, 1 - nx * nx - ny * ny);
-    pos.setZ(i, c * Math.sqrt(rem) + proud);
+    zs[i] = c * Math.sqrt(rem) + proud;
+    pos.setZ(i, zs[i]);
   }
-  pos.needsUpdate = true;
-  geo.computeVertexNormals();
-  return geo;
+  if (!thickness || !tex) {
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    return geo;
+  }
+  const uv = geo.attributes.uv;
+  const positions = [], uvs = [], indices = [];
+  const put = (x, y, z, u, v) => { positions.push(x, y, z); uvs.push(u, v); };
+  const surfZ = (x, y) => {
+    const nxx = x / a, nyy = (centerYOffset + y) / b;
+    return c * Math.sqrt(Math.max(0, 1 - nxx * nxx - nyy * nyy)) + proud;
+  };
+  for (let i = 0; i < cnt; i++) put(pos.getX(i), pos.getY(i), zs[i], uv.getX(i), uv.getY(i));
+  for (let i = 0; i < cnt; i++) put(pos.getX(i), pos.getY(i), zs[i] - thickness, uv.getX(i), uv.getY(i));
+  for (let r = 0; r < 6; r++) {
+    for (let cc = 0; cc < 10; cc++) {
+      const v0 = r * 11 + cc, v1 = v0 + 1, v2 = v0 + 11, v3 = v2 + 1;
+      indices.push(v0, v3, v2, v0, v1, v3);                                 // front cap faces +z
+      indices.push(v3 + cnt, v0 + cnt, v2 + cnt, v1 + cnt, v0 + cnt, v3 + cnt); // back cap faces -z
+    }
+  }
+  // side walls: scan the decal's own alpha for the opaque runs (row runs give the left/
+  // right edges, column runs the top/bottom ones — per glyph, not just the overall hull)
+  const cv = tex.image, W = cv.width, H = cv.height;
+  const px = cv.getContext('2d').getImageData(0, 0, W, H).data;
+  const opaque = (x, y) => x >= 0 && y >= 0 && x < W && y < H && px[(y * W + x) * 4 + 3] > 128;
+  // one wall quad per traced segment: p1/p2 are the front-cap corners in the order that
+  // winds the wall outward, (sx, sy) the texture point the wall samples (just inside the
+  // edge, so it shows the decal's own colour instead of the transparent fringe). The wall's
+  // front edge sits a hair under the cap so the two never z-fight along the outline.
+  const wall = (x1, y1, x2, y2, sx, sy) => {
+    const gx1 = (x1 / W - 0.5) * w, gy1 = (0.5 - y1 / H) * h;
+    const gx2 = (x2 / W - 0.5) * w, gy2 = (0.5 - y2 / H) * h;
+    const f0 = positions.length / 3;
+    put(gx1, gy1, surfZ(gx1, gy1) - 0.002, sx / W, 1 - sy / H);
+    put(gx2, gy2, surfZ(gx2, gy2) - 0.002, sx / W, 1 - sy / H);
+    put(gx1, gy1, surfZ(gx1, gy1) - thickness, sx / W, 1 - sy / H);
+    put(gx2, gy2, surfZ(gx2, gy2) - thickness, sx / W, 1 - sy / H);
+    indices.push(f0, f0 + 1, f0 + 2, f0 + 2, f0 + 1, f0 + 3);
+  };
+  const step = 4;
+  for (let y = 0; y < H - step; y += step) {
+    let x = 0;
+    while (x < W) {
+      while (x < W && !opaque(x, y)) x++;
+      if (x >= W) break;
+      const x0 = x;
+      while (x < W && opaque(x, y)) x++;
+      const x1 = x - 1;
+      wall(x0, y + step, x0, y, x0 + 2, y);   // run's left edge faces -x
+      wall(x1, y, x1, y + step, x1 - 2, y);   // run's right edge faces +x
+    }
+  }
+  for (let x = 0; x < W - step; x += step) {
+    let y = 0;
+    while (y < H) {
+      while (y < H && !opaque(x, y)) y++;
+      if (y >= H) break;
+      const y0 = y;
+      while (y < H && opaque(x, y)) y++;
+      const y1 = y - 1;
+      wall(x, y0, x + step, y0, x, y0 + 2);   // run's top edge faces +y
+      wall(x + step, y1, x, y1, x, y1 - 2);   // run's bottom edge faces -y
+    }
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  out.setIndex(indices);
+  out.computeVertexNormals();
+  return out;
 }
 // the black-ops body: all-black blob + black mitts, a band of a cousin's colour around the
 // eyes (the ski-mask opening), and FBI up the back in the goopy yellow font
@@ -12267,18 +12344,21 @@ function buildFbiBlob(faceColor, big) {
   // own curve (radii 0.42/0.4/0.4, see buildBlob) instead of a separate rigid ellipsoid
   // glued on top of it. The old bump's rim sat proud of the head everywhere except its
   // exact centre, so it clipped out through the forehead/nose curve and the eyes; this
-  // rides a hair off the true surface the whole way round, forehead to nose included.
+  // rides the true surface the whole way round, forehead to nose included. Built thick
+  // (thickness 0.06) so the skin is a lens whose back cap is sunk INTO the skull (the head
+  // surface sits between the caps) with side walls traced around the oval cutout — it
+  // reads as skin set into the head, not a paper-thin slice floating off it.
   // centerYOffset (0.05) matches the face's old vertical centre relative to the skull's own
   // middle (head-local y=0); the mesh's own y-position carries that same 0.05 so the two
   // line up (see curvedBodyDecal's contract, just above).
   const face = new THREE.Mesh(
-    curvedBodyDecal(0.62, 0.34, 0.42, 0.4, 0.4, 0.05, 0.012),
+    curvedBodyDecal(0.62, 0.34, 0.42, 0.4, 0.4, 0.05, 0.03, 0.06, getFaceOvalTex()),
     new THREE.MeshBasicMaterial({ map: getFaceOvalTex(), color: faceColor, transparent: true, depthWrite: false })
   );
   face.position.set(0, 0.05, 0);
   blob.head.add(face);
   const back = new THREE.Mesh(
-    curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0),
+    curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0, 0.03, 0.06, getFbiBackTex()),
     new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false })
   );
   // centred on the torso's own vertical middle (0.62) — the widest part of the back and
