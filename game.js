@@ -12192,24 +12192,50 @@ function resetBluga() {
   bluga.camT = 0; bluga.camDone = false; bluga.wave = 0; bluga.appearT = 0; bluga.smokeT = 0;
 }
 let fbiBackTex = null;
+// 4x the old 96x64 canvas — the old size was fine blended (transparent) but reads as
+// jagged/pixelated any time this map gets sampled without smoothing help (e.g. rendered
+// solid, or just magnified up close), since there were barely any source pixels per letter.
 function drawFbiBackTex(ctx) {
-  ctx.clearRect(0, 0, 96, 64);
+  ctx.clearRect(0, 0, 384, 256);
   ctx.fillStyle = '#f2c21a';
-  ctx.font = `bold 44px ${SIGN_FONT}`;
+  ctx.font = `bold 176px ${SIGN_FONT}`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('FBI', 48, 36);
+  ctx.fillText('FBI', 192, 144);
 }
 function getFbiBackTex() {
-  if (!fbiBackTex) fbiBackTex = canvasTex(96, 64, drawFbiBackTex);
+  if (!fbiBackTex) fbiBackTex = canvasTex(384, 256, drawFbiBackTex);
   return fbiBackTex;
 }
 // canvas text bakes in whatever font is loaded the instant it's drawn, and this texture
 // gets baked once, well before a webfont necessarily crosses the wire — same problem the
 // town signage solves above. Ask for the real face, then redraw once it actually lands.
 if (document.fonts && document.fonts.load) {
-  Promise.all([document.fonts.load(`bold 44px ${SIGN_FONT}`), document.fonts.ready])
+  Promise.all([document.fonts.load(`bold 176px ${SIGN_FONT}`), document.fonts.ready])
     .then(() => { if (fbiBackTex) { drawFbiBackTex(fbiBackTex.image.getContext('2d')); fbiBackTex.needsUpdate = true; } })
     .catch(() => {}); // no webfont: the Comic Sans fallback baked in is fine
+}
+// the ski-mask opening's alpha mask: a soft-edged oval, white-on-transparent, tinted per
+// blob by the material's own color (the cousin's face colour). Squashing a radial gradient
+// through a scaled context keeps the falloff even all the way round the oval instead of
+// stretching it thin on the long axis.
+let faceOvalTex = null;
+// a hard cut, not a blend: skin-to-mask-material should read as one surface stopping and
+// another starting, not a feathered fade between them. Solid fill + the canvas's own ~1px
+// edge antialiasing (at 256x192, sub-pixel relative to how big the decal ends up on
+// screen) is what gets that crisp a line; a gradient stop, however tight, still blends.
+function drawFaceOvalTex(ctx) {
+  const w = 256, h = 192, r = w / 2;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(1, h / w);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function getFaceOvalTex() {
+  if (!faceOvalTex) faceOvalTex = canvasTex(256, 192, drawFaceOvalTex);
+  return faceOvalTex;
 }
 // a flat decal only touches a curved body at one point (wherever it's tangent) and drifts
 // away from the surface everywhere else — which is exactly why the old flat FBI plane
@@ -12236,10 +12262,20 @@ function curvedBodyDecal(w, h, a, b, c, centerYOffset, proud = 0.015) {
 // eyes (the ski-mask opening), and FBI up the back in the goopy yellow font
 function buildFbiBlob(faceColor, big) {
   const blob = buildBlob({ color: FBI_BLACK, scale: big ? 1.4 : 1.0, hands: FBI_BLACK_DK });
-  // the shiesty opening: a clean SIDEWAYS OVAL of the cousin's colour laid flat on the face
-  // front (thin, riding proud of the black skull instead of buried in it), wide enough to
-  // frame both eyes — which still poke through in front of it
-  const face = ball(1, faceColor); face.scale.set(0.3, 0.15, 0.055); face.position.set(0, 0.05, 0.355);
+  blob.mouth.visible = false; // the ski mask covers it — a visible mouth would clip through the mask
+  // the shiesty opening: same trick as the back logo below — a decal bent to the skull's
+  // own curve (radii 0.42/0.4/0.4, see buildBlob) instead of a separate rigid ellipsoid
+  // glued on top of it. The old bump's rim sat proud of the head everywhere except its
+  // exact centre, so it clipped out through the forehead/nose curve and the eyes; this
+  // rides a hair off the true surface the whole way round, forehead to nose included.
+  // centerYOffset (0.05) matches the face's old vertical centre relative to the skull's own
+  // middle (head-local y=0); the mesh's own y-position carries that same 0.05 so the two
+  // line up (see curvedBodyDecal's contract, just above).
+  const face = new THREE.Mesh(
+    curvedBodyDecal(0.62, 0.34, 0.42, 0.4, 0.4, 0.05, 0.012),
+    new THREE.MeshBasicMaterial({ map: getFaceOvalTex(), color: faceColor, transparent: true, depthWrite: false })
+  );
+  face.position.set(0, 0.05, 0);
   blob.head.add(face);
   const back = new THREE.Mesh(
     curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0),

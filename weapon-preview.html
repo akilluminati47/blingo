@@ -372,15 +372,18 @@ function ownMat(mesh) {
 const FBI_BLACK = 0x141519, FBI_BLACK_DK = 0x0a0b0e, BLUGA_FACE = 0x6fd8ff;
 const FBI_FONT = "'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive";
 let fbiBackTex = null;
+// 4x the old 96x64 canvas — the old size was fine blended (transparent) but reads as
+// jagged/pixelated any time this map gets sampled without smoothing help, which is exactly
+// what happens up close in this preview (see setMeshGhost below for the other half of that).
 function drawFbiBackTex(ctx) {
-  ctx.clearRect(0, 0, 96, 64);
+  ctx.clearRect(0, 0, 384, 256);
   ctx.fillStyle = '#f2c21a';
-  ctx.font = `bold 44px ${FBI_FONT}`;
+  ctx.font = `bold 176px ${FBI_FONT}`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('FBI', 48, 36);
+  ctx.fillText('FBI', 192, 144);
 }
 function getFbiBackTex() {
-  if (!fbiBackTex) fbiBackTex = canvasTex(96, 64, drawFbiBackTex);
+  if (!fbiBackTex) fbiBackTex = canvasTex(384, 256, drawFbiBackTex);
   return fbiBackTex;
 }
 // canvas text bakes in whatever font is actually loaded the instant it draws, and this
@@ -388,9 +391,30 @@ function getFbiBackTex() {
 // so without this it would silently bake in the Comic Sans fallback forever. Ask for the
 // real face, then redraw once it lands.
 if (document.fonts && document.fonts.load) {
-  Promise.all([document.fonts.load(`bold 44px ${FBI_FONT}`), document.fonts.ready])
+  Promise.all([document.fonts.load(`bold 176px ${FBI_FONT}`), document.fonts.ready])
     .then(() => { if (fbiBackTex) { drawFbiBackTex(fbiBackTex.image.getContext('2d')); fbiBackTex.needsUpdate = true; } })
     .catch(() => {}); // no webfont: the Comic Sans fallback baked in is fine
+}
+// the ski-mask opening's alpha mask: a soft-edged oval, white-on-transparent, tinted per
+// blob by the material's own color (the cousin's face colour) — matches game.js exactly.
+let faceOvalTex = null;
+// a hard cut, not a blend: skin-to-mask-material should read as one surface stopping and
+// another starting, not a feathered fade between them. Solid fill + the canvas's own ~1px
+// edge antialiasing (at 256x192, sub-pixel relative to how big the decal ends up on
+// screen) is what gets that crisp a line; a gradient stop, however tight, still blends.
+function drawFaceOvalTex(ctx) {
+  const w = 256, h = 192, r = w / 2;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(w / 2, h / 2);
+  ctx.scale(1, h / w);
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+function getFaceOvalTex() {
+  if (!faceOvalTex) faceOvalTex = canvasTex(256, 192, drawFaceOvalTex);
+  return faceOvalTex;
 }
 function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'right', droopy = false, brain = false, blind = false, wounded = false, hands = 0 }) {
   const root = new THREE.Group();
@@ -509,7 +533,14 @@ function curvedBodyDecal(w, h, a, b, c, centerYOffset, proud = 0.015) {
 // eyes (the ski-mask opening), and FBI up the back in the goopy yellow font
 function buildFbiBlob(faceColor, big) {
   const blob = buildBlob({ color: FBI_BLACK, scale: big ? 1.4 : 1.0, hands: FBI_BLACK_DK });
-  const face = ball(1, faceColor); face.scale.set(0.3, 0.15, 0.055); face.position.set(0, 0.05, 0.355);
+  blob.mouth.visible = false; // the ski mask covers it — a visible mouth would clip through the mask
+  // the shiesty opening: a decal bent to the skull's own curve (radii 0.42/0.4/0.4, see
+  // buildBlob) instead of a separate rigid ellipsoid glued on top of it — matches game.js.
+  const face = new THREE.Mesh(
+    curvedBodyDecal(0.62, 0.34, 0.42, 0.4, 0.4, 0.05, 0.012),
+    new THREE.MeshBasicMaterial({ map: getFaceOvalTex(), color: faceColor, transparent: true, depthWrite: false })
+  );
+  face.position.set(0, 0.05, 0);
   blob.head.add(face);
   const back = new THREE.Mesh(
     curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0),
@@ -520,6 +551,13 @@ function buildFbiBlob(faceColor, big) {
   back.position.set(0, 0.62, 0); back.rotation.y = Math.PI; blob.wob.add(back);
   face.frustumCulled = false; back.frustumCulled = false;
   face.castShadow = true; face.receiveShadow = true; back.castShadow = true; back.receiveShadow = true;
+  // these two are alpha-masked decals (a soft oval cutout, transparent letterforms) — their
+  // "opacity" only ever means alpha, never the opaque-material swap setMeshGhost does for
+  // solid body parts. Tag them so the ghost slider fades their alpha but never flips
+  // .transparent off, which is what was silhouetting the FBI logo as a black rectangle
+  // at 100% on the slider (an alpha-masked map rendered as opaque paints its cleared —
+  // fully transparent, RGB-black — pixels as solid black instead of skipping them).
+  face.userData.decal = true; back.userData.decal = true;
   return blob;
 }
 // ═══════════════════════════════════════════════════════════════════════════
@@ -650,8 +688,13 @@ document.getElementById('btnReset').onclick = () => { reframeCurrent(); };
 // z-fighting between overlapping surfaces instead of reading as solid. At full slider,
 // weld it back to an ordinary opaque material — depthWrite on, transparent off — same as
 // the game's normal (non-ghosted) NPCs.
-function setMeshGhost(material, opacity) {
-  const solid = opacity >= 0.999;
+function setMeshGhost(material, opacity, isDecal) {
+  // decals (the FBI text, the face oval) carry their shape in the map's alpha channel, not
+  // in the material's overall translucency — they need transparent+alpha ON even at a
+  // "solid" 100%, or their cleared/transparent pixels paint as opaque black instead of
+  // vanishing. Ordinary body materials still get welded to fully opaque at 100% to avoid
+  // the z-fighting a permanently-transparent, depthWrite-off body would show at full ghost.
+  const solid = opacity >= 0.999 && !isDecal;
   material.transparent = !solid;
   material.depthWrite = solid;
   material.opacity = solid ? 1 : opacity;
@@ -661,11 +704,11 @@ function applyGhost(blob, opacity) {
   blob.root.traverse(o => {
     if (!o.isMesh) return;
     ownMat(o);
-    setMeshGhost(o.material, opacity);
+    setMeshGhost(o.material, opacity, o.userData.decal);
   });
 }
 function setGhostOpacity(blob, opacity) {
-  blob.root.traverse(o => { if (o.isMesh && o.material) setMeshGhost(o.material, opacity); });
+  blob.root.traverse(o => { if (o.isMesh && o.material) setMeshGhost(o.material, opacity, o.userData.decal); });
 }
 function teardownBlob() {
   if (!currentBlob) return;
