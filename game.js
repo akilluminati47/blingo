@@ -2676,7 +2676,7 @@ function colTop(c, x, z) {
 }
 // pitched shingle roof + gables. Returns the peek entry (materials + the blocker box) so
 // the house can fade its own roof out from over the hero — see updateHousePeek.
-function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
+function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC, t = 0.35) {
   const rh = d * 0.32;
   // cloned: roofMats is shared by every house on the map, so fading the cached one
   // would ghost roofs chunks away
@@ -2695,17 +2695,24 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
     slab.rotation.x = s * ang;
     group.add(slab);
   }
-  // gable ends with thickness matching the walls
+  // gable ends: extrude depth is set to the ACTUAL wall thickness (t) rather than a
+  // hardcoded 0.22, and the mesh is shifted outward by half that depth so the slab lands
+  // centred on the wall's centreline below — flush with both the outer and inner wall
+  // faces. (ExtrudeGeometry only builds in the +z direction, i.e. z:[0,gdepth] before the
+  // rotation below turns that into a world-x span of [-gdepth,0] relative to the anchor —
+  // so anchoring at the wall's own centre used to leave the gable's outer face sitting
+  // gdepth inboard of the real wall face, and its inner face poking gdepth past the wall's
+  // inner face: a lip on both sides, worse the further gdepth and t disagreed.)
   const shape = new THREE.Shape();
   shape.moveTo(-d / 2, 0); shape.lineTo(d / 2, 0); shape.lineTo(0, rh); shape.closePath();
-  const gdepth = 0.22;
+  const gdepth = t;
   const ggeo = new THREE.ExtrudeGeometry(shape, { depth: gdepth, bevelEnabled: false });
   const gmat = new THREE.MeshLambertMaterial({ color: gableC !== undefined ? gableC : 0x5d5044, side: THREE.DoubleSide });
   gmat.userData.owned = true;
   for (const s of [-1, 1]) {
     const gable = new THREE.Mesh(ggeo, gmat);
     gable.rotation.y = -s * Math.PI / 2;  // face outward, extrude into the house
-    gable.position.set(bx + s * w / 2, by, bz);
+    gable.position.set(bx + s * (w / 2 + gdepth / 2), by, bz); // shifted flush with the wall centreline
     group.add(gable);
   }
   // (the old flat brown "drop ceiling" filler plane is gone — the pitched shingle
@@ -2722,7 +2729,7 @@ function addRoof(group, bx, by, bz, w, d, rng, colliders, gableC) {
   // roofs skip side collision there (their standing surface is handled by colTop instead),
   // but a gable end is a wall you walk INTO, not a roof you walk on top of.
   for (const s of [-1, 1]) {
-    const gx = bx + s * w / 2 - s * gdepth / 2; // centred on the gable body, flush with wall face
+    const gx = bx + s * w / 2; // flush with the wall centreline — same face the wall box occupies
     const c = aabb(gx, bz, gdepth / 2 + 0.05, d / 2, rh, by);
     c.roof = { axis: 'x', rh, slopeHalf: d / 2 }; // apex runs along x (the gable's thin axis), slopes fall away in z — matches the extruded triangle shape exactly
     c.gable = true;
@@ -2815,7 +2822,7 @@ function makeBuilding(rng, bx, bz, group, colliders, crateList, pads) {
   // the boards are a real surface now: a walkable collider whose top matches the mesh,
   // so feet stand ON the floor (a 6cm sill over the pad — walked over, never noticed)
   colliders.push(aabb(bx, bz, w / 2 - t, d / 2 - t, 0.56, y0 - 0.5));
-  const roofPeek = addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders, wallC); // roof sits down onto the walls, standable
+  const roofPeek = addRoof(group, bx, y0 + h - 0.05, bz, w, d, rng, colliders, wallC, t); // roof sits down onto the walls, standable
   if (roofPeek) shell.push(roofPeek); // the roof clears too, or looking down at the hero shows only shingles
   if (rng() < 0.85) {
     // hunt for interior floor the shelf can stand on without capping a door or a window; a
@@ -3947,6 +3954,17 @@ function buildChurchyard(rng) {
     townGroup.add(gable);
   }
   roofSlope(townColliders, cx, y0 + h - 0.05, cz, 'z', d / 2 + 0.45, w / 2 + 0.5, rh); // scalable nave roof
+  // gable-end colliders: without these the two triangle cap pieces above were pure
+  // decoration — shots (and their bullet holes) sailed straight through since nothing
+  // in townColliders occupied that space. Same rayGableWall solid-triangle treatment
+  // the generated houses use for their gable ends (see addRoof).
+  for (const s of [-1, 1]) {
+    const gz = cz + s * (d / 2 - 0.14); // centred on the 0.28-thick extruded slab above
+    const c = aabb(cx, gz, w / 2, 0.14 + 0.05, rh, y0 + h - 0.05);
+    c.roof = { axis: 'z', rh, slopeHalf: w / 2 };
+    c.gable = true;
+    townColliders.push(c);
+  }
   // bell tower + spire + leaning cross over the front (road-side) entrance
   const ridgeY = y0 + h - 0.05 + rh;
   const steepleZ = northZ - 2.4;
@@ -4910,7 +4928,7 @@ function buildLoungeHall(rng, { bx, bz, wallC, floorC, signText, signBg, signFg,
   floor.position.set(bx, y0 - 0.24, bz);
   townGroup.add(floor);
   townColliders.push(aabb(bx, bz, w / 2 - t, d / 2 - t, 0.56, y0 - 0.5));
-  const roofPeek = addRoof(townGroup, bx, y0 + h - 0.05, bz, w, d, rng, townColliders, wallC);
+  const roofPeek = addRoof(townGroup, bx, y0 + h - 0.05, bz, w, d, rng, townColliders, wallC, t);
   if (roofPeek) shell.push(roofPeek);
   // the loot: shelving lined along every wall, the way she left the stockroom.
   // Each rolls its crates through makeShelf like any chunk house shelf would.
