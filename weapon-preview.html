@@ -19,12 +19,15 @@
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
-    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;overflow:hidden;}
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;overflow:hidden;
+    /* iOS momentum-scroll/rubber-band and pinch bounce fight the canvas's own drag/pinch
+       handling — lock the whole page down and let the canvas own its own gestures instead */
+    overscroll-behavior:none;touch-action:none;}
   #app{display:flex;height:100%;}
 
   /* ---------- sidebar ---------- */
   #sidebar{width:240px;min-width:240px;background:var(--panel);border-right:1px solid var(--line);
-    display:flex;flex-direction:column;overflow-y:auto;}
+    display:flex;flex-direction:column;overflow-y:auto;touch-action:pan-y;}
   #sidebar h1{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);
     margin:0;padding:16px 14px 10px;border-bottom:1px solid var(--line);font-weight:700;}
   #sidebar h1 span{display:block;color:var(--dim);font-size:10px;letter-spacing:.08em;
@@ -40,24 +43,33 @@
   .wbtn.disabled{color:#555a4f;cursor:default;}
   .wbtn.disabled:hover{background:transparent;}
 
+  /* ---------- sidebar toggle + backdrop (mobile drawer) ---------- */
+  #sidebarToggle{display:none;position:absolute;left:14px;top:14px;z-index:30;width:38px;height:38px;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);
+    font-size:16px;align-items:center;justify-content:center;cursor:pointer;}
+  #backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:19;}
+
   /* ---------- viewport ---------- */
-  #viewport{flex:1;position:relative;background:radial-gradient(ellipse at 50% 40%,#181b16 0%,#0d0f0d 70%);}
-  canvas{display:block;width:100%;height:100%;cursor:grab;}
+  #viewport{flex:1;position:relative;background:radial-gradient(ellipse at 50% 40%,#181b16 0%,#0d0f0d 70%);
+    min-width:0;}
+  canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none;}
   canvas.dragging{cursor:grabbing;}
 
   #hint{position:absolute;left:16px;bottom:14px;font-size:11px;color:var(--dim);
     letter-spacing:.02em;line-height:1.5;background:rgba(10,11,9,.55);padding:8px 12px;
-    border-radius:6px;border:1px solid var(--line);}
+    border-radius:6px;border:1px solid var(--line);max-width:calc(100vw - 32px);}
 
-  #toolbar{position:absolute;left:16px;top:14px;display:flex;gap:8px;flex-wrap:wrap;max-width:60%;}
+  #toolbar{position:absolute;left:16px;top:14px;display:flex;gap:8px;flex-wrap:wrap;
+    max-width:calc(100vw - 32px);}
   .tbtn{background:var(--panel);border:1px solid var(--line);color:var(--dim);font-size:11px;
     padding:6px 11px;border-radius:5px;cursor:pointer;font-family:inherit;letter-spacing:.03em;}
   .tbtn:hover{color:var(--text);border-color:#3a3f34;}
   .tbtn.on{color:var(--accent);border-color:var(--accent);background:rgba(200,164,74,.08);}
 
   /* ---------- stat panel ---------- */
-  #stats{position:absolute;right:16px;top:14px;width:250px;background:rgba(15,17,13,.82);
-    border:1px solid var(--line);border-radius:8px;padding:14px 16px;backdrop-filter:blur(4px);}
+  #stats{position:absolute;right:16px;top:14px;width:250px;max-width:calc(100vw - 32px);
+    background:rgba(15,17,13,.82);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+    backdrop-filter:blur(4px);max-height:calc(100vh - 28px);overflow-y:auto;touch-action:pan-y;}
   #stats h2{margin:0 0 2px;font-size:16px;color:var(--accent);letter-spacing:.01em;}
   #stats .id{font-size:10px;color:var(--dim);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px;}
   .statrow{display:flex;justify-content:space-between;font-size:12.5px;padding:3px 0;
@@ -72,15 +84,58 @@
 
   #legend{position:absolute;right:16px;bottom:14px;font-size:11px;color:var(--dim);
     background:rgba(10,11,9,.55);padding:8px 12px;border-radius:6px;border:1px solid var(--line);
-    display:flex;flex-direction:column;gap:4px;}
+    display:flex;flex-direction:column;gap:4px;max-width:calc(100vw - 32px);}
   #legend .row{display:flex;align-items:center;gap:7px;}
   #legend .dot{width:8px;height:8px;border-radius:50%;flex:none;}
   .dot.muzzle{background:#ff5a3a;box-shadow:0 0 6px #ff5a3a;}
   .dot.fist{background:#5aa0ff;box-shadow:0 0 6px #5aa0ff;}
+
+  /* ================= MOBILE PORTRAIT: narrow width, any height =================
+     Sidebar becomes a slide-in drawer (off-canvas by default) behind a hamburger
+     toggle, so the 3D view — the actual point of the page — owns the screen. */
+  @media (max-width: 780px){
+    #sidebarToggle{display:flex;}
+    #sidebar{position:fixed;left:0;top:0;bottom:0;z-index:20;width:82vw;max-width:300px;
+      min-width:0;box-shadow:2px 0 18px rgba(0,0,0,.5);
+      transform:translateX(-100%);transition:transform .22s ease;}
+    #sidebar.open{transform:translateX(0);}
+    #backdrop.open{display:block;}
+    #toolbar{left:60px;top:14px;} /* clears the hamburger button */
+    #hint{display:none;} /* the drag/wheel hint doesn't apply to touch anyway */
+    #stats{top:auto;bottom:14px;left:16px;right:16px;width:auto;max-width:none;}
+    #legend{display:none;} /* redundant with the on-canvas markers themselves at this size */
+  }
+
+  /* ================= MOBILE LANDSCAPE: short height =================
+     Width is usually fine on a landscape phone — height is the squeeze. Trim
+     vertical padding/line-height everywhere instead of relocating panels. */
+  @media (max-height: 480px) and (orientation: landscape){
+    #sidebarToggle{display:flex;width:32px;height:32px;left:10px;top:10px;font-size:14px;}
+    #sidebar{width:70vw;max-width:260px;}
+    #sidebar h1{padding:12px 14px 8px;font-size:12px;}
+    .grp-label{padding:8px 14px 4px;}
+    .wbtn{padding:6px 14px 6px 18px;font-size:12px;}
+    #toolbar{left:50px;top:10px;gap:6px;max-width:calc(100vw - 100px);}
+    .tbtn{padding:4px 8px;font-size:10px;}
+    #stats{top:10px;right:10px;padding:9px 12px;max-height:calc(100vh - 20px);}
+    #stats h2{font-size:13px;}
+    .statrow{font-size:11px;padding:2px 0;}
+    #legend{display:none;} /* no vertical room to spare */
+    #hint{display:none;}
+  }
+
+  /* very short landscape (small phones in landscape, ~360px tall or less): the
+     stats panel can still run taller than the viewport, so let it scroll rather
+     than clipping or pushing the canvas around */
+  @media (max-height: 360px) and (orientation: landscape){
+    #stats{max-height:calc(100vh - 16px);}
+  }
 </style>
 </head>
 <body>
 <div id="app">
+  <button id="sidebarToggle" aria-label="Toggle weapon list">☰</button>
+  <div id="backdrop"></div>
   <div id="sidebar">
     <h1>Arsenal Preview<span>click a weapon — drag to orbit, wheel to zoom</span></h1>
     <div id="wlist"></div>
@@ -654,6 +709,45 @@ canvasEl().addEventListener('wheel', e => {
   applyOrbit();
 }, { passive: false });
 
+// touch has no wheel event, so pinch is the only way to zoom on a phone/tablet. Track the
+// two active touches by identifier (a third finger touching down mid-pinch shouldn't reset
+// it) and compare each frame's finger-to-finger distance against the last one.
+const activeTouches = new Map(); // pointerId -> {x,y}
+let pinchStartDist = null;
+canvasEl().addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch') activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (activeTouches.size === 2) {
+    dragging = false; // two fingers means pinch, not orbit-drag
+    pinchStartDist = null;
+  }
+});
+addEventListener('pointermove', e => {
+  if (e.pointerType !== 'touch' || !activeTouches.has(e.pointerId)) return;
+  activeTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (activeTouches.size !== 2) return;
+  const [a, b] = [...activeTouches.values()];
+  const dist = Math.hypot(a.x - b.x, a.y - b.y);
+  if (pinchStartDist != null) {
+    orbit.dist = Math.max(0.12, Math.min(8, orbit.dist * (pinchStartDist / dist)));
+    applyOrbit();
+  }
+  pinchStartDist = dist;
+});
+function endTouch(e) { activeTouches.delete(e.pointerId); if (activeTouches.size < 2) pinchStartDist = null; }
+addEventListener('pointerup', endTouch);
+addEventListener('pointercancel', endTouch);
+
+// ---------- mobile sidebar drawer ----------
+const sidebarEl = document.getElementById('sidebar');
+const sidebarToggle = document.getElementById('sidebarToggle');
+const backdrop = document.getElementById('backdrop');
+function setDrawer(open) {
+  sidebarEl.classList.toggle('open', open);
+  backdrop.classList.toggle('open', open);
+}
+sidebarToggle.onclick = () => setDrawer(!sidebarEl.classList.contains('open'));
+backdrop.onclick = () => setDrawer(false);
+
 // ---------- toolbar ----------
 let wireOn = false, markersOn = true, gridOn = true, spinOn = false;
 let heldMode = false, currentBlob = null, cousinColor = 0xff8c42, ghostOpacity = 0.35;
@@ -832,6 +926,7 @@ function selectWeapon(id) {
   reframeCurrent();
   renderStats(id);
   muzzleDot.visible = markersOn && !!current.userData.muzzle;
+  setDrawer(false); // the drawer's only relevant on mobile; a no-op on desktop where it's never open
 }
 
 // ---------- render loop ----------
@@ -841,6 +936,7 @@ function resize() {
   camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
+addEventListener('orientationchange', () => setTimeout(resize, 120));
 resize();
 
 const _mzWorld = new THREE.Vector3();
