@@ -1803,11 +1803,9 @@ function buildGunMesh(id) {
     const barrel = cyl(0.04, 0.045, 0.58, 0x1c1e22); barrel.rotation.x = Math.PI/2; barrel.position.set(0, 0.09, -0.76); g.add(barrel);
     const stock = box(0.1, 0.15, 0.34, c); stock.position.set(0, 0.04, 0.3); g.add(stock);
 
-    // the underside pipe: the magazine tube, with the pump slide riding further forward on
-    // it than a real 590's rearmost travel — puts daylight between it and the curved mag
-    // behind it instead of the two nearly touching.
-    const botPipe = cyl(0.05, 0.05, 0.6, 0x1c1e22); botPipe.rotation.x = Math.PI/2; botPipe.position.set(0, -0.05, -0.28); g.add(botPipe);
-    const pump = box(0.13, 0.07, 0.28, 0x1c1e22); pump.position.set(0, -0.05, -0.48); g.add(pump);
+    // no separate magazine tube underneath anymore — the pump slide mounts straight onto
+    // the underside of the big upper tube instead, raised up to actually nestle against it
+    const pump = box(0.13, 0.07, 0.28, 0x1c1e22); pump.position.set(0, -0.03, -0.48); g.add(pump);
 
     // curved box mag, its bow swept back toward the trigger/grip area instead of hanging
     // straight down — profile drawn as (depth, height) so the bow reads correctly from
