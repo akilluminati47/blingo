@@ -328,7 +328,8 @@ function buildGunMesh(id) {
   if (id !== 'fists') g.position.z = w.melee ? -0.1 : -0.22;
   const MELEE_FWD = { axe: 0.12, sledge: 0.12, katana: 0.12, machete: 0.12, bat: 0.12, pipe: 0.12 };
   if (MELEE_FWD[id]) g.position.z -= MELEE_FWD[id];
-  if (id === 'rpg') g.position.z += 0.37;
+  if (id === 'rpg') g.position.z += 0.25; // pulled back a bit so the grip lands on the thumb line
+  if (id === 'rpg') g.position.y += 0.18; // raised further — rear funnel needs to fully clear
   if (id === 'pumpshotgun') { g.position.z -= 0.06; g.position.y += 0.05; }
   if (!w.melee) {
     const tip = { pistol: [0.05, -0.3], magnum: [0.05 * MAGNUM_BIG, -0.3 * MAGNUM_BIG], smg: [0.04, -0.42],

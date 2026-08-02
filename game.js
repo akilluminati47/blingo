@@ -1893,7 +1893,11 @@ function buildGunMesh(id) {
   // the RPG's grip moved back onto the middle of the wood handguard (see buildGunMesh's
   // 'rpg' branch) — push the whole assembly forward by the same amount so that new grip
   // spot stays anchored near the fist instead of drifting away from the hand.
-  if (id === 'rpg') g.position.z += 0.37;
+  if (id === 'rpg') g.position.z += 0.25; // pulled back a bit so the grip lands on the thumb line
+  // the fist actually wraps around the LOWER part of the grip, not its vertical middle —
+  // the grip box spans y -0.13..0.05 (centre -0.04, half-height 0.09), so nudge the fist's
+  // anchor down toward that bottom third instead of sitting mid-grip.
+  if (id === 'rpg') g.position.y += 0.18; // raised further still — the rear funnel needs to fully clear
   // the pistol grip is gone (the fist wraps the frame directly now) — nudge the whole gun
   // forward and up a bit so the stock block rides clear of the thumb instead of tucking in
   // behind it, the way it read with the old grip anchoring the hand further back and low.
