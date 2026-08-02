@@ -1676,8 +1676,8 @@ const WEAPONS = {
   chili:   { id: 'chili',   name: "Red's Chili",  melee: true, slot: 'consumable', consumable: true, dmg: 6, range: 2.4, rpm: 150, mag: Infinity, kick: 0.02, rmb: [130, 0.9, 0.55], cqc: 0, weak: true, dismember: 0.12 },
   pipe:    { id: 'pipe',    name: 'Lead Pipe',    melee: true, slot: 'melee', dmg: 16, range: 3.1, rpm: 150, mag: Infinity, kick: 0.03, rmb: [80, 0.5, 0.3], cqc: 0, dismember: 0.28, color: 0x8b9099 },
   bat:     { id: 'bat',     name: 'Slugger Bat',  melee: true, slot: 'melee', dmg: 19, range: 3.4, rpm: 130, mag: Infinity, kick: 0.04, rmb: [90, 0.55, 0.35], cqc: 0, dismember: 0.34, color: 0x8a5a2a },
-  machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 23, range: 3.2, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
-  katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 27, range: 3.7, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
+  machete: { id: 'machete', name: 'Machete',      melee: true, slot: 'melee', dmg: 23, range: 2.8, rpm: 155, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.82, color: 0xb7bcc4 },
+  katana:  { id: 'katana',  name: 'Katana',       melee: true, slot: 'melee', dmg: 27, range: 3.6, rpm: 175, mag: Infinity, kick: 0.03, rmb: [90, 0.5, 0.4], cqc: 0, dismember: 0.95, gib: true, color: 0xd8dde5 },
   sledge:  { id: 'sledge',  name: 'Sledgehammer', melee: true, slot: 'melee', dmg: 39, range: 3.1, rpm: 72, mag: Infinity, kick: 0.09, rmb: [150, 0.95, 0.5], cqc: 0, dismember: 0.6, gib: true, color: 0x5c6068 },
   axe:     { id: 'axe',     name: 'Fire Axe',     melee: true, slot: 'melee', dmg: 31, range: 3.2, rpm: 96, mag: Infinity, kick: 0.06, rmb: [120, 0.7, 0.45], cqc: 0, dismember: 0.9, gib: true, color: 0xc23a2a },
   pistol:  { id: 'pistol',  name: 'Pistol',       slot: 'gun', dmg: 5, mag: 18, rpm: 320, auto: false, spread: 0.012, ammo: 90,  color: 0x555a66, kick: 0.025, rmb: [60, 0.3, 0.5],  cqc: 0.45, weak: true,  dismember: 0.14, fRange: 14, oneHand: true },
@@ -1888,12 +1888,12 @@ function buildGunMesh(id) {
   // a few melee handles still read as buried behind the fist at the generic -0.1: their
   // grip end (pommel/knob/hilt) sits well behind where the fist visually closes, instead
   // of right at its edge. Pull just those forward a bit more so the grip end lands there.
-  const MELEE_FWD = { axe: 0.12, sledge: 0.12, katana: 0.12, machete: 0.12, bat: 0.12, pipe: 0.12 };
+  const MELEE_FWD = { axe: 0.12, sledge: 0.12, katana: 0.07, machete: -0.04, bat: 0.12, pipe: 0.12 };
   if (MELEE_FWD[id]) g.position.z -= MELEE_FWD[id];
   // the RPG's grip moved back onto the middle of the wood handguard (see buildGunMesh's
   // 'rpg' branch) — push the whole assembly forward by the same amount so that new grip
   // spot stays anchored near the fist instead of drifting away from the hand.
-  if (id === 'rpg') g.position.z += 0.25; // pulled back a bit so the grip lands on the thumb line
+  if (id === 'rpg') g.position.z += 0.32; // further back still — closes the gap into a slight clip
   // the fist actually wraps around the LOWER part of the grip, not its vertical middle —
   // the grip box spans y -0.13..0.05 (centre -0.04, half-height 0.09), so nudge the fist's
   // anchor down toward that bottom third instead of sitting mid-grip.
@@ -2058,14 +2058,14 @@ function buildMeleeMesh(g, id, c) {
     // guard (tsuba) merged flush onto the blade's own root — was floating mid-handle,
     // well past where the blade actually ends, with a stretch of bare wrap ahead of it
     const guard = cyl(0.12, 0.12, 0.035, 0x1c1c22); guard.rotation.x = Math.PI / 2; guard.position.set(0, 0, -0.06); g.add(guard);
-    for (const zz of [0.05, 0.12, 0.19]) { // silk wrap bands
+    for (const zz of [-0.02, 0.03, 0.08]) { // silk wrap bands — respaced for the shorter handle
       const wrap = cyl(0.052, 0.052, 0.035, 0x0c1c2c); wrap.rotation.x = Math.PI / 2; wrap.position.set(0, 0, zz); g.add(wrap);
     }
     // pommel (kashira) merged flush onto the handle's own actual rear end (z=0.12, the
     // same "near" the tsuka's shaftZ below is built on) instead of floating further back
     // past it — the two "coins" now cap the hilt at its real front and back edges.
     const pommel = cyl(0.056, 0.056, 0.04, 0xc8a44a); pommel.rotation.x = Math.PI / 2; pommel.position.set(0, 0, 0.12); g.add(pommel);
-    g.add(shaftZ(0.28, 0.05, 0.05, 0x14304a, 0.12));
+    g.add(shaftZ(0.18, 0.05, 0.05, 0x14304a, 0.12)); // stops right at the guard (z=-0.06) — no more overlap into the blade
   } else if (id === 'sledge') {
     g.add(shaftZ(0.8, 0.042, 0.052, 0x6b5330));
     const head = box(0.24, 0.24, 0.34, c); head.position.set(0, 0, -0.76); g.add(head);
