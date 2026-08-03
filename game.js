@@ -4630,7 +4630,13 @@ function petrify(root) {
     o.material = mat((g << 16) | (g << 8) | g);
   });
 }
+// where the monument stands and how wide a berth the butterflies give it. 4.4 circumscribes the
+// 6.2m base step (half-width 3.1, so 3.1·√2 to the corners), which is the widest stone they can
+// meet — they cruise at bloom height, inside that bottom step's own half-metre band. A circle
+// rather than the square it really is: an arc reads like a butterfly, and it can't clip a corner.
+let statueGuard = null;
 function buildBlingoStatue(x, z) {
+  statueGuard = { x, z, r: 4.4 };
   const y0 = groundHeight(x, z);
   const granite = 0x8f939b, graniteDk = 0x6d7178;
   // thin ground-level paved disc under the whole structure — decorative only, no collider
@@ -4763,11 +4769,29 @@ function updateButterflies(dt) {
       b.tgt = next;
       continue;
     }
-    b.yaw = Math.atan2(dx, dz);
+    let hx = dx / d, hz = dz / d;
+    // the beds sit either side of the lawn's centre, so the straight run between two of them
+    // goes clean through the monument. If the statue lies on this run, fly its TANGENT instead
+    // — peel off by just enough to graze the guard circle, and fall back onto the bloom the
+    // moment it's behind. Reads as banking around it rather than a hard swerve.
+    if (statueGuard) {
+      const gx = statueGuard.x - b.g.position.x, gz = statueGuard.z - b.g.position.z;
+      const along = gx * hx + gz * hz;             // how far up this run the statue sits
+      if (along > 0 && along < d) {                // ahead of us, and nearer than the flower
+        const side = gx * hz - gz * hx;            // signed miss distance off the current heading
+        if (Math.abs(side) < statueGuard.r) {
+          const distC = Math.hypot(gx, gz);
+          const turn = side >= 0 ? -1 : 1;         // bank whichever way we're already leaning
+          const ang = Math.atan2(gx, gz) + turn * Math.asin(Math.min(statueGuard.r / Math.max(distC, statueGuard.r), 1));
+          hx = Math.sin(ang); hz = Math.cos(ang);
+        }
+      }
+    }
+    b.yaw = Math.atan2(hx, hz);
     b.g.rotation.y = b.yaw;
     const step = Math.min(d, b.speed * dt);
-    b.g.position.x += (dx / d) * step;
-    b.g.position.z += (dz / d) * step;
+    b.g.position.x += hx * step;
+    b.g.position.z += hz * step;
     b.g.position.y += clamp(dy, -1.4 * dt, 1.4 * dt);
   }
 }
