@@ -379,7 +379,9 @@ function navGrid(){
   const ptiles = [...document.querySelectorAll('.ptile')];
   const ppips = [...document.querySelectorAll('.ppip')];
   const pdownBtns = ['pdown-exe','pdown-apk','pdown-ipa'].map(id => document.getElementById(id)).filter(Boolean);
-  const ghbadge = document.querySelector('.pdown-ghbadge');
+  // every badge in the stack (GitHub releases, then the Discord invite) — a singular
+  // querySelector here silently stranded the second one outside keyboard/pad reach
+  const badges = [...document.querySelectorAll('.pdown-ghbadge')];
   const ptoblock = document.getElementById('ptoblock');
   const pcredit = document.getElementById('pcreditlink');
   const rows = [];
@@ -390,7 +392,7 @@ function navGrid(){
   if (pdownBtns.length > 0) {
     for (const btn of pdownBtns) rows.push([btn]);
   }
-  if (ghbadge) rows.push([ghbadge]);
+  for (const b of badges) rows.push([b]);
   if (ptoblock) rows.push([ptoblock]);
   if (pcredit) rows.push([pcredit]);
   return rows;
