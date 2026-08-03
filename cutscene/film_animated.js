@@ -9,7 +9,7 @@ const $ = window.__dbg;
 if (!$) { console.error('window.__dbg not found — is the game loaded?'); return; }
 const {
   renderer, camera, scene, game, player, settings,
-  wxSet, applyEnvironment, buildBlob, spawnZombie,
+  wxSet, applyEnvironment, buildBlob, cousinHands, spawnZombie,
   skyDome, cloudDome, hemi, sunLight, addRotGore,
   groundHeight, bossState, zombies, THREE,
 } = $;
@@ -172,12 +172,33 @@ function restoreCulling() {
 
 function spawnCousin(id, x, z, rot) {
   const c = COUSINS.find(c => c.id === id);
-  const blob = buildBlob({ color: c.color, scale: 1 });
+  // the actual in-game cousin model: per-cousin hand skin tone + Blondie's lefty gun hand
+  const blob = buildBlob({ color: c.color, gunHand: c.id === 'blondie' ? 'left' : 'right', hands: cousinHands(c.id) });
   const y = groundHeight(x, z);
   blob.root.position.set(x, y, z);
   blob.root.rotation.y = rot || 0;
   scene.add(blob.root); cleanup.push(blob.root);
   return blob;
+}
+// drive one cousin's in-game idle: breathing squash-and-stretch, body sway, head bob
+// and arm/leg swing — the same motion the player's blob does when standing still.
+// phase0 is random per cousin (so the six never bounce in sync) and t is the SHOT
+// PROGRESS (0..1): every motion runs whole cycles over the shot (breathe 2x, the rest
+// 1x of a 4π base swing), so the last frame lands EXACTLY on the first frame's pose
+// and the idle loops seamless. The gaze stays locked forward — no body-yaw sway, so
+// nobody's eyes drift off the fountain as the camera pans.
+function idleCousin(blob, phase0, t) {
+  const p = phase0 + t * Math.PI * 4;
+  const b = blob;
+  const wobble = Math.sin(p * 2.0) * 0.03;
+  b.wob.scale.set(1 + wobble, 1 - wobble, 1 + wobble);
+  b.wob.rotation.z = Math.sin(p) * 0.025;
+  b.head.rotation.x = Math.sin(p) * 0.05;
+  const swing = Math.sin(p) * 0.06;
+  b.legs[0].rotation.x = swing;
+  b.legs[1].rotation.x = -swing;
+  b.arms[0].rotation.x = -swing * 0.8; b.arms[0].rotation.z = 0;
+  b.arms[1].rotation.x = swing * 0.8; b.arms[1].rotation.z = 0;
 }
 function spawnZ(x, z, opts) {
   const zz = spawnZombie(x, z, 1, opts || {});
@@ -280,9 +301,32 @@ const SHOTS = [
     const ids = COUSINS.map(c => c.id);
     // spread across bank steps, facing south toward the fountain
     const positions = [[-3.5,-35],[-2,-35],[-0.5,-35],[1,-35],[2.5,-35],[4,-35]];
-    for (let i = 0; i < 6; i++) spawnCousin(ids[i], positions[i][0], positions[i][1], 0);
+    // each cousin idles on their own clock — a random start phase so their
+    // bounces never line up; the shot spans whole cycles of every motion, so
+    // the last frame lands back on the first (seamless loop, no gaze snap)
+    const blobs = [], idle = [];
+    for (let i = 0; i < 6; i++) {
+      blobs.push(spawnCousin(ids[i], positions[i][0], positions[i][1], 0));
+      idle.push(Math.random() * Math.PI * 2);
+    }
     await pause(600);
-    await panShot('s02', 10, v3(-5, 3, -30), v3(6, 2.5, -30), v3(0, 1.5, -35));
+    beginCapture();
+    noFrustumCull();
+    const dur = 10, n = Math.round(dur * D.FPS), dt = 1 / D.FPS;
+    const camA = v3(-5, 3, -30), camB = v3(6, 2.5, -30), lookAt2 = v3(0, 1.5, -35);
+    for (let i = 0; i < n; i++) {
+      const t = i / Math.max(n - 1, 1);
+      camera.position.lerpVectors(camA, camB, t);
+      camera.lookAt(lookAt2);
+      skyDome.position.copy(camera.position);
+      cloudDome.position.copy(camera.position);
+      for (let k = 0; k < blobs.length; k++) idleCousin(blobs[k], idle[k], t);
+      snap('s02_' + String(i).padStart(4, '0'));
+      if (window.__step) window.__step(1, dt);
+      await new Promise(r => requestAnimationFrame(r));
+    }
+    endCapture();
+    restoreCulling();
   },
 
   // SHOT 5 — Rotten One closeup (9s, storm + lightning)
@@ -299,7 +343,10 @@ const SHOTS = [
     scene.add(boss.root); cleanup.push(boss.root);
     for (let i = 0; i < 8; i++) {
       const a = Math.random() * Math.PI * 2, d = 5 + Math.random() * 4;
-      spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true, shield: true });
+      // blind guards: no target to home on, so they shuffle from bearing to
+      // bearing like the street walkers — the shot gets a slow patrol, not a
+      // mob converging on the parked player
+      spawnZ(bx + Math.sin(a) * d, bz + Math.cos(a) * d, { green: true, rot: true, shield: true, blind: true });
     }
     await pause(300);
     await panShot('s05', 6, v3(bx + 10, 5, bz + 8), v3(bx, 4, bz + 6), v3(bx, 3, bz)); // orbit to head-on

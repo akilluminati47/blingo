@@ -21,7 +21,8 @@
     "apk:sync": "node scripts/copy-web.mjs && cap sync android",
     "dev": "node scripts/dev-server.mjs",
     "film": "node scripts/dev-server.mjs",
-    "merge": "node scripts/merge-video.mjs"
+    "merge": "node scripts/merge-video.mjs",
+    "preview": "node scripts/merge-video.mjs preview"
   },
   "devDependencies": {
     "@capacitor/android": "^8.4.2",

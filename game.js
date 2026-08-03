@@ -6435,7 +6435,7 @@ function spawnZombie(x, z, powerScale = 1, opts = {}) {
   const corpse = mode === 'corpse';
   const droopy = !corpse && !purple && !red && !green && Math.random() < 0.3;
   const brain = corpse ? Math.random() < 0.4 : Math.random() < 0.12;
-  const blind = !corpse && !purple && !red && !green && Math.random() < 0.16;
+  const blind = !!opts.blind || (!corpse && !purple && !red && !green && Math.random() < 0.16);
   // extra-gore mode makes fresh zombies spawn already mangled and bloody; a corpse always
   // spawns wounded — it's already dead, a carcass for the crows to pick over
   const wounded = mode === 'corpse' || (extraGoreOn() && Math.random() < 0.35 + settings.extraGore * 0.5);
@@ -15839,7 +15839,7 @@ window.__dbg = {
   recruitAll: () => companions.forEach(c => { if (!c.recruited) recruitCousin(c); }),
   step: (dt = 0.05) => { updatePlayer(dt); updateCompanions(dt); updateZombies(dt); updateCrates(dt); updatePickups(dt); updateSpawner(dt); updateJelly(dt); updateCelebration(dt); updateFx(dt); },
   // cutscene director — direct references so console scripts can destructure freely
-  renderer, scene, wxSet, COUSINS, buildBlob, spawnZombie,
+  renderer, scene, wxSet, COUSINS, buildBlob, cousinHands, spawnZombie,
   skyDome, cloudDome, hemi, sunLight, moonLight, addRotGore,
   mat, SPHERE, BOX, bossState, THREE,
 };
