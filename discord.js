@@ -52,9 +52,16 @@
       return;
     }
 
+    // the current Discord iframe URL carries the client id as the SUBDOMAIN
+    // (1533697932149264495.discordsays.com) — not always as a query param.
+    // Passing null to the SDK makes Discord reject the handshake and ready()
+    // hangs until timeout, so resolve it properly.
+    var clientId = params.get('client_id') || String(window.location.hostname).split('.')[0];
+    window.BLINGO_DISCORD.diag('clientId ' + clientId);
+
     var sdk;
     try {
-      sdk = new SDK(params.get('client_id'));
+      sdk = new SDK(clientId);
     } catch (err) {
       // whatever the iframe URL lacks, the mappings below can still work —
       // and the panel says exactly which query param (or other cause) broke it
@@ -109,16 +116,19 @@
       window.BLINGO_DISCORD.diag('patchUrlMappings failed: ' + err);
     }
 
-    // probe the release path through the proxy (what the policies page uses)
-    fetch('/.proxy/api/release').then(
+    // probe the release path through the proxy (what the policies page uses).
+    // NOTE: use the direct mapping prefix — /.proxy/api/... does not match the
+    // /api mapping and falls through to the / mapping (404 on pages.dev)
+    fetch('/api/release').then(
       function (r) { window.BLINGO_DISCORD.diag('release probe HTTP ' + r.status); },
       function (e) { window.BLINGO_DISCORD.diag('release probe failed: ' + e.message); }
     );
 
     // probe the PeerJS broker WebSocket through the proxy (patched, so this is
-    // exactly the URL PeerJS will connect to) — answers "does hosting work"
+    // exactly the URL PeerJS will connect to) — answers "does hosting work".
+    // the broker closes sockets without a real id/token/version, so mimic PeerJS
     try {
-      var wsp = new WebSocket('wss://0.peerjs.com/peerjs?key=peerjs&diag=1');
+      var wsp = new WebSocket('wss://0.peerjs.com/peerjs?key=peerjs&id=diagprobe&token=diag-token&version=1.5.4');
       wsp.onopen = function () {
         window.BLINGO_DISCORD.diag('peer broker WS OPEN');
         try { wsp.close(); } catch (_) {}
@@ -138,7 +148,7 @@
         state('ready');
         window.BLINGO_DISCORD.diag('sdk ready');
         return sdk.commands.authorize({
-          client_id: params.get('client_id'),
+          client_id: clientId,
           response_type: 'code',
           state: '',
           prompt: 'none',
@@ -147,7 +157,7 @@
       })
       .then(function (res) {
         if (!res || !res.code) throw new Error('no code');
-        return fetch('/.proxy/api/token', {
+        return fetch('/api/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: res.code })

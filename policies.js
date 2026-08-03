@@ -480,10 +480,11 @@ if(location.hash === '#policies') openPolicies();
   if (!data) {
     try {
       // inside Discord the sandbox can't reach api.github.com, so route through
-      // the OAuth worker (URL mapping /api -> blingo-discord-token worker)
+      // the OAuth worker (URL mapping /api -> blingo-discord-token worker).
+      // Direct prefix: /.proxy/api/... doesn't match the mapping and 404s.
       const discord = window.BLINGO_DISCORD && window.BLINGO_DISCORD.sdk;
       const url = discord
-        ? '/.proxy/api/release'
+        ? '/api/release'
         : 'https://api.github.com/repos/akilluminati47/blingo/releases/latest';
       const res = await fetch(url);
       if (res.ok) data = await res.json();
