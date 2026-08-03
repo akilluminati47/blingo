@@ -28,6 +28,10 @@ const SAVE = 'http://localhost:3000/save';
 let _saveQ = Promise.resolve(), cleanup = [];
 let _prevDrawDist = 2;
 let _origEscape = null;
+// the camera's locked lens for the shot in progress — see setCam() below for why this has
+// to be re-asserted every single frame, not just set once
+let _lockedFov = 70;
+const _tmpCamPos = new THREE.Vector3();
 
 // ── Director mode: override pause menu so capture never gets interrupted ──
 function directorMode() {
@@ -101,6 +105,13 @@ function beginCapture() {
   const w = C.width || window.innerWidth, h = C.height || window.innerHeight;
   renderer.setSize(D.CAP_W, D.CAP_H);
   camera.aspect = D.CAP_W / D.CAP_H;
+  // the baseline lens for this shot — NOT whatever camera.fov currently holds. window.__step()
+  // runs the real game frame under the hood between captures (see setCam below), and that
+  // includes updateCamera(), which is the live player's camera rig: it has no idea a director
+  // is driving and no reason to stay out of the way. settings.fov is the one value that's
+  // always the game's own clean, unzoomed default, so every shot starts from the same lens
+  // no matter what the last shot (or a stray keypress) left sitting on the camera.
+  _lockedFov = (settings && settings.fov) || 70;
   camera.updateProjectionMatrix();
 }
 function endCapture() {
@@ -119,16 +130,50 @@ function snap(name) {
   );
 }
 
+// Point the camera for the frame about to be captured — and, just as importantly, undo
+// whatever the last window.__step() did to it. updateCamera() (the real per-frame player
+// rig) runs unconditionally every step; it has no concept of director mode. With the player
+// parked at (9999,-50,9999) and marked dead, that rig reads the camera as buried a mile
+// underground and fires the "ground-cam flare" meant for a live player's lens getting shoved
+// into the dirt — FOV blown out by up to 24°, PLUS the projection matrix hand-stretched on
+// top of that. The director's own position/lookAt reset already undid the position half of
+// that corruption every loop; this locks the fov/matrix half the same way. And since the
+// scene keeps breathing while a shot rolls (new crows fly in, old ones leave — see
+// noFrustumCull below), this also re-sweeps the world for anything that showed up since the
+// last frame, so nothing spawned mid-shot is ever left relying on real-world frustum culling
+// against a camera that's off doing 100-unit director moves.
+function setCam(pos, lookAt) {
+  camera.position.copy(pos);
+  camera.lookAt(lookAt);
+  skyDome.position.copy(camera.position);
+  cloudDome.position.copy(camera.position);
+  camera.fov = _lockedFov;
+  camera.updateProjectionMatrix(); // rebuilt from scratch every time — this is what actually
+                                    // discards the flare's manually-poked matrix elements
+  noFrustumCull();
+}
+// same idea for a shot that never moves the camera at all: pin position + orientation by
+// QUATERNION (not lookAt — nothing to aim at once the camera's just holding still) so a held
+// shot is exactly as immune to the live rig's per-frame meddling as a moving one.
+function pinCam() {
+  const pos = camera.position.clone(), quat = camera.quaternion.clone();
+  return () => {
+    camera.position.copy(pos);
+    camera.quaternion.copy(quat);
+    skyDome.position.copy(pos);
+    cloudDome.position.copy(pos);
+    camera.fov = _lockedFov;
+    camera.updateProjectionMatrix();
+    noFrustumCull();
+  };
+}
+
 async function panShot(name, dur, camA, camB, lookAt) {
   beginCapture();
-  noFrustumCull();
   const n = Math.max(1, Math.round(dur * D.FPS));
   for (let i = 0; i < n; i++) {
     const t = i / Math.max(n - 1, 1);
-    camera.position.lerpVectors(camA, camB, t);
-    camera.lookAt(lookAt);
-    skyDome.position.copy(camera.position);
-    cloudDome.position.copy(camera.position);
+    setCam(_tmpCamPos.lerpVectors(camA, camB, t), lookAt);
     snap(name + '_' + String(i).padStart(4, '0'));
     if (window.__step) window.__step(1, 1 / D.FPS);
     await new Promise(r => requestAnimationFrame(r));
@@ -139,9 +184,10 @@ async function panShot(name, dur, camA, camB, lookAt) {
 
 async function holdShot(name, dur) {
   beginCapture();
-  noFrustumCull();
+  const pin = pinCam();
   const n = Math.round(dur * D.FPS);
   for (let i = 0; i < n; i++) {
+    pin();
     snap(name + '_' + String(i).padStart(4, '0'));
     if (window.__step) window.__step(1, 1 / D.FPS);
     await new Promise(r => requestAnimationFrame(r));
@@ -156,18 +202,31 @@ function setWeather(k) { wxSet(k); applyEnvironment(true); }
 function setFog(near, far) { settings.fogFar = far; applyEnvironment(true); }
 function v3(x,y,z) { return new THREE.Vector3(x,y,z); }
 
-// capture-safe view: no part on screen may be frustum-chopped when the camera
-// pulls high or tilts up (a director camera out-lives the game's own framing).
-let _cullingOriginal = null;
+// capture-safe view: no part on screen may be frustum-chopped when the camera pulls high or
+// tilts up (a director camera out-lives the game's own framing). This used to be a ONE-TIME
+// snapshot taken when a shot began, which missed anything the world spawned mid-shot — most
+// visibly the crow trickle-spawner, which flies fresh birds in and old ones out every few
+// seconds all on its own. A crow born after the snapshot kept three.js's normal frustumCulled
+// default and was left to the ordinary (camera-relative) cull test — accurate for the live
+// player's camera, but a director shot routinely parks the camera 100 units out on a crane
+// move, where a bird sitting near the top of frame reads as behind the frustum's near-vertical
+// plane and blinks out mid-shot, then pops back once the spawner's next bird lands somewhere
+// safer. setCam/pinCam now call this every captured frame instead of once, so anything new
+// gets swept in before it can ever be judged by a cull test built for a different camera.
+let _cullingOriginal = null, _cullingSeen = null;
 function noFrustumCull() {
-  if (_cullingOriginal) return;
-  _cullingOriginal = [];
-  scene.traverse(o => { if (o.isMesh) { _cullingOriginal.push([o, o.frustumCulled]); o.frustumCulled = false; } });
+  if (!_cullingOriginal) { _cullingOriginal = []; _cullingSeen = new WeakSet(); }
+  scene.traverse(o => {
+    if (!o.isMesh || _cullingSeen.has(o)) return;
+    _cullingSeen.add(o);
+    _cullingOriginal.push([o, o.frustumCulled]);
+    o.frustumCulled = false;
+  });
 }
 function restoreCulling() {
   if (!_cullingOriginal) return;
   for (const [mesh, v] of _cullingOriginal) mesh.frustumCulled = v;
-  _cullingOriginal = null;
+  _cullingOriginal = null; _cullingSeen = null;
 }
 
 function spawnCousin(id, x, z, rot) {
@@ -263,7 +322,6 @@ const SHOTS = [
       { t: 1.00, pos: v3(2, 8, -20),   look: v3(0, 3, -30), clock: 18.5 },
     ];
     beginCapture();
-    noFrustumCull();
     let lastClock = -1;
     for (let i = 0; i < n; i++) {
       const t = i / Math.max(n - 1, 1);
@@ -275,10 +333,7 @@ const SHOTS = [
       const wt = (t - waypoints[lo].t) / (waypoints[hi].t - waypoints[lo].t || 1);
       const cp = waypoints[lo].pos.clone().lerp(waypoints[hi].pos, wt);
       const cl = waypoints[lo].look.clone().lerp(waypoints[hi].look, wt);
-      camera.position.copy(cp);
-      camera.lookAt(cl);
-      skyDome.position.copy(camera.position);
-      cloudDome.position.copy(camera.position);
+      setCam(cp, cl);
       // change clock at waypoint crossings
       const ck = waypoints[lo].clock;
       if (ck !== lastClock) { game.clock = ck; applyEnvironment(true); lastClock = ck; }
@@ -311,15 +366,11 @@ const SHOTS = [
     }
     await pause(600);
     beginCapture();
-    noFrustumCull();
     const dur = 10, n = Math.round(dur * D.FPS), dt = 1 / D.FPS;
     const camA = v3(-5, 3, -30), camB = v3(6, 2.5, -30), lookAt2 = v3(0, 1.5, -35);
     for (let i = 0; i < n; i++) {
       const t = i / Math.max(n - 1, 1);
-      camera.position.lerpVectors(camA, camB, t);
-      camera.lookAt(lookAt2);
-      skyDome.position.copy(camera.position);
-      cloudDome.position.copy(camera.position);
+      setCam(_tmpCamPos.lerpVectors(camA, camB, t), lookAt2);
       for (let k = 0; k < blobs.length; k++) idleCousin(blobs[k], idle[k], t);
       snap('s02_' + String(i).padStart(4, '0'));
       if (window.__step) window.__step(1, dt);
