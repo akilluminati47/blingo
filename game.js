@@ -5975,6 +5975,7 @@ function scatterCousins() {
     scene.remove(c.blob.root);
     if (c.blob.shadow) scene.remove(c.blob.shadow);
     if (c.beacon) scene.remove(c.beacon);
+    dropJellySplat(c);
   }
   companions.length = 0;
   recruitCounter = 0;
@@ -6120,6 +6121,7 @@ function reviveCousin(c, free) {
     c.downed = false;
     c.hp = pay ? Math.min(pay, c.maxHp) : c.hp; // mirror it host-side until their next pose lands
     netSyncCousinBeacon(c);
+    netSyncCousinJelly(c);
     SFX.recruit();
     rumble(140, 0.5, 0.6);
     toast(`PLAYER ${c.netP} IS BACK UP`);
@@ -6130,6 +6132,7 @@ function reviveCousin(c, free) {
   c.blob.wob.rotation.x = 0;
   c.blob.wob.scale.set(1, 1, 1);
   if (c.beacon) { scene.remove(c.beacon); c.beacon = null; }
+  dropJellySplat(c);
   SFX.recruit();
   rumble(140, 0.5, 0.6);
   toast(`${c.data.name.toUpperCase()} IS BACK UP`);
@@ -6141,6 +6144,12 @@ function netSyncCousinBeacon(c) {
     scene.add(c.beacon);
   } else if (!c.downed && c.beacon) { scene.remove(c.beacon); c.beacon = null; }
   if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
+}
+// host-side: a downed jelly-carrier drags a purple stain — the auto-revive tell, gore-free
+function netSyncCousinJelly(c) {
+  if (c.downed && c.netJl && !c.jellySplat) c.jellySplat = makeJellySplat(c.pos.x, c.pos.z);
+  else if ((!c.downed || !c.netJl) && c.jellySplat) dropJellySplat(c);
+  moveJellySplat(c, c.pos.x, c.pos.z);
 }
 
 // ---------- player ----------
@@ -6222,6 +6231,8 @@ function goDown() {
     player.beacon = makeBeacon(0xff3b3b, 0.3);
     scene.add(player.beacon);
   }
+  // the jar broke: a purple stain starts dragging under the crawl — the auto-revive tell
+  if (player.jellyT > 0) player.jellySplat = makeJellySplat(player.pos.x, player.pos.z);
   SFX.hurt();
   rumble(400, 1, 0.8);
   shakeAmp = Math.max(shakeAmp, 0.14);
@@ -6239,6 +6250,7 @@ function playerGetUp(byRescue, hp) {
     ? clamp(Math.round(hp || player.maxHp * 0.5), 1, player.maxHp)
     : Math.max(1, Math.round(player.maxHp * 0.35));
   if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
+  dropJellySplat(player);
   playerBlob.wob.rotation.x = 0;
   SFX.recruit();
   rumble(140, 0.5, 0.6);
@@ -6253,6 +6265,7 @@ function jellyRevive() {
   player.downed = false; player.downT = 0; player.jellyT = 0;
   player.hp = player.maxHp;
   if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
+  dropJellySplat(player);
   playerBlob.wob.rotation.x = 0;
   SFX.recruit();
   rumble(320, 0.9, 0.8);
@@ -6579,6 +6592,24 @@ function groundSplat(x, z, r) {
   scene.add(m);
   decals.push(m);
   if (decals.length > MAX_DECALS) { const old = decals.shift(); scene.remove(old); old.material.dispose(); }
+}
+// the GOOD JELLY tell: a purple stain that drags along under a jelly-carrier bleeding out.
+// No gore slider involved — it's the jar working, not blood — so the whole squad sees the
+// auto-revive ticking under the crawl from across the street.
+function makeJellySplat(x, z) {
+  const m = new THREE.Mesh(decalGeo, new THREE.MeshBasicMaterial({ color: 0xb06fff, transparent: true, opacity: 0.55, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2; m.rotation.z = Math.random() * TAU;
+  m.scale.setScalar(0.7 + Math.random() * 0.3);
+  m.position.set(x, groundHeight(x, z) + 0.07, z);
+  m.renderOrder = 1;
+  scene.add(m);
+  return m;
+}
+function dropJellySplat(o) {
+  if (o && o.jellySplat) { scene.remove(o.jellySplat); o.jellySplat = null; }
+}
+function moveJellySplat(o, x, z) {
+  if (o && o.jellySplat) o.jellySplat.position.set(x, groundHeight(x, z) + 0.07, z);
 }
 // paint a flattened blood stain onto a blob's body ellipsoid, so blood reads as being ON
 // the body rather than a separate blob floating in front. `count` ({n}) caps accumulation.
@@ -7261,6 +7292,7 @@ function resetGame() {
   player.dropKick = false; player.dropKickHard = false; player.dropKickHits = null;
   player.downed = false; player.downT = 0; player.dripT = 0;
   if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
+  dropJellySplat(player);
   player.slideT = 0; player.hopT = 0;
   // consumables come back with the world: full jars, full pot, six bowls, nobody fed yet
   player.jellyT = 0;
@@ -9619,6 +9651,7 @@ function recruitCousin(c, byP = 1) {
   c.hp = c.maxHp; c.downed = false;
   scene.remove(c.beacon);
   c.beacon = null;
+  dropJellySplat(c);
   SFX.recruit();
   rumble(160, 0.5, 0.7);
   toast(`${c.data.name.toUpperCase()} JOINED .ᐟ`);
@@ -9901,6 +9934,7 @@ function updatePlayer(dt) {
       if (Math.random() < dt * 9) spawnParticles(player.pos.x, player.pos.y + 0.7, player.pos.z, 0x9b4dff, 3, 2.2, 0.5);
       if (player.jellyT <= 0) jellyRevive();
     }
+    moveJellySplat(player, player.pos.x, player.pos.z); // the purple trail drags with the crawl
     if (player.downed && player.downT <= 0) playerGetUp(false);
   }
   // mid-meal (eating, growing, the look-around): rooted to the spot, that's the ritual
@@ -12083,6 +12117,7 @@ function grandmaWake() {
     const x = JELLY_G.x + Math.sin(a) * 2.5, z = JELLY_G.z + Math.cos(a) * 2.5; // ringed round her, clear of the table
     c.downed = false; c.hp = c.maxHp;
     if (c.beacon) { scene.remove(c.beacon); c.beacon = null; }
+    dropJellySplat(c);
     if (c.netP) {
       if (c.netConn) { try { c.netConn.send({ t: 'finale', x, z }); } catch (e) {} }
     } else {
@@ -12200,7 +12235,7 @@ function updateJelly(dt) {
       if (player.downed) { // the jelly stops the rot: the party stands you up whole
         player.downed = false; player.downT = 0; player.jellyT = 0; player.hp = player.maxHp;
         if (player.beacon) { scene.remove(player.beacon); player.beacon = null; }
-        playerBlob.wob.rotation.x = 0;
+        dropJellySplat(player);
       }
       spawnParticles(ft.x, player.pos.y + 1.2, ft.z, myCousinData().color, 10, 4, 0.8);
     }
@@ -14061,6 +14096,7 @@ function wireHostConn(conn) {
         } else {
           c.netPose = m; c.hp = m.hp;
           c.netGs = m.gs || 1; // their chili-giant scale rides the pose stream
+          c.netJl = m.jl ? 1 : 0; // the GOOD JELLY flag: their jar is mid-auto-revive
           // a player-controlled cousin owns its own downed state (hurtCompanion bails out
           // for them), so mirror it here and run their rescue beacon from it
           const dn = !!m.dn;
@@ -14068,6 +14104,7 @@ function wireHostConn(conn) {
             c.downed = dn; netSyncCousinBeacon(c); rebuildSquadBars();
             if (dn) toast(`P${c.netP} ${c.data.name.toUpperCase()} DOWN .ᐟ`, true);
           }
+          netSyncCousinJelly(c);
         }
         // a mob melee kill reports every zombie it hit in one batch riding this same pose
         // packet instead of a flurry of separate messages — see netClientShot/netQueueHit
@@ -14240,6 +14277,7 @@ function netSweepHolds() {
       const num = c.netP;
       c.netP = null; c.netHold = 0; c.netTok = null; c.netPose = null;
       c.hp = Math.max(c.hp, c.maxHp * 0.5);
+      dropJellySplat(c); // their jar stopped working the moment they left — the stain goes with them
       for (const o of companions) if (o.followP === num) o.followP = 1; // their followers fall back to the host
       toast(`PLAYER ${num} LEFT, ${c.data.name.toUpperCase()} REJOINS THE SQUAD`);
       rebuildSquadBars();
@@ -14309,7 +14347,7 @@ function netHostTick(dt) {
     playerBlob.root.rotation.y, player.weapon.id, player.hp, !!player.downed,
     playerBlob.arms[playerBlob.gunArm].rotation.x, player.giantScale || 1,
     playerBlob.arms[playerBlob.gunArm].rotation.z, player.slideT > 0, player.grounded, !!player.dropKick,
-    playerBlob.arms[playerBlob.offArm].rotation.x)];
+    playerBlob.arms[playerBlob.offArm].rotation.x, player.jellyT > 0 ? 1 : 0)];
   // the remaining cousins still waiting to be found: streamed so every client sees the same
   // recruit beacons the host does and can walk one up themselves (netFindNearRecruit)
   const rc = [];
@@ -14323,7 +14361,7 @@ function netHostTick(dt) {
       c.blob.arms[c.blob.gunArm].rotation.x, c.netGs || 1,
       c.blob.arms[c.blob.gunArm].rotation.z, c.slideT > 0, c.grounded,
       !!(c.netPose && c.netPose.dk), // a player-controlled cousin's dropkick lives in their streamed pose, not host physics
-      c.blob.arms[c.blob.offArm].rotation.x));
+      c.blob.arms[c.blob.offArm].rotation.x, c.netJl || 0));
   }
   const zb = [];
   const shielded = bossShielded();   // its wave guards are up: the boss is invuln right now
@@ -14404,12 +14442,12 @@ function netHostTick(dt) {
   base.zb = null; base.pk = null; base.cr = null; // never let the last client's filtered lists linger on the shared object
   if (net.hitQ.length) net.hitQ = []; // flushed (or dropped for a congested conn, same as zb/pk/cr above) either way
 }
-function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az, sl, gr, dk, ar2) {
+function netActorOf(p, cid, x, z, y, yw, wp, hp, dn, ar, gs, az, sl, gr, dk, ar2, jl) {
   const R = v => Math.round(v * 20) / 20;
   const key = p ? 'p' + p : 'ai' + cid;
   const mv = Math.hypot(x - (net['_lx' + key] || x), z - (net['_lz' + key] || z)) > 0.03 ? 1 : 0;
   net['_lx' + key] = x; net['_lz' + key] = z;
-  return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, mv,
+  return { p, c: cid, x: R(x), z: R(z), y: R(y), yw: R(yw), wp, hp: Math.round(hp), dn: dn ? 1 : 0, jl: jl ? 1 : 0, mv,
     ar: ar == null ? undefined : Math.round(ar * 100) / 100,
     az: az == null ? undefined : Math.round(az * 100) / 100,
     ar2: ar2 == null ? undefined : Math.round(ar2 * 100) / 100,
@@ -14986,7 +15024,7 @@ function netApplySnapshot(m) {
       nb.root.position.copy(g.blob.root.position);
       nb.root.rotation.y = g.blob.root.rotation.y;
       scene.add(nb.root);
-      g = { blob: nb, wp: '', data: cd, p: a.p, walk: g.walk, walkPhase: g.walkPhase ?? Math.random() * 9, beacon: g.beacon };
+      g = { blob: nb, wp: '', data: cd, p: a.p, walk: g.walk, walkPhase: g.walkPhase ?? Math.random() * 9, beacon: g.beacon, jellySplat: g.jellySplat, jl: g.jl };
       net.actors.set(key, g);
     }
     if (!g) {
@@ -15031,7 +15069,7 @@ function netApplySnapshot(m) {
     g.tz = netFinite(a.z, g.tz ?? player.pos.z, 'actor.z:' + key);
     g.ty = netFinite(a.y, g.ty ?? 0, 'actor.y:' + key);
     g.tyw = netFinite(a.yw, g.tyw ?? 0, 'actor.yw:' + key);
-    g.mv = a.mv; g.hp = a.hp; g.dn = a.dn;
+    g.mv = a.mv; g.hp = a.hp; g.dn = a.dn; g.jl = a.jl || 0;
     g.tar = netFinite(a.ar, g.tar ?? -Math.PI / 2, 'actor.ar:' + key);
     g.taz = netFinite(a.az, g.taz ?? 0, 'actor.az:' + key);
     g.tar2 = netFinite(a.ar2, g.tar2 ?? 0, 'actor.ar2:' + key);
@@ -15046,6 +15084,7 @@ function netApplySnapshot(m) {
     if (!g.p && net._xfer) net._xfer.set(g.data.id, g.blob);
     else { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); }
     if (g.beacon) { scene.remove(g.beacon); g.beacon = null; }
+    dropJellySplat(g);
     net.actors.delete(key);
   }
   updatePauseLobby();   // the slots readout follows the actor list live, even mid-pause
@@ -15237,6 +15276,11 @@ function netClientWorldTick(dt) {
       g.beacon.material.opacity = 0.22 + Math.sin(performance.now() * 0.004) * 0.12;
       g.beacon.rotation.y += dt * 0.8;
     }
+    // their GOOD JELLY trail: the purple stain follows the crawl — same gore-free tell the
+    // host paints over them, so every screen sees the auto-revive ticking
+    if (g.dn && g.jl && !g.jellySplat) g.jellySplat = makeJellySplat(b.root.position.x, b.root.position.z);
+    else if ((!g.dn || !g.jl) && g.jellySplat) dropJellySplat(g);
+    moveJellySplat(g, b.root.position.x, b.root.position.z);
   }
   // mirror the host's final-ten hunt rings on our ghosts (quota fields ride the snapshot)
   const huntFinal = game.cleanup && game.clearTarget > 0 && (game.clearTarget - game.kills) <= 10;
@@ -15395,6 +15439,7 @@ function netClientTick(dt) {
         ar2: Math.round(playerBlob.arms[playerBlob.offArm].rotation.x * 100) / 100,
         gs: (player.giantScale || 1) > 1.02 ? Math.round(player.giantScale * 20) / 20 : undefined,
         dn: player.downed ? 1 : 0,
+        jl: player.jellyT > 0 ? 1 : 0,
         sl: player.slideT > 0 ? 1 : 0, gr: player.grounded ? 1 : 0,
         dk: player.dropKick ? 1 : 0,
         // an armed jump swing (or its post-swing hold) needs to survive the airborne tuck
@@ -15522,7 +15567,7 @@ function netLeave() {
   restoreOwnNotches();     // the spawn rows go back to being theirs, ungreyed
   updateHostPauseLock();
   for (const [nid] of [...net.ghosts]) netRemoveGhost(nid);
-  for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); if (g.beacon) scene.remove(g.beacon); net.actors.delete(key); }
+  for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); if (g.beacon) scene.remove(g.beacon); dropJellySplat(g); net.actors.delete(key); }
   for (const [id, g] of [...net.recruits]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); scene.remove(g.beacon); net.recruits.delete(id); }
   for (const c of companions) { c.netP = null; c.netConn = null; c.netPose = null; c.netHold = 0; c.netTok = null; }
   net.leaving = false;
@@ -15588,6 +15633,7 @@ function netPoseCompanion(c, dt) {
     b.legs[0].rotation.x = 0.3 + claw * 0.18;
     b.legs[1].rotation.x = 0.3 - claw * 0.18;
     if (c.beacon) c.beacon.position.set(c.pos.x, groundHeight(c.pos.x, c.pos.z) + BEACON_Y, c.pos.z);
+    moveJellySplat(c, c.pos.x, c.pos.z); // their purple trail keeps up with the crawl
   } else if (p && p.sl) { b.wob.rotation.x = -0.85; }
   else { if (b.wob.rotation.x) b.wob.rotation.x = 0; }
   if (p && p.sl) { b.legs[0].rotation.x = -1.2; b.legs[1].rotation.x = -1.35; b.arms[b.offArm].rotation.x = -2.6; }
