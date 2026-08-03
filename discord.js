@@ -135,7 +135,7 @@
       };
       wsp.onerror = function () { window.BLINGO_DISCORD.diag('peer broker WS onerror'); };
       wsp.onclose = function (e) {
-        if (e && e.code && e.code !== 1000) {
+        if (e && e.code && e.code !== 1000 && e.code !== 1005) {
           window.BLINGO_DISCORD.diag('peer broker WS close ' + e.code + ' ' + (e.reason || ''));
         }
       };

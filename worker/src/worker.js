@@ -28,19 +28,23 @@ function json(body, status) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // the Discord activity maps PREFIX /api -> this worker, and the proxy CONSUMES
+    // the prefix, so /api/token arrives here as /token. Strip it so the same routes
+    // serve both the mapped path (activity) and the direct workers.dev path.
+    const path = url.pathname.replace(/^\/api/, '');
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS });
     }
 
-    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/health')) {
+    if (request.method === 'GET' && (path === '/' || path === '/health')) {
       return json({ ok: true, service: 'blingo-discord-token' });
     }
 
     // latest GitHub release info for the policies download section (the Discord
     // sandbox can't reach api.github.com directly, so the page asks us instead)
-    if (request.method === 'GET' && url.pathname === '/api/release') {
-      const cacheKey = new Request('https://blingo-discord-token.akilluminati47.workers.dev/api/release');
+    if (request.method === 'GET' && path === '/release') {
+      const cacheKey = new Request('https://blingo-discord-token.akilluminati47.workers.dev/release');
       const cache = caches.default;
       const cached = await cache.match(cacheKey);
       if (cached) return cached;
@@ -55,7 +59,7 @@ export default {
       return res;
     }
 
-    if (url.pathname === '/api/token' && request.method === 'POST') {
+    if (path === '/token' && request.method === 'POST') {
       const clientId = env.DISCORD_CLIENT_ID;
       const clientSecret = env.DISCORD_CLIENT_SECRET;
       if (!clientId || !clientSecret) {
