@@ -73,6 +73,7 @@ jobs:
             - **BLINGO-${{ steps.bump.outputs.version }}-ios.ipa** — iOS sideload via AltStore / SideStore
 
             Play instantly in the browser instead: https://blingo.pages.dev
+            - **Discord Activity** — play it in a voice channel: https://discord.com/oauth2/authorize?client_id=1533697932149264495
 
   windows:
     needs: bump

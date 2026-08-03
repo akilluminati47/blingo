@@ -32,6 +32,21 @@
     window.BLINGO_DISCORD = { state: 'connecting', sdk: sdk };
     state('connecting');
 
+    // Discord's sandbox only allows requests to the activity origin, so anything
+    // the game needs from the outside goes through the activity proxy. The portal
+    // URL mappings below are REQUIRED for these to resolve:
+    //   PREFIX /github  TARGET api.github.com   (policies page: latest release,
+    //                                            Windows/Android/iOS download links)
+    //   PREFIX /peer    TARGET 0.peerjs.com     (multiplayer lobby broker)
+    try {
+      if (window.DiscordSDK.patchUrlMappings) {
+        window.DiscordSDK.patchUrlMappings([
+          { prefix: '/github', target: 'api.github.com' },
+          { prefix: '/peer', target: '0.peerjs.com' }
+        ]);
+      }
+    } catch (_) {}
+
     Promise.race([sdk.ready(), timeout(20000)])
       .then(function () {
         state('ready');
