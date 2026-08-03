@@ -529,6 +529,11 @@ if(location.hash === '#policies') openPolicies();
     const href = a.getAttribute('href') || '';
     if (!href || href[0] === '#') return; // in-page links keep working
     e.preventDefault();
-    discord.openExternal(a.href);
+    const p = discord.openExternal(a.href);
+    if (p && p.then) p.then(function (r) {
+      if (r && !r.opened && window.BLINGO_DISCORD.diag) {
+        window.BLINGO_DISCORD.diag('external link blocked: ' + a.href);
+      }
+    });
   }, true);
 })();
