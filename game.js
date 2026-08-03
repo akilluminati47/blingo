@@ -13926,9 +13926,6 @@ function showLobbies() {
   scan.on('error', e => {
     if (e.type === 'peer-unavailable') return;
     if (!found) lobbyHintEl.textContent = 'Lobby service unreachable . . host one instead';
-    if (window.BLINGO_DISCORD && window.BLINGO_DISCORD.diag) {
-      window.BLINGO_DISCORD.diag('scan peer error: ' + (e && e.type ? e.type : e));
-    }
   });
   setTimeout(() => { if (net.scan === scan && !found) lobbyHintEl.textContent = 'No open lobbies . . host one .ᐟ'; }, 3500);
 }
@@ -13979,9 +13976,6 @@ function hostLobby(rawCode) {
       // taken and let them choose, or they'd never know where they actually landed
       lobbyHintEl.textContent = `${code.toUpperCase()} is already hosting . . pick another code`;
     } else if (!net.role) lobbyHintEl.textContent = 'Lobby service unreachable . .';
-    if (window.BLINGO_DISCORD && window.BLINGO_DISCORD.diag) {
-      window.BLINGO_DISCORD.diag('host peer error: ' + (e && e.type ? e.type : e));
-    }
   });
 }
 function lobbyPlayers() {

@@ -184,33 +184,58 @@ function frame(){
 }
 const fmt = s => { s=Math.max(0,Math.round(s)); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
 
-async function play(id){
-  ensureCtx();
-  if(P.ctx.state==='suspended') await P.ctx.resume();
-  const wasSame = P.cousin===id && P.playing;
-  if(P.playing) stop(false);
-  if(wasSame) return;
-  const c = COUSINS.find(x=>x.id===id);
-  let song;
-  try{ song = getSong(id); }
-  catch(e){ document.getElementById('pnowInfo').textContent='could not load '+id+' theme'; return; }
-  P.notes=song.notes; P.dur=song.duration; P.program=song.program;
-  P.idx=0; P.cousin=id; P.playing=true; P.nodes=[];
-  P.startAt=P.ctx.currentTime+0.08;
-  P.timer=setInterval(scheduler, 25);
-  P.raf=requestAnimationFrame(frame);
-  const wave=(LEAD_WAVE[song.program[0]]||'square');
-  setNow(id, c.name, wave+' · '+song.bpm+' BPM · '+fmt(song.duration), c.hex);
-  nowEl.classList.add('armed');
-  barEl.setAttribute('aria-valuenow', 0);
-  setPlayingBlob(id);
-  renderPips();
+/* the same blur-morph the splash picker uses when it spells a new cousin: the old
+   stage blurs, the swap lands deep in the blur, then the blur falls away — so a
+   theme change never pops between the old blob pose and the new one. */
+let morphTimer = null;
+function blurMorph(on){
+  nowEl.classList.toggle('morph', on);
+  for(const cv of document.querySelectorAll('.pblobcv')) cv.classList.toggle('morph', on);
 }
-function stop(ended){
+function haltAudio(){
   if(P.timer){ clearInterval(P.timer); P.timer=null; }
   if(P.raf){ cancelAnimationFrame(P.raf); P.raf=null; }
   for(const n of P.nodes){ try{ n.stop(); }catch(e){} }
   P.nodes=[]; P.playing=false;
+}
+async function play(id){
+  ensureCtx();
+  if(P.ctx.state==='suspended') await P.ctx.resume();
+  const wasSame = P.cousin===id && P.playing;
+  const morphing = P.playing && !wasSame;
+  if(morphTimer){ clearTimeout(morphTimer); morphTimer = null; }
+  if(morphing){
+    // audio stops now, but the old blob + now-bar hold their pose under the blur
+    haltAudio();
+    blurMorph(true);
+  } else if(P.playing) stop(false);
+  if(wasSame) return;
+  const c = COUSINS.find(x=>x.id===id);
+  let song;
+  try{ song = getSong(id); }
+  catch(e){ blurMorph(false); document.getElementById('pnowInfo').textContent='could not load '+id+' theme'; return; }
+  const swap = () => {
+    P.notes=song.notes; P.dur=song.duration; P.program=song.program;
+    P.idx=0; P.cousin=id; P.playing=true; P.nodes=[];
+    P.startAt=P.ctx.currentTime+0.08;
+    P.timer=setInterval(scheduler, 25);
+    P.raf=requestAnimationFrame(frame);
+    const wave=(LEAD_WAVE[song.program[0]]||'square');
+    setNow(id, c.name, wave+' · '+song.bpm+' BPM · '+fmt(song.duration), c.hex);
+    nowEl.classList.add('armed');
+    barEl.setAttribute('aria-valuenow', 0);
+    setPlayingBlob(id);
+    renderPips();
+    blurMorph(false);
+  };
+  if(morphing){
+    morphTimer = setTimeout(() => { morphTimer = null; swap(); }, 420);
+  } else swap();
+}
+function stop(ended){
+  if(morphTimer){ clearTimeout(morphTimer); morphTimer = null; }
+  blurMorph(false);
+  haltAudio();
   setPlayingBlob(null);
   nowEl.classList.remove('playing'); nowEl.classList.add('idle');
   if(ended){ document.getElementById('pnowFill').style.width='100%';
@@ -530,11 +555,9 @@ if(location.hash === '#policies') openPolicies();
     const href = a.getAttribute('href') || '';
     if (!href || href[0] === '#') return; // in-page links keep working
     e.preventDefault();
-    const p = discord.openExternal(a.href);
-    if (p && p.then) p.then(function (r) {
-      if (r && !r.opened && window.BLINGO_DISCORD.diag) {
-        window.BLINGO_DISCORD.diag('external link blocked: ' + a.href);
-      }
-    });
+    // openExternal lives on BLINGO_DISCORD itself, not on the SDK — it wraps
+    // sdk.commands.openExternalLink and falls back to window.open if Discord
+    // refuses (or isn't connected), so the browser always ends up with the link
+    window.BLINGO_DISCORD.openExternal(a.href);
   }, true);
 })();

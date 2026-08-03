@@ -739,10 +739,15 @@
     filter:blur(3.5px) brightness(.62) saturate(.85); transition:filter .4s ease; }
   .ptile.playing .pblobcv { filter:none; }
   .ptile.loading .pblobcv { filter:blur(2px) brightness(.8); }
+  /* blur-morph between themes, the same trick the splash picker uses: blur climbs,
+     the swap lands deep in the blur, then the blur falls away (no pop) */
+  .pblobcv.morph, .ptile.playing .pblobcv.morph { filter:blur(16px); }
   .pnm { font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
     font-weight:700; font-size:16px; margin-top:2px; }
   .pnow { margin:14px 0 4px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.13);
-    border-radius:14px; padding:14px 16px; display:flex; align-items:center; gap:14px; min-height:70px; text-align:left; }
+    border-radius:14px; padding:14px 16px; display:flex; align-items:center; gap:14px; min-height:70px; text-align:left;
+    transition:filter .4s ease; }
+  .pnow.morph { filter:blur(16px); }
   .pnow.idle .peq, .pnow.idle .pnowmeta { opacity:.45; }
   .peq { display:flex; align-items:flex-end; gap:3px; height:26px; width:30px; flex:0 0 auto; }
   .peq span { flex:1; background:var(--c,#6fd8ff); border-radius:2px; height:30%; }
