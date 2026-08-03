@@ -353,6 +353,12 @@ function darken(hex, f = 0.86) {
 // A private copy of a cached material, so one mesh can fade without dragging every other
 // user of mat()'s cache with it. Flagged so its chunk disposes it on unload.
 function ownMat(mesh) {
+  // a mesh can wear a material ARRAY — the town signage boards do, text on the two broad
+  // faces and solid board on the four edges. Clone every slot so the peek fade owns them all.
+  if (Array.isArray(mesh.material)) {
+    mesh.material = mesh.material.map(m => { const c = m.clone(); c.userData.owned = true; return c; });
+    return mesh.material;
+  }
   mesh.material = mesh.material.clone();
   mesh.material.userData.owned = true;
   return mesh.material;
@@ -475,10 +481,22 @@ function drawPlate(ctx, txt, bg, fg) {
   ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(caps, SIGN_W / 2, SIGN_H / 2 + 2);
 }
+// Every sign in town used to be a zero-thickness plane, which reads as a decal painted on the
+// wall rather than a board hung off it — edge-on it vanished entirely. They're boards now, as
+// deep as the pegs the RED'S CHILI plate hangs from, so they cast and catch light like objects.
+const SIGN_D = 0.2;
 function textPlate(txt, w, h, bg = '#241f1a', fg = '#ffe9c0') {
   const t = canvasTex(SIGN_W, SIGN_H, ctx => drawPlate(ctx, txt, bg, fg));
   textPlates.push({ txt, bg, fg, tex: t });
-  return new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshLambertMaterial({ map: t }));
+  const geo = new THREE.BoxGeometry(w, h, SIGN_D);
+  // the back face stays exactly where the old flat plane sat, so every caller's existing mount
+  // offset still lands on its wall and the whole depth protrudes forward instead of sinking in
+  geo.translate(0, 0, SIGN_D / 2);
+  const faceMat = new THREE.MeshLambertMaterial({ map: t });
+  const edgeMat = new THREE.MeshLambertMaterial({ color: new THREE.Color(bg) });
+  // BoxGeometry group order is +x, -x, +y, -y, +z, -z: lettering on the two broad faces, plain
+  // board on the four edges — the sides would otherwise smear the text sideways
+  return new THREE.Mesh(geo, [edgeMat, edgeMat, edgeMat, edgeMat, faceMat, faceMat]);
 }
 // Canvas text bakes in whatever font is loaded the instant you draw it, and the whole town
 // is built long before a webfont crosses the wire — so every sign would silently bake the
@@ -3856,7 +3874,11 @@ const shopDoors = [];   // every shopfront's doorstep, filled in as the town is 
 const townPeek = [];
 function registerTownPeek(bx, meshes) {
   const mats = [];
-  for (const m of meshes) m.traverse(o => { if (o.isMesh) mats.push(ownMat(o)); });
+  for (const m of meshes) m.traverse(o => {
+    if (!o.isMesh) return;
+    const own = ownMat(o);
+    if (Array.isArray(own)) mats.push(...own); else mats.push(own); // signage hands back a slot per face
+  });
   townPeek.push({ mats, box: bx, op: 1, want: 1 });
 }
 function shopBuilding(x, z, w, d, h, faceDir, label, rng) {
@@ -4867,9 +4889,8 @@ function buildChiliStand(rng) {
   sign.position.set(sx, pegTop + 0.85, sz);
   sign.rotation.y = Math.PI; // face the main-street crossing the park sign points from
   townGroup.add(sign);
-  const signBack = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
-  signBack.position.set(sx, pegTop + 0.85, sz + 0.02);
-  townGroup.add(signBack); // readable coming down the road from the north too
+  // one board now does both reads: it's as deep as the pegs holding it up and lettered on both
+  // broad faces, so the old second plate stacked a hair behind it is no longer needed
   // the plate itself is solid: a narrow catwalk top to crown, set a hair behind the pegs
   // (now that pegs sit on the centerline too) so a blob standing on them never gets
   // shoved off by the plate's box
@@ -5832,9 +5853,10 @@ const COUSINS = [
   { id: 'blondie', name: 'Blondie', color: 0xffd84a, perk: '+50% ammo from loot', melee: 'machete', lore: 'The family hoarder. Her pockets don’t make sense geometrically. If there’s a bullet in a crate, she’ll find three.' },
 ];
 // per-cousin hand skin tone — blob-kind comes in every colour of the blobby-rainbow, so the
-// family doesn't all share one mitt: Blondie runs pale, Bloopy a touch browner, Blomba a warm
-// tan. The rest keep the family default (0xffd7a8, baked into buildBlob). Knuckles auto-darken.
-const COUSIN_HANDS = { blondie: 0xffe7cf, bloopy: 0xc79a6a, blomba: 0xe4b98c };
+// family doesn't all share one mitt: Blondie runs pale, Blingo wears the tan, Bloopy is the
+// brownest of the six, Blomba a warm middle. The rest keep the family default (0xffd7a8,
+// baked into buildBlob). Knuckles auto-darken off whatever tone lands here.
+const COUSIN_HANDS = { blondie: 0xffe7cf, blingo: 0xc79a6a, bloopy: 0x8d5f38, blomba: 0xe4b98c };
 function cousinHands(id) { return COUSIN_HANDS[id] || 0; }
 let selectedCousin = 'blingo';
 // the living-tab controller (set up far below): { lockTo(idx), unlock() }. Declared here so
@@ -12373,28 +12395,51 @@ if (document.fonts && document.fonts.load) {
     .then(() => { if (fbiBackTex) { drawFbiBackTex(fbiBackTex.image.getContext('2d')); fbiBackTex.needsUpdate = true; } })
     .catch(() => {}); // no webfont: the Comic Sans fallback baked in is fine
 }
-// the ski-mask opening's alpha mask: a soft-edged oval, white-on-transparent, tinted per
-// blob by the material's own color (the cousin's face colour). Squashing a radial gradient
-// through a scaled context keeps the falloff even all the way round the oval instead of
-// stretching it thin on the long axis.
-let faceOvalTex = null;
-// a hard cut, not a blend: skin-to-mask-material should read as one surface stopping and
-// another starting, not a feathered fade between them. Solid fill + the canvas's own ~1px
-// edge antialiasing (at 256x192, sub-pixel relative to how big the decal ends up on
-// screen) is what gets that crisp a line; a gradient stop, however tight, still blends.
-function drawFaceOvalTex(ctx) {
-  const w = 256, h = 192, r = w / 2;
-  ctx.clearRect(0, 0, w, h);
-  ctx.save();
-  ctx.translate(w / 2, h / 2);
-  ctx.scale(1, h / w);
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
-  ctx.restore();
-}
-function getFaceOvalTex() {
-  if (!faceOvalTex) faceOvalTex = canvasTex(256, 192, drawFaceOvalTex);
-  return faceOvalTex;
+// The ski-mask opening as a real curved plate rather than a painted oval. The outer face is the
+// skull's own curve pushed out by `thick`; the inside is that same curve dropped `sink` BELOW
+// it, so the plate is concave and its underside sits buried in the head rather than lying
+// exactly on the skull — coplanar was what put those two z-fighting specks on the forehead.
+// Burying it also drives the rim down into the head, so the edge reads as set into the skull
+// instead of perched on it. The oval is geometry now: no alpha mask, no blending.
+function curvedFacePlate(rx, ry, a, b, c, centerYOffset, thick = 0.03, sink = 0.05, segU = 40, segV = 5) {
+  const ez = (x, y) => {
+    const nx = x / a, ny = (centerYOffset + y) / b;
+    return c * Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+  };
+  const pos = [], idx = [];
+  const ring = (v, lift) => {                    // one ring of the radial grid
+    for (let iu = 0; iu < segU; iu++) {
+      const u = (iu / segU) * TAU;
+      const x = rx * v * Math.cos(u), y = ry * v * Math.sin(u);
+      pos.push(x, y, ez(x, y) + lift);
+    }
+  };
+  for (let iv = 0; iv <= segV; iv++) ring(iv / segV, thick);  // outer (convex) face
+  const innerBase = (segV + 1) * segU;
+  for (let iv = 0; iv <= segV; iv++) ring(iv / segV, -sink);  // inner (concave) face, down inside the skull
+  const cap = (base, flip) => {
+    for (let iv = 0; iv < segV; iv++) for (let iu = 0; iu < segU; iu++) {
+      const iu2 = (iu + 1) % segU;
+      const A = base + iv * segU + iu, B = base + iv * segU + iu2;
+      const C = base + (iv + 1) * segU + iu, D = base + (iv + 1) * segU + iu2;
+      if (flip) { idx.push(A, C, B, B, C, D); } else { idx.push(A, B, C, B, D, C); }
+    }
+  };
+  // rings run counter-clockwise in XY, so A,B,C winds AWAY from the viewer: the outer cap is
+  // the flipped one. Getting this backwards culled the whole top face and left only the rim
+  // band showing, which read as a thin brow line instead of a plate.
+  cap(0, true);            // outer face points away from the head
+  cap(innerBase, false);   // inner face points back into it
+  const oRim = segV * segU, iRim = innerBase + segV * segU; // stitch the two rims together
+  for (let iu = 0; iu < segU; iu++) {
+    const iu2 = (iu + 1) % segU;
+    idx.push(oRim + iu, iRim + iu, oRim + iu2, oRim + iu2, iRim + iu, iRim + iu2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
 }
 // a flat decal only touches a curved body at one point (wherever it's tangent) and drifts
 // away from the surface everywhere else — which is exactly why the old flat FBI plane
@@ -12431,20 +12476,23 @@ function buildFbiBlob(faceColor, big) {
   // middle (head-local y=0); the mesh's own y-position carries that same 0.05 so the two
   // line up (see curvedBodyDecal's contract, just above).
   const face = new THREE.Mesh(
-    curvedBodyDecal(0.62, 0.34, 0.42, 0.4, 0.4, 0.05, 0.012),
-    new THREE.MeshBasicMaterial({ map: getFaceOvalTex(), color: faceColor, transparent: true, depthWrite: false })
+    curvedFacePlate(0.31, 0.17, 0.42, 0.4, 0.4, 0.05, 0.019),
+    new THREE.MeshLambertMaterial({ color: faceColor })
   );
   face.position.set(0, 0.05, 0);
   blob.head.add(face);
+  face.frustumCulled = false; face.castShadow = true; face.receiveShadow = true;
+  // one layer of the real lettering, sat FLUSH on the coat — polygonOffset is what buys that:
+  // it biases the decal forward in the depth test only, so the geometry can sit right on the
+  // torso's own surface (proud 0) without speckling against it. Centred on the torso's vertical
+  // middle (0.62), the widest part of the back and clear of the shoulder line (0.95).
   const back = new THREE.Mesh(
-    curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0),
-    new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false })
+    curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0, 0),
+    new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
   );
-  // centred on the torso's own vertical middle (0.62) — the widest part of the back and
-  // clear of the shoulder line (0.95), where it used to sit and read too high/cramped
   back.position.set(0, 0.62, 0); back.rotation.y = Math.PI; blob.wob.add(back);
-  face.frustumCulled = false; back.frustumCulled = false;
-  face.castShadow = true; face.receiveShadow = true; back.castShadow = true; back.receiveShadow = true;
+  back.frustumCulled = false; back.castShadow = true; back.receiveShadow = true;
   return blob;
 }
 // stand up one black-ops blob in the zombie list (so the whole hitscan / damage / death /
