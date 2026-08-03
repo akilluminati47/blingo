@@ -15,6 +15,13 @@ const COUSINS = [
   {id:'bloopy', name:'Bloopy',  hex:'#3fd8b0'},
   {id:'blondie',name:'Blondie', hex:'#ffd84a'},
 ];
+// per-cousin hand skin tone, same table the in-game buildBlob uses — the preview meshes
+// must wear the same mitts the cousins actually do in-game (default ffd7a8, knuckles darken)
+const COUSIN_HANDS = { blondie: 0xffe7cf, blingo: 0xc79a6a, bloopy: 0x8d5f38, blomba: 0xe4b98c };
+function darken(hex, f = 0.86) {
+  const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+  return (((r * f) | 0) << 16) | (((g * f) | 0) << 8) | ((b * f) | 0);
+}
 
 const screenEl = document.getElementById('policiesscreen');
 const gridEl   = document.getElementById('pgrid');
@@ -25,7 +32,7 @@ let built = false;   // blobs + tiles build lazily on first open (six WebGL cont
 /* ------------------------------------------------------------------ *
  *  A small 3D blob per badge (same proportions as in-game buildBlob) *
  * ------------------------------------------------------------------ */
-function makeBlob(hex){
+function makeBlob(hex, hands){
   const color = parseInt(hex.slice(1),16);
   const g = new THREE.Group();
   const mat = c => new THREE.MeshLambertMaterial({color:c});
@@ -43,8 +50,8 @@ function makeBlob(hex){
   for(const s of [-1,1]){
     const sh=new THREE.Group(); sh.position.set(0.5*s,0.95,0); g.add(sh);
     const arm=box(0.2,0.4,0.2,color); arm.position.y=-0.26; sh.add(arm);
-    const hand=box(0.28,0.26,0.28,0xffd7a8); hand.position.y=-0.56; sh.add(hand);
-    const knuck=box(0.3,0.09,0.14,0xf0c898); knuck.position.set(0,-0.52,0.13); sh.add(knuck);
+    const hand=box(0.28,0.26,0.28,hands || 0xffd7a8); hand.position.y=-0.56; sh.add(hand);
+    const knuck=box(0.3,0.09,0.14, hands ? darken(hands) : 0xf0c898); knuck.position.set(0,-0.52,0.13); sh.add(knuck);
     arms.push(sh);
   }
   for(const s of [-1,1]){
@@ -65,7 +72,7 @@ function initBlob(id, hex, canvas){
   const key = new THREE.DirectionalLight(0xfff2dd, 0.95); key.position.set(2.5,4,3); scene.add(key);
   const cam = new THREE.PerspectiveCamera(42, 1, 0.1, 50);
   cam.position.set(0, 1.18, 3.95); cam.lookAt(0, 0.92, 0);
-  const b = makeBlob(hex); scene.add(b.root);
+  const b = makeBlob(hex, COUSIN_HANDS[id]); scene.add(b.root);
   blobs[id] = {renderer, scene, cam, root:b.root, arms:b.arms};
   renderIdle(id);
 }
