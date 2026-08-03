@@ -27,6 +27,15 @@ renderer.shadowMap.enabled = true; // always on now — self-shadowing scoped to
 // which meshes cast/receive (blob bodies only — see box/ball/cyl defaults + buildBlob's
 // traverse) keeps the softness affordable without needing the hard single-tap map.
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// flag the shadow pass for the curve-aware cull test (see THREE.Frustum.intersectsObject
+// below): that pass bends about the light instead of the camera, so it culls conservatively
+{
+  const shadowRender = renderer.shadowMap.render.bind(renderer.shadowMap);
+  renderer.shadowMap.render = function (lights, scene, camera) {
+    _inShadowPass = true;
+    try { shadowRender(lights, scene, camera); } finally { _inShadowPass = false; }
+  };
+}
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
 
@@ -80,6 +89,53 @@ function curveDrop(x, z) {
   const dx = x - camera.position.x, dz = z - camera.position.z;
   return (dx * dx + dz * dz) * CURVE_DROP;
 }
+// ...and the same sink for CULLING, which is the other half of that bargain. three.js tests an
+// object's bounding sphere at its FLAT world position, so it disagreed with the shader about
+// where everything actually is: anything the curve was about to sink INTO view from above the
+// top of the frame got culled while it was still visible. That's the "top-of-frustum pop" the
+// crows, the beacons, the blobs and the whole town were all individually opting out of culling
+// to dodge — which meant submitting essentially the entire world every frame.
+// Bend the sphere the way the vertex shader bends the geometry instead: drop the centre by the
+// sink at its own distance, then grow the radius by how much MORE the far edge sinks than the
+// near one ((d+r)² - d²), so the sphere still contains the whole curved object. Culling now
+// agrees with what's drawn, and everything can go back to being culled normally.
+let _inShadowPass = false;
+// whichever camera is mid-render, because the shader bends about ITS position — the game
+// camera for the world, but the splash stage and the cousin-theme previews each drive their
+// own renderer and their own camera. Culling the splash blob against the game camera's
+// position would be judging it from somewhere it isn't.
+let _cullCam = null;
+{
+  const rendererRender = THREE.WebGLRenderer.prototype.render;
+  THREE.WebGLRenderer.prototype.render = function (scene, cam) {
+    const prev = _cullCam; _cullCam = cam;
+    try { return rendererRender.call(this, scene, cam); } finally { _cullCam = prev; }
+  };
+}
+const _cullSphere = new THREE.Sphere();
+const _frustumIntersectsObject = THREE.Frustum.prototype.intersectsObject;
+THREE.Frustum.prototype.intersectsObject = function (object) {
+  const geometry = object.geometry;
+  const cam = _cullCam;
+  if (!geometry || !cam) return _frustumIntersectsObject.call(this, object);
+  const m = object.material;
+  // backdrops that opted out of the curve are drawn flat, so they must be culled flat too
+  if (m && !Array.isArray(m) && m.defines && m.defines.NO_CURVE) return _frustumIntersectsObject.call(this, object);
+  if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
+  _cullSphere.copy(geometry.boundingSphere).applyMatrix4(object.matrixWorld);
+  const dx = _cullSphere.center.x - cam.position.x, dz = _cullSphere.center.z - cam.position.z;
+  const d2 = dx * dx + dz * dz, r = _cullSphere.radius;
+  // + slack, because being wrong in the tight direction is the only failure that shows. Swept
+  // against a ground truth that bends each object's eight world corners individually: 20% + 1u
+  // is where false culls hit zero, and it costs ~3% of the draw calls culling just saved.
+  const spread = (2 * Math.sqrt(d2) * r + r * r) * CURVE_DROP + r * 0.2 + 1;
+  // The shadow pass bends about the LIGHT, not the camera, so the exact sink doesn't apply
+  // there. Widen instead of moving: a sphere grown by the full drop always contains the
+  // geometry wherever the bend puts it, so a caster can never be culled out of its own shadow.
+  if (_inShadowPass) _cullSphere.radius = r + spread + d2 * CURVE_DROP;
+  else { _cullSphere.center.y -= d2 * CURVE_DROP; _cullSphere.radius = r + spread; }
+  return this.intersectsSphere(_cullSphere);
+};
 
 const hemi = new THREE.HemisphereLight(0x8fa3d0, 0x2e2a22, 0.9);
 scene.add(hemi);
@@ -2256,10 +2312,11 @@ function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'rig
   root.scale.setScalar(scale);
   // collect skin meshes for red damage flash
   const skinList = [];
-  // frustumCulled off for every part (see top-of-screen note below), and shadows ON: blob
-  // bodies are the only thing in the world that casts/receives now (see box/ball/cyl,
-  // which default both off) — the self-shadowing between limbs is what makes the curves pop.
-  root.traverse(o => { if (o.isMesh) { skinList.push({ mesh: o, mat: o.material }); o.frustumCulled = false; o.castShadow = true; o.receiveShadow = true; } });
+  // shadows ON for every part: blob bodies are the only thing in the world that casts/receives
+  // now (see box/ball/cyl, which default both off) — the self-shadowing between limbs is what
+  // makes the curves pop. Culling stays ON; the curve-aware frustum test up top is what stopped
+  // characters blinking out at the top of the frame, so they no longer opt out of it.
+  root.traverse(o => { if (o.isMesh) { skinList.push({ mesh: o, mat: o.material }); o.castShadow = true; o.receiveShadow = true; } });
   return { root, wob, head, arms, legs, gunSocket, gunArm, offArm: 1 - gunArm, body, skull, brainMesh, eyes, pupils, mouth, stainCount, skinList, flashT: 0,
            armGone: [false, false], legGone: [false, false], headGone: false };
 }
@@ -3310,7 +3367,6 @@ function buildChunk(cx, cz) {
     }
   }
 
-  group.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   scene.add(group);
   return { group, colliders, crates: crateList, buildings, pads, cx, cz };
 }
@@ -3773,7 +3829,6 @@ let fountainFx = null; // animated water on the plaza fountain — filled in bui
 // now, sliding it below the horizon instead of popping it, so the stand-ins had
 // nothing left to stand in for)
 scene.add(townGroup);
-townGroup.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
 
 // civic building: colonnaded facade on the faceDir side (+1 = faces +z, -1 = faces -z)
 function grandBuilding(x, z, w, d, h, wallColor, label, rng, faceDir = -1) {
@@ -5991,7 +6046,6 @@ const BEACON_Y = 60; // centre height: base on the dirt, crown in the clouds
 function makeBeacon(color, opacity) {
   const m = new THREE.Mesh(BEACON_GEO, new THREE.MeshBasicMaterial({ color, transparent: true, opacity,
     blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }));
-  m.frustumCulled = false; // 60 units tall, base to crown — same top-of-frustum pop as crows
   return m;
 }
 
@@ -9246,7 +9300,6 @@ function buildParachuteCrateMesh() {
     strand(corner, pinch);
     strand(pinch, rim);
   }
-  g.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   return { g, lid, trim, glow, chuteRig };
 }
 function spawnParachuteCrate(bossX, bossZ) {
@@ -12505,7 +12558,7 @@ function buildFbiBlob(faceColor, big) {
   );
   face.position.set(0, 0.05, 0);
   blob.head.add(face);
-  face.frustumCulled = false; face.castShadow = true; face.receiveShadow = true;
+  face.castShadow = true; face.receiveShadow = true;
   // one layer of the real lettering, sat FLUSH on the coat — polygonOffset is what buys that:
   // it biases the decal forward in the depth test only, so the geometry can sit right on the
   // torso's own surface (proud 0) without speckling against it. Centred on the torso's vertical
@@ -12516,7 +12569,7 @@ function buildFbiBlob(faceColor, big) {
       polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
   );
   back.position.set(0, 0.62, 0); back.rotation.y = Math.PI; blob.wob.add(back);
-  back.frustumCulled = false; back.castShadow = true; back.receiveShadow = true;
+  back.castShadow = true; back.receiveShadow = true;
   return blob;
 }
 // stand up one black-ops blob in the zombie list (so the whole hitscan / damage / death /
@@ -13035,10 +13088,6 @@ function buildCrow(x, y, z, roost) {
   g.scale.setScalar(1 + Math.random() * 0.35);
   g.position.set(x, y, z);
   g.rotation.y = Math.random() * TAU;
-  // crows fly highest of anything in the game — most likely to cross the frustum's top
-  // plane and blink out mid-flight before they've actually left the screen (see buildBlob
-  // for the same fix on characters)
-  g.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
   scene.add(g);
   const c = { g, wingL, wingR, rollL: wl.roll, rollR: wr.roll, tipL: wl.tip, tipR: wr.tip,
     legL, legR, breast, beak, eyes, purple, peckT: 0,
