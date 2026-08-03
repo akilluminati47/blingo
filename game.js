@@ -6071,7 +6071,15 @@ function updateSquadBars() {
 }
 function hurtCompanion(c, dmg) {
   // player-controlled cousins take their damage on their own screen
-  if (c.netP) { if (c.netConn) { try { c.netConn.send({ t: 'hurt', d: dmg }); } catch (e) {} } return; }
+  if (c.netP) {
+    if (c.netConn) { try { c.netConn.send({ t: 'hurt', d: dmg }); } catch (e) {} }
+    // every screen reads the same hit: flash their body here on the host and broadcast
+    // it so the other clients flash their ghost of this player too (their own screen
+    // already flashed via the 'hurt' relay — the 'hit' no-ops there, no self actor)
+    flashBlob(c.blob);
+    if (net.role === 'host') netBroadcast({ t: 'hit', p: c.netP, g: 0 });
+    return;
+  }
   if (c.downed || !c.recruited) return;
   // The Infected One's plague goes through an AI cousin like paper — they fold three times
   // as fast while he stands. This sits below the netP hand-off on purpose: a real person
@@ -9507,7 +9515,7 @@ function explodeRPG(x, y, z, owner, opts = {}) {
       player.vx += (pdx/(pdist||1)) * 7 * falloff;
       player.vz += (pdz/(pdist||1)) * 7 * falloff;
       player.vy += 4 * falloff;
-      if (player.hp <= 0 && !player.downed) downPlayer();
+      if (player.hp <= 0 && !player.dead) { if (hasHumanAlly() || player.owned.includes('jelly')) goDown(); else die(); }
     }
   }
   // tell the rest of the lobby exactly where this went off, so their ghost rocket (see
@@ -14978,7 +14986,7 @@ function netApplySnapshot(m) {
       nb.root.position.copy(g.blob.root.position);
       nb.root.rotation.y = g.blob.root.rotation.y;
       scene.add(nb.root);
-      g = { blob: nb, wp: '', data: cd, p: a.p, walk: g.walk, walkPhase: g.walkPhase ?? Math.random() * 9 };
+      g = { blob: nb, wp: '', data: cd, p: a.p, walk: g.walk, walkPhase: g.walkPhase ?? Math.random() * 9, beacon: g.beacon };
       net.actors.set(key, g);
     }
     if (!g) {
@@ -15037,6 +15045,7 @@ function netApplySnapshot(m) {
     if (!g.p && !net._xfer) net._xfer = new Map();
     if (!g.p && net._xfer) net._xfer.set(g.data.id, g.blob);
     else { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); }
+    if (g.beacon) { scene.remove(g.beacon); g.beacon = null; }
     net.actors.delete(key);
   }
   updatePauseLobby();   // the slots readout follows the actor list live, even mid-pause
@@ -15217,6 +15226,17 @@ function netClientWorldTick(dt) {
     } else if (g.tpMats && !g.dn && !(g.meltT > 0)) { endBlobFade(g); b.root.scale.setScalar(gsTgt); }
     placeShadow(b, b.root.position.x, b.root.position.z, b.root.position.y);
     updateFlash(b, dt);
+    // a downed player's rescue beacon — the same red shaft the host raises over them,
+    // driven off the streamed dn flag so every screen can find the crawl and haul them up
+    if (g.dn && !g.beacon) {
+      g.beacon = makeBeacon(0xff3b3b, 0.3);
+      scene.add(g.beacon);
+    } else if (!g.dn && g.beacon) { scene.remove(g.beacon); g.beacon = null; }
+    if (g.beacon) {
+      g.beacon.position.set(b.root.position.x, groundHeight(b.root.position.x, b.root.position.z) + BEACON_Y, b.root.position.z);
+      g.beacon.material.opacity = 0.22 + Math.sin(performance.now() * 0.004) * 0.12;
+      g.beacon.rotation.y += dt * 0.8;
+    }
   }
   // mirror the host's final-ten hunt rings on our ghosts (quota fields ride the snapshot)
   const huntFinal = game.cleanup && game.clearTarget > 0 && (game.clearTarget - game.kills) <= 10;
@@ -15502,7 +15522,7 @@ function netLeave() {
   restoreOwnNotches();     // the spawn rows go back to being theirs, ungreyed
   updateHostPauseLock();
   for (const [nid] of [...net.ghosts]) netRemoveGhost(nid);
-  for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); net.actors.delete(key); }
+  for (const [key, g] of [...net.actors]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); if (g.beacon) scene.remove(g.beacon); net.actors.delete(key); }
   for (const [id, g] of [...net.recruits]) { scene.remove(g.blob.root); if (g.blob.shadow) scene.remove(g.blob.shadow); scene.remove(g.beacon); net.recruits.delete(id); }
   for (const c of companions) { c.netP = null; c.netConn = null; c.netPose = null; c.netHold = 0; c.netTok = null; }
   net.leaving = false;
