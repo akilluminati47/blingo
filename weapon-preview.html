@@ -180,7 +180,8 @@
 // with game.js if those functions change — copy/paste, don't hand-edit here.
 // ═══════════════════════════════════════════════════════════════════════════
 const MAT = {};
-function mat(color, opts = {}) {
+function mat(color, opts) {
+  if (opts === undefined) return MAT[color] || (MAT[color] = new THREE.MeshLambertMaterial({ color }));
   const key = color + JSON.stringify(opts);
   if (!MAT[key]) MAT[key] = new THREE.MeshLambertMaterial({ color, ...opts });
   return MAT[key];
@@ -456,26 +457,50 @@ if (document.fonts && document.fonts.load) {
     .then(() => { if (fbiBackTex) { drawFbiBackTex(fbiBackTex.image.getContext('2d')); fbiBackTex.needsUpdate = true; } })
     .catch(() => {}); // no webfont: the Comic Sans fallback baked in is fine
 }
-// the ski-mask opening's alpha mask: a soft-edged oval, white-on-transparent, tinted per
-// blob by the material's own color (the cousin's face colour) — matches game.js exactly.
-let faceOvalTex = null;
-// a hard cut, not a blend: skin-to-mask-material should read as one surface stopping and
-// another starting, not a feathered fade between them. Solid fill + the canvas's own ~1px
-// edge antialiasing (at 256x192, sub-pixel relative to how big the decal ends up on
-// screen) is what gets that crisp a line; a gradient stop, however tight, still blends.
-function drawFaceOvalTex(ctx) {
-  const w = 256, h = 192, r = w / 2;
-  ctx.clearRect(0, 0, w, h);
-  ctx.save();
-  ctx.translate(w / 2, h / 2);
-  ctx.scale(1, h / w);
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(0, 0, r, 0, TAU); ctx.fill();
-  ctx.restore();
-}
-function getFaceOvalTex() {
-  if (!faceOvalTex) faceOvalTex = canvasTex(256, 192, drawFaceOvalTex);
-  return faceOvalTex;
+// The ski-mask opening as a real curved plate rather than a painted oval. The outer face is the
+// skull's own curve pushed out by `thick`; the inside is that same curve dropped `sink` BELOW
+// it, so the plate is concave and its underside sits buried in the head rather than lying
+// exactly on the skull — coplanar was what put two z-fighting specks on the forehead. Burying
+// it also drives the rim down into the head, so the edge reads as set into the skull instead of
+// perched on it. The oval is geometry now: no alpha mask, no blending. Matches game.js.
+function curvedFacePlate(rx, ry, a, b, c, centerYOffset, thick = 0.03, sink = 0.05, segU = 40, segV = 5) {
+  const ez = (x, y) => {
+    const nx = x / a, ny = (centerYOffset + y) / b;
+    return c * Math.sqrt(Math.max(0, 1 - nx * nx - ny * ny));
+  };
+  const pos = [], idx = [];
+  const ring = (v, lift) => {
+    for (let iu = 0; iu < segU; iu++) {
+      const u = (iu / segU) * TAU;
+      const x = rx * v * Math.cos(u), y = ry * v * Math.sin(u);
+      pos.push(x, y, ez(x, y) + lift);
+    }
+  };
+  for (let iv = 0; iv <= segV; iv++) ring(iv / segV, thick);  // outer (convex) face
+  const innerBase = (segV + 1) * segU;
+  for (let iv = 0; iv <= segV; iv++) ring(iv / segV, -sink);  // inner (concave) face, inside the skull
+  const cap = (base, flip) => {
+    for (let iv = 0; iv < segV; iv++) for (let iu = 0; iu < segU; iu++) {
+      const iu2 = (iu + 1) % segU;
+      const A = base + iv * segU + iu, B = base + iv * segU + iu2;
+      const C = base + (iv + 1) * segU + iu, D = base + (iv + 1) * segU + iu2;
+      if (flip) { idx.push(A, C, B, B, C, D); } else { idx.push(A, B, C, B, D, C); }
+    }
+  };
+  // rings run counter-clockwise in XY, so A,B,C winds AWAY from the viewer: the outer cap is
+  // the flipped one. Getting this backwards culls the whole top face and leaves only the rim.
+  cap(0, true);
+  cap(innerBase, false);
+  const oRim = segV * segU, iRim = innerBase + segV * segU;
+  for (let iu = 0; iu < segU; iu++) {
+    const iu2 = (iu + 1) % segU;
+    idx.push(oRim + iu, iRim + iu, oRim + iu2, oRim + iu2, iRim + iu, iRim + iu2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
 }
 function buildBlob({ color = 0xff8c42, zombie = false, scale = 1, gunHand = 'right', droopy = false, brain = false, blind = false, wounded = false, hands = 0 }) {
   const root = new THREE.Group();
@@ -595,30 +620,33 @@ function curvedBodyDecal(w, h, a, b, c, centerYOffset, proud = 0.015) {
 function buildFbiBlob(faceColor, big) {
   const blob = buildBlob({ color: FBI_BLACK, scale: big ? 1.4 : 1.0, hands: FBI_BLACK_DK });
   blob.mouth.visible = false; // the ski mask covers it — a visible mouth would clip through the mask
-  // the shiesty opening: a decal bent to the skull's own curve (radii 0.42/0.4/0.4, see
-  // buildBlob) instead of a separate rigid ellipsoid glued on top of it — matches game.js.
+  // the shiesty opening: a solid curved plate seated into the skull (radii 0.42/0.4/0.4, see
+  // buildBlob), not a decal painted on it — matches game.js.
   const face = new THREE.Mesh(
-    curvedBodyDecal(0.62, 0.34, 0.42, 0.4, 0.4, 0.05, 0.012),
-    new THREE.MeshBasicMaterial({ map: getFaceOvalTex(), color: faceColor, transparent: true, depthWrite: false })
+    curvedFacePlate(0.31, 0.17, 0.42, 0.4, 0.4, 0.05, 0.019),
+    new THREE.MeshLambertMaterial({ color: faceColor })
   );
   face.position.set(0, 0.05, 0);
   blob.head.add(face);
+  face.frustumCulled = false; face.castShadow = true; face.receiveShadow = true;
+  // one layer of the real lettering, sat FLUSH on the coat — polygonOffset is what buys that:
+  // it biases the decal forward in the depth test only, so the geometry can sit right on the
+  // torso's own surface (proud 0) without speckling against it. Centred on the torso's vertical
+  // middle (0.62), the widest part of the back and clear of the shoulder line (0.95).
   const back = new THREE.Mesh(
-    curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0),
-    new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false })
+    curvedBodyDecal(0.66, 0.44, 0.55, 0.62, 0.5, 0, 0),
+    new THREE.MeshBasicMaterial({ map: getFbiBackTex(), transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
   );
-  // centred on the torso's own vertical middle (0.62) — the widest part of the back and
-  // clear of the shoulder line (0.95), where it used to sit and read too high/cramped
   back.position.set(0, 0.62, 0); back.rotation.y = Math.PI; blob.wob.add(back);
-  face.frustumCulled = false; back.frustumCulled = false;
-  face.castShadow = true; face.receiveShadow = true; back.castShadow = true; back.receiveShadow = true;
-  // these two are alpha-masked decals (a soft oval cutout, transparent letterforms) — their
-  // "opacity" only ever means alpha, never the opaque-material swap setMeshGhost does for
-  // solid body parts. Tag them so the ghost slider fades their alpha but never flips
-  // .transparent off, which is what was silhouetting the FBI logo as a black rectangle
-  // at 100% on the slider (an alpha-masked map rendered as opaque paints its cleared —
-  // fully transparent, RGB-black — pixels as solid black instead of skipping them).
-  face.userData.decal = true; back.userData.decal = true;
+  back.frustumCulled = false; back.castShadow = true; back.receiveShadow = true;
+  // Only the lettering is an alpha-masked decal now: its "opacity" means alpha, never the
+  // opaque-material swap setMeshGhost does for solid body parts. Tag it so the ghost slider
+  // fades its alpha but never flips .transparent off, which is what was silhouetting the FBI
+  // logo as a black rectangle at 100% (an alpha-masked map rendered as opaque paints its
+  // cleared — fully transparent, RGB-black — pixels as solid black instead of skipping them).
+  // The face plate is ordinary solid geometry, so it ghosts like any other body part.
+  back.userData.decal = true;
   return blob;
 }
 // ═══════════════════════════════════════════════════════════════════════════
