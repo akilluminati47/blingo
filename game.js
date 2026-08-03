@@ -5532,6 +5532,30 @@ function joyGoHome() {
 if (isTouch) joyGoHome();
 addEventListener('resize', () => { if (isTouch && joyTouchId === null) joyGoHome(); });
 
+// lock the page-level rubber-band on touch. The menus/policies own their own pan
+// (touch-action:pan-y + overscroll-behavior:contain where supported), but older iOS and
+// WebViews still chain an edge swipe into the page bounce, dragging the fixed cutscene
+// video behind the translucent panels. Any drag that would overscroll past an overlay's
+// top/bottom — or that starts anywhere else — is eaten, so the backdrop never moves.
+const _gestY = new Map();
+addEventListener('touchstart', e => { for (const t of e.changedTouches) _gestY.set(t.identifier, t.clientY); }, { passive: true });
+addEventListener('touchmove', e => {
+  for (const t of e.changedTouches) {
+    const y0 = _gestY.get(t.identifier);
+    if (y0 === undefined) continue;
+    const dy = t.clientY - y0;
+    const sc = t.target && t.target.closest ? t.target.closest('.screen, #policiesscreen') : null;
+    let letRun = false;
+    if (sc) {
+      const max = sc.scrollHeight - sc.clientHeight;
+      if (dy > 1) letRun = sc.scrollTop > 0;        // pulling down — fine unless pinned at the top
+      else if (dy < -1) letRun = sc.scrollTop < max; // pulling up — fine unless pinned at the bottom
+    }
+    if (!letRun) { e.preventDefault(); break; }
+  }
+}, { passive: false });
+for (const ev of ['touchend', 'touchcancel']) addEventListener(ev, e => { for (const t of e.changedTouches) _gestY.delete(t.identifier); }, { passive: true });
+
 let camLast = { x: 0, y: 0 };
 touchLayer.addEventListener('touchstart', e => {
   initAudio();

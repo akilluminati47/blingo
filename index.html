@@ -55,11 +55,12 @@
   /* rides above the veils that black out the world (so it actually shows), below the menu
      panels that sit on top of it (#startscreen z:30, #policiesscreen z:40) — and fades out
      in lockstep with them once a run starts, so it never bleeds into actual gameplay */
-  #policybg { position:fixed; top:0; left:0; width:100vw; height:100vh; object-fit:cover; z-index:21;
+  #policybg { position:fixed; top:0; left:0; width:100vw; height:100vh; height:100lvh; object-fit:cover; z-index:21;
     opacity:0.35; pointer-events:none; transition:opacity 1.1s ease; }
-  /* sized in large-viewport units (not %/inset:0) so the element never resizes when the
+  /* sized in stable large-viewport units (not %/inset:0) so the element never resizes when the
      mobile URL bar collapses — a fixed element sized against the layout viewport would
-     re-crop object-fit:cover on every toolbar slide, making the backdrop visibly jump */
+     re-crop object-fit:cover on every toolbar slide, making the backdrop visibly jump.
+     lvh (the full toolbar-hidden height) wins where supported so it always fills the view */
   body.playing #policybg { opacity:0; }
   /* the HUD + touch controls get the same vignette-to-black treatment, but from above them
      (z above touch/hud, below the menus) — so the on-screen buttons don't ghost through the
