@@ -1274,6 +1274,7 @@ let blurMuted = false;
 function initAudio() {
   if (actx) { if (actx.state === 'suspended') actx.resume(); return; }
   actx = new AC();
+  if (actx.state === 'suspended') actx.resume(); // don't rely on auto-resume-on-gesture alone -- kick it explicitly so scheduled tones aren't racing the context's wake-up
   masterGain = actx.createGain(); masterGain.gain.value = settings.master; masterGain.connect(actx.destination);
   sfxGain = actx.createGain(); sfxGain.gain.value = settings.sfx; sfxGain.connect(masterGain);
   musicGain = actx.createGain(); musicGain.gain.value = settings.music; musicGain.connect(masterGain);
@@ -1335,9 +1336,15 @@ function tone(freq, dur, vol, type = 'sine', slideTo, dest) {
   const o = actx.createOscillator(), g = actx.createGain();
   o.type = type; o.frequency.setValueAtTime(freq, actx.currentTime);
   if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, actx.currentTime + dur);
-  g.gain.setValueAtTime(vol, actx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + dur);
-  o.connect(g); g.connect(dest || sfxDest || sfxGain); o.start(); o.stop(actx.currentTime + dur);
+  const now = actx.currentTime;
+  // a short attack ramp instead of a hard setValueAtTime jump -- an instant onset is what
+  // reads as a click/pop or a "cut off" start, especially on the very first tone right as
+  // the context wakes up. 12ms is inaudible as a fade but gives the driver a clean ramp in.
+  const fadeIn = Math.min(0.012, dur * 0.3);
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.exponentialRampToValueAtTime(vol, now + fadeIn);
+  g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+  o.connect(g); g.connect(dest || sfxDest || sfxGain); o.start(); o.stop(now + dur);
 }
 // route the next SFX call through a stereo-panned, distance-attenuated bus (3D sound)
 function busFor(x, z) {
@@ -15824,7 +15831,12 @@ function splashDismiss() {
   // the same click/keypress that opens the game is a real user gesture, so ride it
   // straight into fullscreen — Esc (or Alt+Enter / Ctrl+F) hands it back
   if (!document.fullscreenElement) document.documentElement.requestFullscreen?.()?.catch(() => {});
-  initAudio();          // the user gesture audio was waiting on — ambience rises with it
+  // unlockAudio (not just initAudio) — it inits, forces resume(), and fires the one-sample
+  // silent buffer that actually wakes iOS/Safari output. Doing that FIRST, synchronously in
+  // this same gesture, means the confirm ping and opening theme below are scheduled against
+  // an already-running context instead of racing its wake-up (which is what was chopping the
+  // start of the very first note).
+  unlockAudio();         // the user gesture audio was waiting on — ambience rises with it
   SFX.tradePing();      // the confirm ping for the input itself
   playOpeningTheme();   // six motifs in one march, at the volume the settings remember
   // the shared cutscene video was loading behind the splash — ensure it's actually
