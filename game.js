@@ -4670,11 +4670,23 @@ function buildBlingoStatue(x, z) {
 function buildPark(rng) {
   const cx = (PARK.x0 + PARK.x1) / 2, cz = (PARK.z0 + PARK.z1) / 2; // (129, -42)
   // manicured rows: leafy trees pace the two street edges at even intervals, an
-  // evergreen squaring off each corner — planted, not sprouted
-  for (let z = PARK.z0 + 3; z <= PARK.z1 - 3; z += 6) makeTree(rng, PARK.x0 + 2.5, z, townGroup, townColliders);
-  for (let x = PARK.x0 + 8; x <= PARK.x1 - 3; x += 6) makeTree(rng, x, PARK.z1 - 2.5, townGroup, townColliders);
+  // evergreen squaring off each corner — planted, not sprouted.
+  // The rows and the corners used to be laid out independently, with nothing comparing them:
+  // the first row tree and the x0/z0 corner conifer both sit on x0+2.5, half a metre apart, so
+  // they grew straight through each other. One planting list now covers the whole lawn and
+  // anything landing inside a neighbour's canopy is skipped. The corners go in FIRST — they're
+  // the deliberate accent, and a row of six can spare one far more easily than a corner can.
+  const planted = [];
+  const CANOPY = 3.2; // widest leafy ball ~1.4, widest conifer skirt ~1.7, plus a little air
+  const plant = (make, x, z) => {
+    for (const p of planted) if (Math.hypot(p.x - x, p.z - z) < CANOPY) return;
+    planted.push({ x, z });
+    make(rng, x, z, townGroup, townColliders);
+  };
   for (const [ex, ez] of [[PARK.x0 + 2.5, PARK.z0 + 2.5], [PARK.x1 - 2.5, PARK.z0 + 2.5], [PARK.x1 - 2.5, PARK.z1 - 2.5]])
-    makeEvergreen(rng, ex, ez, townGroup, townColliders);
+    plant(makeEvergreen, ex, ez);
+  for (let z = PARK.z0 + 3; z <= PARK.z1 - 3; z += 6) plant(makeTree, PARK.x0 + 2.5, z);
+  for (let x = PARK.x0 + 8; x <= PARK.x1 - 3; x += 6) plant(makeTree, x, PARK.z1 - 2.5);
   // hedge line down the two quiet edges
   for (let x = PARK.x0 + 4; x <= PARK.x1 - 2; x += 4.5) makeBush(rng, x, PARK.z0 + 1.6, townGroup, rng() < 0.3);
   for (let z = PARK.z0 + 6; z <= PARK.z1 - 4; z += 4.5) makeBush(rng, PARK.x1 - 1.6, z, townGroup, rng() < 0.3);
