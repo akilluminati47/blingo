@@ -1222,14 +1222,20 @@ function updateBulletHoles(dt) {
 // leans on it (phones start at the lightest notch) — the input code reuses it as isTouch
 const IS_TOUCH = ('ontouchstart' in window) && matchMedia('(pointer: coarse)').matches;
 // notches: integer 0..5 per setting. `settings` holds the derived engine values.
-const NOTCH_KEYS = ['master', 'sfx', 'music', 'mouseSens', 'padSens', 'drawDist', 'zombieSpawn', 'lootSpawn', 'gore', 'extraGore'];
-const notches = { master: 3, sfx: 5, music: 3, mouseSens: 3, padSens: 3, drawDist: IS_TOUCH ? 0 : 2, zombieSpawn: 2, lootSpawn: 2, gore: 3, extraGore: 0 };
+const NOTCH_KEYS = ['master', 'sfx', 'music', 'mouseSens', 'padSens', 'drawDist', 'zombieSpawn', 'lootSpawn', 'gore', 'fov'];
+const notches = { master: 3, sfx: 5, music: 3, mouseSens: 3, padSens: 3, drawDist: IS_TOUCH ? 0 : 2, zombieSpawn: 2, lootSpawn: 2, gore: 3, fov: 2 };
 try {
   const saved = JSON.parse(localStorage.getItem('blingo-notches') || '{}');
   for (const k of NOTCH_KEYS) if (Number.isInteger(saved[k]) && saved[k] >= 0 && saved[k] <= 5) notches[k] = saved[k];
 } catch (e) {}
 const SENS_MULT = [0.5, 0.5, 0.75, 1, 1.4, 1.9];
 const SPAWN_MULT = [0, 0.5, 1, 1.6, 2.2, 3];
+// third-person/hip-fire FOV per notch: notch 2 is the old hardcoded default (70, "as is"),
+// stepped 6° a side so the extremes stay usable — a wider lens pulls the framing back
+// (reads as farther out), a narrower one pulls it in (reads as closer), but neither goes
+// far enough to distort the view or crowd the HUD. Aiming/scoping still lerps away from
+// this base toward each weapon's own zoomed FOV, so sniping etc. is untouched by the notch.
+const FOV_STEPS = [58, 64, 70, 76, 82, 88];
 const settings = {};
 function syncDerived() {
   settings.master = notches.master / 5;
@@ -1243,7 +1249,12 @@ function syncDerived() {
   settings.zombieSpawn = SPAWN_MULT[notches.zombieSpawn];
   settings.lootSpawn = SPAWN_MULT[notches.lootSpawn];
   settings.gore = notches.gore / 5;
-  settings.extraGore = notches.extraGore / 5;
+  // Extra Gore used to be its own slider, only reachable once Gore was already maxed —
+  // now it's just the top of the one Gore bar: notches 4-5 layer the same "extra" intensity
+  // in on top of the base amount, so the single dial still climbs past old-"maxed" instead
+  // of capping there. (extraGoreOn(), goreAmt() etc. read this the same way they always did.)
+  settings.extraGore = clamp((notches.gore - 3) / 2, 0, 1);
+  settings.fov = FOV_STEPS[notches.fov];
   // draw distance: how many chunk rings stay live, and how far the fog lets you see.
   // fogFar (the sunny-weather cap) never exceeds the guaranteed streamed-ground radius
   // (viewR chunks = viewR*40 units in the worst standing spot), so the world is always
@@ -6511,9 +6522,9 @@ const BLOOD = 0x7a0f0f;
 // the two bosses' liveries, shared by the local spawn and the client-side ghost so a
 // joiner sees the same monster the host does
 const BOSS_PURPLE = 0x8a2be2, BOSS_CRIMSON = 0xc22626, CRIMSON_HANDS = 0x6e1414;
-// how much blood to throw: base gore slider, boosted by the unlocked extra-gore slider
+// how much blood to throw: base gore slider, boosted once the bar climbs into its "extra" top end
 function goreAmt() { return settings.gore + settings.extraGore * 1.4; }
-function extraGoreOn() { return settings.gore >= 0.999 && settings.extraGore > 0; }
+function extraGoreOn() { return settings.extraGore > 0; }
 // stretches + points a gore mesh along its launch direction — a hit thrown hard enough
 // reads as a streak, not a puff. Only worth bothering with above ~1.05x; the one caller
 // that ever hands in more is the giant's slide-hop kick, scaled off its own knockback.
@@ -7461,6 +7472,10 @@ const DEATH_ICONS = {
 function finishDeath() {
   game.state = 'dead';
   document.body.classList.remove('playing');
+  // losing 'playing' is what the menu cutscene's CSS keys off to reappear — same as the
+  // finale, pause it here so the death screen doesn't sit there decoding an unseen video
+  // the whole time someone reads their stats.
+  { const bg = document.getElementById('policybg'); if (bg && !bg.paused) bg.pause(); }
   const mins = Math.floor(game.time / 60), secs = Math.floor(game.time % 60);
   const chips = [
     ['kills', game.kills, 'kills'],
@@ -7619,7 +7634,7 @@ const SETTING_DEFS = [
   // so it takes the name of the thing they actually have in their hands
   ['mouseSens', isTouch ? 'Swipe Sens' : 'Mouse Sens'], ['padSens', 'Pad Sens'],
   ['drawDist', 'Draw Dist'], ['zombieSpawn', 'Zombies'], ['lootSpawn', 'Loot'],
-  ['gore', 'Gore'], ['extraGore', 'Extra Gore'],
+  ['gore', 'Gore'], ['fov', 'Field of View'],
 ];
 const settingsGrid = document.getElementById('settingsGrid');
 const rowEls = {};
@@ -7635,9 +7650,6 @@ function setNotch(key, n, silent) {
   // in a joined lobby the spawn dials belong to the HOST — a client's copies are read-only
   if (net.role === 'client' && HOST_NOTCH_KEYS.includes(key)) return;
   n = clamp(Math.round(n), 0, 5);
-  // Extra Gore is a continuation of Gore: dialing it up fills Gore first
-  if (key === 'extraGore' && n > 0 && notches.gore < 5) setNotch('gore', 5, true);
-  if (key === 'gore' && n < 5 && notches.extraGore > 0) { notches.extraGore = 0; refreshRow('extraGore'); }
   if (n === notches[key]) return;
   notches[key] = n;
   syncDerived();
@@ -8094,12 +8106,18 @@ function meleeChopHit() {
     return;
   }
   const hop = player.meleeChopHop;
-  const knock = 3.5 * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5);
+  // the down swing is the SAME attack as the opening swing landing a beat later — it
+  // needs the same giant-mode treatment (insta-gib base, bigger knockback, chest pop) or
+  // a giant's second hit of every armed swing quietly reverts to human-sized numbers,
+  // which is what made some weapons' combos feel like the buff wasn't sticking.
+  const knock = 3.5 * (hop ? 2.2 : 1) * (player.grounded ? 1 : 1.5) * (playerGiantOn() ? 1.8 : 1);
   for (const hit of hits) {   // the down swing sweeps the whole crowd too
     const dx = hit.pos.x - player.pos.x, dz = hit.pos.z - player.pos.z, d = Math.hypot(dx, dz) || 1;
     const wasDying = hit.state === 'dying';
-    damageZombie(hit, w.dmg * player.meleeMult * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock, { weapon: w, dist: d, isHead: false });
-    meleeMoveGib(w, hit, dx / d, dz / d, hop);
+    const base = (playerGiantOn() && !hit.isBoss) ? 400 : w.dmg;
+    damageZombie(hit, base * player.meleeMult * closeBonus(w, d) * (hop ? 2 : 1), dx / d, dz / d, knock, { weapon: w, dist: d, isHead: false });
+    if (playerGiantOn() && !hit.isBoss && !hit.netGhost && hit.state === 'dying' && !wasDying && !hit.blob.bodyGone) popChest(hit, dx / d, dz / d);
+    meleeMoveGib(w, hit, dx / d, dz / d, hop, playerGiantOn() || player.meleeMult > 1 || (selectedCousin === 'blazo' && w.id === 'axe'));
     blombaVamp(w, hit, dx / d, dz / d, wasDying);
   }
   SFX.shoot(w); rumble(...w.rmb);
@@ -13525,7 +13543,7 @@ function updateCamera(dt) {
   if (wz.id === 'sniper') zoomedFov = SNIPER_FOVS[sniperNotch]; // dynamic, notched scope zoom
   else if (wz.melee) zoomedFov = 62;
   else zoomedFov = fpv > 0.5 ? 45 : 52;
-  const baseFov = lerp(70, zoomedFov, aimT);
+  const baseFov = lerp(settings.fov, zoomedFov, aimT);
   lookFov = baseFov;
   const fov = baseFov + gc * 24;
   // The flare goes wide *and* warps the frame — both axes stretch out (y harder than x) so
