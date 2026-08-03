@@ -9867,6 +9867,16 @@ function animate() {
 // frames — the same hook the solo-multiplayer __dbg workflow leans on.
 window.__step = (n = 1, fdt = 1 / 60) => { for (let i = 0; i < n; i++) stepFrame(fdt); };
 function stepFrame(dt) {
+  // adaptive cutscene fps probe (see CUTSCENE above): wall-clock fps over the first ~1.25s
+  // of frames. Below 30 the 4K backdrop is costing the stage, so the video drops to mb. The
+  // warmup's blocking compile just pauses the count — real frame time is what we're pricing.
+  if (!CUTSCENE.decided) {
+    const p = CUTSCENE.probe;
+    if (p.t0 === 0) p.t0 = performance.now();
+    p.n++;
+    const el = performance.now() - p.t0;
+    if (el >= 1250) { CUTSCENE.decided = true; if (p.n / (el / 1000) < 30) cutsceneFallback(); }
+  }
   // the opening splash owns the frame until it's gone: it renders its own stage and
   // swallows the gamepad, so "any button" wakes the audio instead of clicking the
   // menu waiting underneath
@@ -15906,6 +15916,25 @@ const _splTagV = new THREE.Vector3();
 const splashBg = new THREE.Color(0x07080d);
 const splashHeroC = new THREE.Color();
 let splashRenderer = null, splashScene = null, splashCam = null, splashBlobs = null, splashStars = null;
+// ---- adaptive cutscene quality: the shared backdrop behind the menus is the 4K master on
+// capable devices, but a weak chip can't decode 4K at speed (seen on an old phone: the splash
+// stuttered because the video was dragging the renderer). Any low-spec machine — touch or
+// not — drops to the tiny mb encode immediately; everything else gets a real fps probe over
+// the first ~1.25s of frames: if the stage can't hold 30fps the 4K backdrop is too heavy for
+// that device too, nobody suffers the 4K they can't run.
+const CUTSCENE = { hd: 'blingo_cutscene.mp4', mb: 'blingo_cutscene_mb.mp4', decided: false, probe: { t0: 0, n: 0 } };
+function cutsceneLooksWeak() {
+  const ram = navigator.deviceMemory || 8, cores = navigator.hardwareConcurrency || 8;
+  return ram <= 4 || cores <= 4;
+}
+function cutsceneFallback() {
+  if (CUTSCENE.decided) return;
+  CUTSCENE.decided = true;
+  const bg = document.getElementById('policybg');
+  if (!bg || bg.src.endsWith(CUTSCENE.mb)) return;
+  bg.src = CUTSCENE.mb; bg.load(); bg.play().catch(() => {}); // restarts behind the splash, no visible pop
+}
+if (cutsceneLooksWeak()) cutsceneFallback(); // obvious low-enders never download the 4K at all
 {
   const starsCv = document.getElementById('splashStars');
   const starsCx = starsCv.getContext('2d');
