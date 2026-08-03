@@ -18,21 +18,17 @@
 
   (function boot() {
     if (typeof window === 'undefined') return;
-    var SDK = window.DiscordSDK && window.DiscordSDK.DiscordSDK;
-    if (!SDK) return;
     var params = new URLSearchParams(window.location.search);
-    if (!params.get('client_id') || !params.get('frame_id')) return; // not in Discord
+    // Discord injects client_id/frame_id/etc. as query params on discordsays.com —
+    // be generous here so the diagnostics panel always comes up inside the sandbox
+    var inDiscord = !!params.get('client_id') || !!params.get('frame_id') ||
+      !!params.get('instance_id') || /discordsays\.com$/i.test(window.location.hostname);
+    if (!inDiscord) return;
 
-    var sdk;
-    try {
-      sdk = new SDK(params.get('client_id'));
-    } catch (err) {
-      return;
-    }
-    window.BLINGO_DISCORD = { state: 'connecting', sdk: sdk };
+    window.BLINGO_DISCORD = {};
     state('connecting');
 
-    // tiny diagnostics panel — only ever created inside Discord, never on the web build
+    // tiny diagnostics panel — created first, before anything that can throw
     window.BLINGO_DISCORD.diag = function (msg) {
       try {
         var el = window.BLINGO_DISCORD._el;
@@ -48,6 +44,30 @@
         while (el.childNodes.length > 40) el.removeChild(el.firstChild);
       } catch (_) {}
     };
+    window.BLINGO_DISCORD.diag('host ' + window.location.hostname + window.location.search.slice(0, 160));
+
+    var SDK = window.DiscordSDK && window.DiscordSDK.DiscordSDK;
+    if (!SDK) {
+      window.BLINGO_DISCORD.diag('SDK bundle missing');
+      return;
+    }
+
+    var sdk;
+    try {
+      sdk = new SDK(params.get('client_id'));
+    } catch (err) {
+      // whatever the iframe URL lacks, the mappings below can still work —
+      // and the panel says exactly which query param (or other cause) broke it
+      window.BLINGO_DISCORD.diag('SDK ctor failed: ' + (err && err.message ? err.message : err));
+      try {
+        if (window.DiscordSDK.patchUrlMappings) {
+          window.DiscordSDK.patchUrlMappings([{ prefix: '/peer', target: '0.peerjs.com' }]);
+          window.BLINGO_DISCORD.diag('url mappings patched (fallback)');
+        }
+      } catch (_) {}
+      return;
+    }
+    window.BLINGO_DISCORD.sdk = sdk;
 
     // external links can't navigate inside Discord's sandboxed iframe — open them
     // in the user's browser instead (used by the policies page download links etc.)
