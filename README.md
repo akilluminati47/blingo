@@ -1,12 +1,13 @@
 # BLINGO
 
-An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. Play as one of six immune blob cousins of blob-kind — in your browser, or grab the app for Windows, Android, or iOS. Clear the wasteland, loot glowing crates for guns and ammo, and recruit the other cousins to fight alongside you. All platforms share the same lobbies — squad up with anyone, anywhere.
+An infinite-map, squad zombie shooter built with plain JavaScript and Three.js. Play as one of six immune blob cousins of blob-kind — in your browser, as a Discord Activity, or grab the app for Windows, Android, or iOS. Clear the wasteland, loot glowing crates for guns and ammo, and recruit the other cousins to fight alongside you. All platforms share the same lobbies — squad up with anyone, anywhere.
 
 ---
 
 ## Play
 
 - **Browser: [blingo.pages.dev](https://blingo.pages.dev)** — play instantly on any device with a web browser (desktop, phone, tablet). No downloads, no sign-ups — just pick a cousin and drop in.
+- **Discord Activity** — install into your server and launch from the app's launcher. Best enjoyed in a voice channel with your squad: [discord.com/oauth2/authorize](https://discord.com/oauth2/authorize?client_id=1533697932149264495)
 - **Cross-platform multiplayer** — browser players and standalone app players share the same lobbies. Squad up with friends regardless of how they're playing.
 - Solo or team up in Public/Private lobbies
 
