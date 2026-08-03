@@ -479,7 +479,13 @@ if(location.hash === '#policies') openPolicies();
   } catch (_) {}
   if (!data) {
     try {
-      const res = await fetch('https://api.github.com/repos/akilluminati47/blingo/releases/latest');
+      // inside Discord the sandbox can't reach api.github.com, so route through
+      // the OAuth worker (URL mapping /api -> blingo-discord-token worker)
+      const discord = window.BLINGO_DISCORD && window.BLINGO_DISCORD.sdk;
+      const url = discord
+        ? '/.proxy/api/release'
+        : 'https://api.github.com/repos/akilluminati47/blingo/releases/latest';
+      const res = await fetch(url);
       if (res.ok) data = await res.json();
     } catch (_) {}
     if (data) try { sessionStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data })); } catch (_) {}
@@ -510,4 +516,19 @@ if(location.hash === '#policies') openPolicies();
   const ghLink = document.getElementById('pdown-ghlink');
   if (ghLink && data.html_url) ghLink.href = data.html_url;
   if (data.tag_name && badgeEl) { badgeEl.hidden = false; badgeEl.textContent = data.tag_name; }
+})();
+
+// Discord blocks navigation to other sites from the activity iframe — when the
+// game is running inside Discord, every external link opens in the browser instead
+(function discordExternalLinks() {
+  const discord = window.BLINGO_DISCORD && window.BLINGO_DISCORD.sdk;
+  if (!discord) return;
+  document.addEventListener('click', function (e) {
+    const a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a) return;
+    const href = a.getAttribute('href') || '';
+    if (!href || href[0] === '#') return; // in-page links keep working
+    e.preventDefault();
+    discord.openExternal(a.href);
+  }, true);
 })();

@@ -37,6 +37,24 @@ export default {
       return json({ ok: true, service: 'blingo-discord-token' });
     }
 
+    // latest GitHub release info for the policies download section (the Discord
+    // sandbox can't reach api.github.com directly, so the page asks us instead)
+    if (request.method === 'GET' && url.pathname === '/api/release') {
+      const cacheKey = new Request('https://blingo-discord-token.akilluminati47.workers.dev/api/release');
+      const cache = caches.default;
+      const cached = await cache.match(cacheKey);
+      if (cached) return cached;
+      const gh = await fetch('https://api.github.com/repos/akilluminati47/blingo/releases/latest', {
+        headers: { 'User-Agent': 'blingo-discord-token-worker' }
+      });
+      if (!gh.ok) return json({ error: 'github fetch failed' }, 502);
+      const data = await gh.json();
+      const res = json(data);
+      res.headers.set('Cache-Control', 'public, max-age=300');
+      await cache.put(cacheKey, res.clone());
+      return res;
+    }
+
     if (url.pathname === '/api/token' && request.method === 'POST') {
       const clientId = env.DISCORD_CLIENT_ID;
       const clientSecret = env.DISCORD_CLIENT_SECRET;

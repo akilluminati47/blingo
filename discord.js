@@ -32,16 +32,24 @@
     window.BLINGO_DISCORD = { state: 'connecting', sdk: sdk };
     state('connecting');
 
+    // external links can't navigate inside Discord's sandboxed iframe — open them
+    // in the user's browser instead (used by the policies page download links etc.)
+    window.BLINGO_DISCORD.openExternal = function (url) {
+      try {
+        return sdk.commands.openExternalLink({ url: String(url) });
+      } catch (err) {
+        return Promise.resolve({ opened: false });
+      }
+    };
+
     // Discord's sandbox only allows requests to the activity origin, so anything
     // the game needs from the outside goes through the activity proxy. The portal
     // URL mappings below are REQUIRED for these to resolve:
-    //   PREFIX /github  TARGET api.github.com   (policies page: latest release,
-    //                                            Windows/Android/iOS download links)
-    //   PREFIX /peer    TARGET 0.peerjs.com     (multiplayer lobby broker)
+    //   PREFIX /peer  TARGET 0.peerjs.com     (multiplayer lobby broker)
+    // (the policies download section talks to the OAuth worker instead, via /api/release)
     try {
       if (window.DiscordSDK.patchUrlMappings) {
         window.DiscordSDK.patchUrlMappings([
-          { prefix: '/github', target: 'api.github.com' },
           { prefix: '/peer', target: '0.peerjs.com' }
         ]);
       }
