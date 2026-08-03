@@ -1,0 +1,10 @@
+name = "blingo-discord-token"
+main = "src/worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# Secrets (set via `wrangler secret put`, never commit them):
+#   DISCORD_CLIENT_ID     = your Discord application's Client ID
+#   DISCORD_CLIENT_SECRET = your Discord application's Client Secret
+#   DISCORD_REDIRECT_URI  = must match the Redirect URI in the Discord dev
+#                           portal (default: https://127.0.0.1)

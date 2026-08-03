@@ -48,6 +48,8 @@
       "game.js",
       "themes.js",
       "policies.js",
+      "discord.js",
+      "titlecard.js",
       "libs/**",
       "policies/**",
       "icons/**",
