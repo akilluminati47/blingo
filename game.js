@@ -334,7 +334,12 @@ function onRoad(x, z, margin = 0) {
 
 // shared materials/geometries
 const MAT = {};
-function mat(color, opts = {}) {
+// The bare-colour call is the hot one by a mile: every particle, blood drop and gib asks for
+// a material as it spawns, and a horde fight with extra gore burns hundreds a frame. That path
+// used to allocate a throwaway "{}" through JSON.stringify on every single lookup purely to
+// build the cache key. Same materials, same keys for the opts callers — just no garbage.
+function mat(color, opts) {
+  if (opts === undefined) return MAT[color] || (MAT[color] = new THREE.MeshLambertMaterial({ color }));
   const key = color + JSON.stringify(opts);
   if (!MAT[key]) MAT[key] = new THREE.MeshLambertMaterial({ color, ...opts });
   return MAT[key];
@@ -7361,6 +7366,7 @@ function resetGame() {
   if (jelly.beacon) { scene.remove(jelly.beacon); jelly.beacon = null; }
   if (jelly.ghost) { scene.remove(jelly.ghost.root); if (jelly.ghost.shadow) scene.remove(jelly.ghost.shadow); jelly.ghost = null; }
   jelly.skins = []; jelly.ghostMats = []; jelly.sat = 0; jelly.awake = false; jelly.wakeT = 0; jelly.statT = -1; jelly.statRows = [];
+  jelly.expandT = -1; jelly.fadeGo = false; jelly.fadeWait = 0; jelly.fadeT = 0; // the blackout latch leaves with the run too
   hideFinalStats();
   bossBarEl.classList.remove('show');
   resetCrows();
@@ -7545,6 +7551,7 @@ function finishDeath() {
   rb.classList.toggle('waithost', lobbyOver && net.role === 'client');
   document.getElementById('waitmsg').classList.add('hidden');
   document.getElementById('deathscreen').classList.remove('hidden');
+  menuFocus = 0; // the pad's ring starts on RETRY, not on whatever index the last screen left behind
 }
 
 // ---------- blood splatter overlay (extra gore) ----------
@@ -7839,7 +7846,10 @@ function padMenuNav(gp, dt, justPressed, ax, ay) {
 let menuFocus = 0, menuNavT = 0;
 function currentScreen() {
   if (!document.getElementById('vkeyboard').classList.contains('hidden')) return document.getElementById('vkeyboard');
-  for (const id of ['startscreen', 'lobbyscreen', 'hostclosed', 'deathscreen']) {
+  // 'finalstats' is grandma's tally: it only becomes a SCREEN once game.state flips to
+  // 'finale' (pollGamepad won't route here while you're still playing), so the pad can't
+  // steal the count-up — it just inherits PLAY / QUIT TO MENU the moment they're live
+  for (const id of ['startscreen', 'lobbyscreen', 'hostclosed', 'deathscreen', 'finalstats']) {
     const el = document.getElementById(id);
     if (el && !el.classList.contains('hidden')) return el;
   }
@@ -7964,6 +7974,7 @@ function openVKeyboard() {
   document.getElementById('vkeyboard').classList.remove('hidden');
   document.body.classList.add('vkopen');
   hud.crosshair.style.left = '50%'; hud.crosshair.style.top = '50%';
+  _chX = _chY = -1; // that '50%' override is ours to undo: let updateFx re-place it in px
   vkSync();
   setMenuFocus(0);
 }
@@ -12003,6 +12014,7 @@ function finishFinale() {
   const waitEl = finalStatsEl.querySelector('.fswait');
   if (waitEl) waitEl.classList.toggle('hidden', !lobbyActive || net.role !== 'client');
   finalStatsEl.classList.add('done');
+  menuFocus = 0; // same as the death screen: the pad picks up on PLAY, not a stale index
   tabTitle && tabTitle.unlock();
 }
 function restartFromFinale() {
@@ -12058,7 +12070,8 @@ function updateBossFx(dt) {
 // into the Jelly House for the family reunion, the opening medley plays, and the run's
 // tally counts itself up on screen while the party runs long enough to read it.
 const jelly = { beacon: null, ghost: null, skins: [], sat: 0, awake: false, wakeT: 0,
-  cyc: 0, gy: 0, col: new THREE.Color(0xff8c42), statRows: [], statT: -1 };
+  cyc: 0, gy: 0, col: new THREE.Color(0xff8c42), statRows: [], statT: -1,
+  expandT: -1, fadeGo: false, fadeWait: 0, fadeT: 0 }; // the tally's expand → blackout latch
 const _jelC = new THREE.Color(), _jelHSL = { h: 0, s: 0, l: 0 };
 function spawnJellyMarks() {
   if (jelly.beacon) return;                     // one light, one grandma
@@ -12160,16 +12173,22 @@ function startFinale() {
     { label: 'TIME', icon: 'survived', v: Math.round(game.time), fmt: fmtTime },
   ];
   jelly.statT = 0;
-  // read against plain dark, the same way the death screen does — not the menu's looping
-  // cutscene — so the tally is what holds your attention. Stays up until a button is
-  // chosen; nothing here auto-dismisses it.
-  deathFadeEl.style.opacity = 1;
+  jelly.expandT = 0;
+  jelly.fadeGo = false; jelly.fadeWait = 0; jelly.fadeT = 0;
+  // the party plays IN FRONT of you while the numbers climb — the black holds off until the
+  // wrapper expands (see updateJelly), so you actually watch the family celebrate instead of
+  // reading chips on an empty screen. Stays up until a button is chosen; nothing auto-dismisses.
+  deathFadeEl.style.opacity = 0;
   { const bg = document.getElementById('policybg'); if (bg && !bg.paused) bg.pause(); }
   buildFinalStats();
 }
 const finalStatsEl = document.getElementById('finalstats');
 function buildFinalStats() {
   finalStatsEl.innerHTML = '';
+  // wipe the LAST finale's end-state off the wrapper: emptying the HTML doesn't drop the
+  // classes, so a second win in the same session used to open already-expanded — title,
+  // lore and live buttons on screen before a single chip had counted
+  finalStatsEl.classList.remove('expand', 'done');
   // title slot — always takes space, fades in on finale
   const title = document.createElement('div');
   title.className = 'fstitle';
@@ -12215,7 +12234,7 @@ function buildFinalStats() {
   finalStatsEl.appendChild(wait);
   finalStatsEl.classList.remove('hidden');
 }
-function hideFinalStats() { finalStatsEl.classList.add('hidden'); finalStatsEl.innerHTML = ''; }
+function hideFinalStats() { finalStatsEl.classList.add('hidden'); finalStatsEl.classList.remove('expand', 'done'); finalStatsEl.innerHTML = ''; }
 function updateJelly(dt) {
   if (!jelly.beacon) return;
   // the finale warp on your OWN body: the splash melt — fade out where you stood, cross
@@ -12294,8 +12313,25 @@ function updateJelly(dt) {
   }
   if (jelly.expandT > 0) {
     const et = jelly.statT - jelly.expandT;
-    if (et > 0.9 && !fadeEl.classList.contains('show')) fadeEl.classList.add('show');
-    if (et > 1.8) { finishFinale(); jelly.expandT = -1; setTimeout(() => fadeEl.classList.remove('show'), 300); }
+    // the black waits for the HUD to clear: toastT runs the line, the queue holds whatever is
+    // lined up behind it, and #toast's own .3s CSS fade carries it off after that — blacking
+    // out on top of a toast cuts the last words of the run off mid-read. Latched, so a toast
+    // arriving mid-fade can't snap the screen back to bright; capped, so a chatty lobby
+    // (joins/leaves still toast) can never strand the finale short of its buttons.
+    if (!jelly.fadeGo) {
+      jelly.fadeWait = (toastT > 0 || toastQueue.length) ? 0 : jelly.fadeWait + dt;
+      // 8s of headroom: the gather's own toasts chain up (every downed cousin the jelly stands
+      // back up spends a "+25 HP" / "GOOD JELLY" / "X IS BACK UP" beat), and that whole run of
+      // them still has to finish. Past that it's a stall, not a queue — take the screen.
+      if (jelly.fadeWait > 0.35 || et > 8) { jelly.fadeGo = true; jelly.fadeT = 0; }
+    } else {
+      // the black rises UNDER the panel (#deathfade is z25, the stats are z26), so the party
+      // dims out behind the numbers. The old full-screen #fade (z40) painted OVER the stats and
+      // made the whole sheet blink out and crawl back — never cover the tally.
+      jelly.fadeT += dt;
+      deathFadeEl.style.opacity = clamp(jelly.fadeT / 1.4, 0, 1);
+      if (jelly.fadeT > 1.9) { finishFinale(); jelly.expandT = -1; }
+    }
   }
 }
 
@@ -13733,6 +13769,8 @@ function updateCompanionPeek(dt) {
   }
 }
 
+// last centre written to the crosshair/hitmarker — see the resize guard in updateFx
+let _chX = -1, _chY = -1;
 function updateFx(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
@@ -13775,13 +13813,18 @@ function updateFx(dt) {
     else t.mesh.material.opacity = t.life / 0.07 * 0.85;
   }
   if (flashT > 0) { flashT -= dt; if (flashT <= 0) flash.visible = false; }
-  // crosshair is always centred now (camera-relative aim in both third and first person)
+  // crosshair is always centred now (camera-relative aim in both third and first person), so
+  // these four only ever change on a resize/rotate — writing them every frame dirtied the style
+  // tree for nothing and forced a recalc on the one element the eye is always locked to
   const cx = innerWidth / 2;
   const cyp = innerHeight / 2;
-  hud.crosshair.style.left = cx + 'px';
-  hud.crosshair.style.top = cyp + 'px';
-  hud.hitmarker.style.left = cx + 'px';
-  hud.hitmarker.style.top = cyp + 'px';
+  if (cx !== _chX || cyp !== _chY) {
+    _chX = cx; _chY = cyp;
+    hud.crosshair.style.left = cx + 'px';
+    hud.crosshair.style.top = cyp + 'px';
+    hud.hitmarker.style.left = cx + 'px';
+    hud.hitmarker.style.top = cyp + 'px';
+  }
   // the X flares open when an enemy is under the crosshair — but only one the shot could
   // actually reach. We measure how far the aim ray travels before a wall, car/truck, roof or
   // the ground stops the round (exactly as fireHitscan does), and a target sitting past that

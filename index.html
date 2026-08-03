@@ -187,10 +187,12 @@
 
   /* grandma's tally → finale screen: the wrapper starts tight around the chips during
      the count-up, then expands its padding just before the fade to make room for the
-     title, lore line and buttons — so they fade into view without any layout jump. */
+     title, lore line and buttons — so they fade into view without any layout jump.
+     The count-up now runs over the LIVE party (the black only rises on expand), so the
+     panel carries its own dark backing to stay readable against confetti. */
   #finalstats { position:fixed; left:50%; top:52%; transform:translate(-50%,-50%); z-index:26;
     display:flex; flex-direction:column; align-items:center; pointer-events:none;
-    background:rgba(8,10,14,.62); border:1px solid rgba(255,179,71,.4); border-radius:14px;
+    background:rgba(8,10,14,.72); border:1px solid rgba(255,179,71,.4); border-radius:14px;
     padding:12px 22px; backdrop-filter:blur(5px); box-shadow:0 0 26px rgba(255,150,40,.25);
     width:min(520px, 92vw); transition:padding-top .7s ease, padding-bottom .7s ease; }
   #finalstats.hidden { display:none; }
