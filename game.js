@@ -27,6 +27,7 @@ renderer.shadowMap.enabled = true; // always on now — self-shadowing scoped to
 // which meshes cast/receive (blob bodies only — see box/ball/cyl defaults + buildBlob's
 // traverse) keeps the softness affordable without needing the hard single-tap map.
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.xr.enabled = true; // harmless until a session is actually requested (see enterVR)
 // flag the shadow pass for the curve-aware cull test (see THREE.Frustum.intersectsObject
 // below): that pass bends about the light instead of the camera, so it culls conservatively
 {
@@ -7625,6 +7626,16 @@ function startRun() {
   if (input.device === 'kbm') grabPointer();
 }
 document.getElementById('playbtn').addEventListener('click', () => { netLeave(); startRun(); });
+// ENTER VR: a session can only be requested from a real user gesture, so it hangs off the
+// button rather than starting on its own. Starts the run too — an empty menu world is a
+// disorienting thing to be dropped into wearing a headset.
+{
+  const vb = document.getElementById('vrbtn');
+  if (vb) vb.addEventListener('click', async () => {
+    if (game.state !== 'playing') { netLeave(); startRun(); }
+    await enterVR();
+  });
+}
 // shared by the solo RESPAWN button and the lobby game-over's HOST RETRY: in a lobby,
 // respawning is Player 1's call alone. A client's click just lights the waiting line
 // under the button; the host's click restarts the run for everyone, with the lobby
@@ -10040,7 +10051,14 @@ function toggleFpsMeter() {
   fpsEl.classList.toggle('show', fpsMeter.on);
   if (fpsMeter.on) fpsEl.textContent = '/FPS —'; // no reading until the first window closes
 }
+// Only ONE clock may drive stepFrame. Entering a session hands the loop to WebXR via
+// setAnimationLoop, but that does nothing to the rAF chain this function keeps re-arming for
+// itself — and the 2D page's rAF is not guaranteed to stop while a headset is presenting. Both
+// running at once would step the simulation twice a frame and play the whole game at double
+// speed. So the flat loop stands itself down here and exitVR is what starts it again.
+let flatLoopOn = true;
 function animate() {
+  if (vr.on) { flatLoopOn = false; return; } // XR owns the clock now — do not re-arm
   requestAnimationFrame(animate);
   const raw = clock.getDelta();
   if (fpsMeter.on) {
@@ -10064,6 +10082,11 @@ function stepFrame(dt) {
   else {
     const pol = document.getElementById('policiesscreen');
     if (!pol || pol.classList.contains('hidden')) pollGamepad(dt);
+    // Touch controllers are read HERE, alongside the flat pad and ahead of updatePlayer, so a
+    // stick push moves you on the same frame you pushed it. Polling it down in updateCamera
+    // (which runs after the player has already moved) would have cost a frame of lag on every
+    // input — survivable at 90Hz, but there's no reason to spend it.
+    if (vr.on) vrPollInput(dt);
   }
   // the death transition: fade runs on real time, the simulation runs on an ever-smaller
   // slice of it. The floor (5%) keeps the horde chewing right up until the black lands —
@@ -13802,7 +13825,140 @@ function updatePickups(dt) {
   }
 }
 
+// ---------- VR (WebXR) ----------
+// Head tracking without touching the 23 places that read camera.position as a WORLD position.
+// The usual three.js recipe — park the camera inside a rig Group and move the rig — would
+// break every one of them, because a parented camera's .position becomes a LOCAL head offset.
+// three.js r160's updateUserCamera has a second path: with `camera.parent === null` it copies
+// the XR head's matrixWorld straight in, so .position stays world-space. The camera here has
+// never had a parent, so locomotion goes through an OFFSET REFERENCE SPACE instead of a rig,
+// and curveDrop / busFor / the cull test / every aim ray keep working untouched.
+const vr = {
+  on: false, session: null, baseRef: null, supported: false,
+  yaw: 0,            // snap-turn heading, folded into the reference-space offset
+  snapHeld: false,   // right stick must recentre before it'll turn again
+  swapHeld: false,   // same one-shot latch for the weapon-cycle button
+};
+const VR_SNAP = Math.PI / 6;      // 30° a click: small enough to keep bearings, big enough to skip the smear
+const _vrQ = new THREE.Quaternion(), _vrT = new THREE.Vector3(), _vrUp = new THREE.Vector3(0, 1, 0);
+if (navigator.xr && navigator.xr.isSessionSupported) {
+  navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+    vr.supported = !!ok;
+    const b = document.getElementById('vrbtn');
+    if (b && ok) b.classList.add('show');
+  }).catch(() => {});
+}
+// Re-anchor the XR origin so the headset reports poses in WORLD space. getOffsetReferenceSpace
+// takes the new origin expressed IN the old space and reports poses through its inverse, so to
+// land a room-space head at R on world point P rotated by `yaw`, the offset is (Q, -(Q·P)) with
+// Q the INVERSE of the turn. Rebuilt every frame: the player is walking, so the anchor moves.
+function vrSyncOrigin() {
+  if (!vr.on || !vr.baseRef) return;
+  _vrQ.setFromAxisAngle(_vrUp, -vr.yaw);
+  _vrT.set(player.pos.x, player.pos.y, player.pos.z).applyQuaternion(_vrQ).negate();
+  try {
+    renderer.xr.setReferenceSpace(vr.baseRef.getOffsetReferenceSpace(
+      new XRRigidTransform({ x: _vrT.x, y: _vrT.y, z: _vrT.z },
+                           { x: _vrQ.x, y: _vrQ.y, z: _vrQ.z, w: _vrQ.w })));
+  } catch (e) {}
+}
+// Touch controllers drive the run: left stick walks (relative to where you're LOOKING, which is
+// the only heading that doesn't fight your own head), right stick snap-turns, triggers shoot and
+// aim, and the face buttons keep the flat game's meanings so muscle memory carries over.
+function vrPollInput(dt) {
+  if (!vr.session) return;
+  let mx = 0, my = 0, turn = 0, shoot = false, aim = false;
+  for (const src of vr.session.inputSources) {
+    const gp = src.gamepad;
+    if (!gp) continue;
+    const ax = gp.axes || [];
+    // Touch reports the stick on axes 2/3 (0/1 are the unused trackpad slots)
+    const sx = ax.length > 2 ? ax[2] : ax[0] || 0, sy = ax.length > 3 ? ax[3] : ax[1] || 0;
+    const dz = v => Math.abs(v) < 0.18 ? 0 : v;
+    const btn = i => gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5);
+    if (src.handedness === 'left') {
+      mx = dz(sx); my = dz(sy);
+      if (btn(4)) input.jump = true;          // X
+      if (btn(5)) input.interact = true;      // Y
+      input.interactHeldPad = btn(5);
+    } else {
+      turn = dz(sx);
+      shoot = btn(0);                          // trigger
+      aim = btn(1);                            // grip
+      if (btn(4)) input.reload = true;        // A
+      if (btn(5) && !vr.swapHeld) cycleWeapon(1); // B
+      vr.swapHeld = btn(5);
+    }
+  }
+  // updatePlayer already walks relative to player.camYaw, and camYaw is pinned to the HEAD's
+  // world heading below — so the sticks can be handed straight over and "forward" comes out
+  // wherever you're actually looking, not wherever the snap-turn happens to have left the room.
+  input.moveX = mx; input.moveY = my;
+  input.device = 'quest';
+  // right stick snap turn — one click per push, recentre to re-arm
+  if (Math.abs(turn) > 0.7) {
+    if (!vr.snapHeld) { vr.yaw += Math.sign(turn) * VR_SNAP; vr.snapHeld = true; }
+  } else if (Math.abs(turn) < 0.3) vr.snapHeld = false;
+  input.shootGamepad = shoot;
+  input.aimPad = aim;
+}
+// the head's own world heading, straight off its matrix — this is what "forward" means to
+// someone wearing the thing, and it already carries the snap turn (the reference space applied
+// it before the pose was ever reported)
+// Matrix4 is column-major, so elements[8..10] is the camera's local +Z in world space, and a
+// camera looks down its own -Z. The game's own convention is fwd = (-sin(cy)cos(cp), sin(cp),
+// -cos(cy)cos(cp)), so -fwd.x = e8 = sin(cy)cos(cp) and -fwd.z = e10 = cos(cy)cos(cp) — which
+// makes it atan2(e8, e10). Taking atan2 of the forward vector instead lands 180° out.
+function vrHeadYaw() {
+  const e = camera.matrixWorld.elements;
+  return Math.atan2(e[8], e[10]);
+}
+async function enterVR() {
+  if (!vr.supported || vr.on) return;
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor'],
+    });
+    vr.session = session;
+    renderer.xr.setReferenceSpaceType('local-floor');
+    await renderer.xr.setSession(session);
+    vr.baseRef = renderer.xr.getReferenceSpace();
+    vr.on = true;
+    vr.yaw = player.camYaw;                 // start facing wherever the flat camera was
+    document.body.classList.add('invr');    // the DOM HUD can't be seen in a headset
+    session.addEventListener('end', exitVR, { once: true });
+    // WebXR owns the frame clock while presenting — rAF never fires in a session
+    renderer.setAnimationLoop(() => stepFrame(Math.min(clock.getDelta(), 0.05)));
+  } catch (e) { console.warn('VR session refused:', e); }
+}
+function exitVR() {
+  vr.on = false; vr.session = null; vr.baseRef = null;
+  document.body.classList.remove('invr');
+  renderer.setAnimationLoop(null);
+  // hand the clock back — but only if the flat loop actually stood down, or a half-finished
+  // enterVR would leave two rAF chains racing each other
+  if (!flatLoopOn) { flatLoopOn = true; clock.getDelta(); requestAnimationFrame(animate); }
+  player.camYaw = vr.yaw;                   // keep the heading you were facing in there
+}
+function toggleVR() { if (vr.on) { try { vr.session.end(); } catch (e) {} } else enterVR(); }
+
 function updateCamera(dt) {
+  // In a headset the head IS the camera: three.js has already written the tracked pose into
+  // camera.position/quaternion by the time anything reads it, so the whole over-the-shoulder
+  // rig below — the shoulder offset, the ground clamp, the flare, the shake — has to stay out
+  // of the way. Anything that yanks a VR camera around independently of the neck it's attached
+  // to is how you make people sick. All that's left is re-anchoring the world to the player.
+  if (vr.on) {
+    // everything downstream — walking, aiming, which way the blob faces, where a squad order
+    // points — reads camYaw, so pin it to where the head is actually looking
+    player.camYaw = vrHeadYaw();
+    player.camPitch = Math.asin(clamp(-camera.matrixWorld.elements[9], -1, 1));
+    vrSyncOrigin();
+    skyDome.position.copy(camera.position);
+    cloudDome.position.copy(camera.position);
+    updateCelestial(dt);
+    return;
+  }
   const cy = player.camYaw, cp = player.camPitch;
   const aimT = player.aimT || 0;
   const fpv = player.fpvT || 0;   // 0 = third-person .. 1 = first-person
@@ -15979,6 +16135,7 @@ window.__dbg = {
   jellyBar, chiliBar, lootJelly, lootChili, grantJelly, grantChili, eatChili, jellyRevive, goDown, hurtPlayer, JELLY, JELLY_G, jelly,
   updateGiant, giantStomp, openCrate, allCrates,
   bluga, prestige, spawnBlugaFinal, startCameo, spawnFbi, updateBluga, FOUNTAIN, CAMEO_SPOT,
+  vr, enterVR, exitVR, toggleVR, vrHeadYaw, // headset state + session control: unreachable to debug otherwise
   spawnJellyMarks, grandmaWake, findNearGrandma,
   randomLayout, defaultLayout, applyLayout, rebuildTownWorld, PARK, CHURCHYARD, CHURCH, GRAVEYARD, COUSIN_HOMES, TOWN_RECTS, TOWN_BOUND, LAYOUT, scatterCousins,
   // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad

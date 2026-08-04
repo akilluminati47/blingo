@@ -342,6 +342,18 @@
     font-size:16px; font-weight:700; letter-spacing:2px; padding:13px 30px; transition:color .12s; }
   .modebtn:first-child { border-right:2px solid var(--hero); }
   .modebtn:hover, .modebtn.focus { background:var(--hero); color:#10131a; }
+  /* ENTER VR: hidden until navigator.xr actually answers yes for immersive-vr, so a phone or a
+     desktop without a headset never sees a button that can't do anything. */
+  #vrbtn { display:none; pointer-events:auto; cursor:pointer; margin:14px auto 0;
+    background:transparent; border:2px solid #6fd8ff; border-radius:14px; color:#6fd8ff;
+    font-size:14px; font-weight:700; letter-spacing:2px; padding:11px 24px; transition:background .12s, color .12s; }
+  #vrbtn.show { display:block; }
+  #vrbtn:hover, #vrbtn.focus { background:#6fd8ff; color:#10131a; }
+  /* in a headset the DOM layer is simply not on screen — the canvas is the whole world — so the
+     flat HUD, the touch pad and the menus are hidden outright rather than left painting into a
+     surface nobody is looking at. */
+  body.invr #hud, body.invr #touchlayer, body.invr .screen, body.invr #controls,
+  body.invr #bottomleft, body.invr #bottomright, body.invr #topbar { display:none !important; }
   /* discreet link to the policies + live cousin-theme player, sat in-flow as a footer chin:
      margin-top:auto pins it to the very bottom of the picker column (below the mode buttons),
      with a hairline rule above it. Killing #startscreen's bottom spacer lets it sit flush at the
@@ -956,6 +968,7 @@
     <button class="modebtn" id="playbtn">SINGLE PLAYER</button>
     <button class="modebtn" id="mpbtn">MULTIPLAYER</button>
   </div>
+  <button id="vrbtn">▸ ENTER VR</button>
   <p id="policieslink"><a href="#policies" id="policiesopen">Cousin Themes ♪ · Terms &amp; Privacy</a></p>
 </div>
 
