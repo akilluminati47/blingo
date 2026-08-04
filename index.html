@@ -138,6 +138,14 @@
   #gianttimer.lower { top:calc(56px + env(safe-area-inset-top)); }
   #gianttimer b { font-size:18px; line-height:1; color:#ff4030; }
   #gianttimer span { font-size:9px; letter-spacing:2px; color:#ff4030; opacity:.65; margin-top:2px; }
+  /* FPS readout, toggled with "/". Parks BELOW the whole top-right stack: the quota sits at
+     10px and the chili countdown drops to 56px when both are up, so 100px clears either
+     combination without ever having to know which of them is currently showing. */
+  #fpsmeter { position:absolute; top:calc(100px + env(safe-area-inset-top)); right:calc(14px + env(safe-area-inset-right));
+    display:none; pointer-events:none; color:var(--hero); font-size:13px; font-weight:700; letter-spacing:2px;
+    font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    text-shadow:0 2px 6px rgba(0,0,0,.7); }
+  #fpsmeter.show { display:block; }
   #cousins b { color:#6fd8ff !important; }
 
   #bottomleft { position:absolute; left:calc(14px + env(safe-area-inset-left)); bottom:calc(14px + env(safe-area-inset-bottom)); color:#fff; }
@@ -881,6 +889,7 @@
 
   <div id="quota"><b>0/0</b><span>REMAIN</span></div>
   <div id="gianttimer"><b>0:00</b><span>RED'S CHILI</span></div>
+  <div id="fpsmeter">FPS 0</div>
   <div id="topbar">
     <div class="stat" id="kills"><b>0</b><span>Kills</span></div>
     <div class="stat" id="timer"><b>0:00</b><span>Survived</span></div>
@@ -998,7 +1007,8 @@
         <ul>
           <li>BLINGO, the name, the six cousins (Blingo, Blazo, Blizzy, Blomba, Bloopy, Blondie), Bluga, the story, artwork, music, and all code is an <b>original work created and owned by <a href="https://github.com/akilluminati47" target="_blank" rel="noopener noreferrer">akilluminati47</a> (AK &amp; Co.)</b>. Copyright &copy; 2026, all rights reserved.</li>
           <li>The <b>source code is visible for transparency</b>, but it is not open source: please don't copy, rehost, resell, or build derivative games from it without written permission.</li>
-          <li>The official ways to play are <b>this website</b> (<a href="https://blingo.pages.dev" target="_blank" rel="noopener noreferrer">blingo.pages.dev</a>) and the <b>standalone builds</b> on <a href="https://github.com/akilluminati47/blingo/releases/latest" target="_blank" rel="noopener noreferrer">GitHub Releases</a>. Anything else claiming to be BLINGO isn't from us.</li>
+          <li>The official ways to play are <b>this website</b> (<a href="https://blingo.pages.dev" target="_blank" rel="noopener noreferrer">blingo.pages.dev</a>), the <b>standalone builds</b> on <a href="https://github.com/akilluminati47/blingo/releases/latest" target="_blank" rel="noopener noreferrer">GitHub Releases</a>, and as a <b>Discord Activity</b> you can <a href="https://discord.com/oauth2/authorize?client_id=1533697932149264495" target="_blank" rel="noopener noreferrer">add to your own server</a>. Anything else claiming to be BLINGO isn't from us.</li>
+          <li>The <b>BLINGO'S BLOCK</b> Discord server (<a href="https://discord.gg/dTXMc9ECmG" target="_blank" rel="noopener noreferrer">discord.gg/dTXMc9ECmG</a>) is the official community. Playing the Activity runs the game inside Discord's own embedded player, so the same peer-to-peer rules above apply: <b>no accounts, no analytics, nothing stored on our side</b> &mdash; Discord's own <a href="https://discord.com/privacy" target="_blank" rel="noopener noreferrer">privacy policy</a> and <a href="https://discord.com/terms" target="_blank" rel="noopener noreferrer">terms</a> cover whatever Discord itself sees while you're in there.</li>
         </ul>
       </div>
 

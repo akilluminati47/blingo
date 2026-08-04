@@ -1442,6 +1442,17 @@ function busFor(x, z) {
   return g;
 }
 function play3d(x, z, fn) { if (!actx) return; sfxDest = busFor(x, z); fn(); sfxDest = null; }
+// A sound that belongs to somebody ELSE's hands: a client opening a crate, lifting a ground
+// drop, cracking a supply chute. The host runs those events because it owns the world, but it
+// has no business HEARING them ring out flat and full-volume from the middle of its own head
+// every time a teammate two blocks away picks something up. Pan it to where it actually
+// happened, and past earshot don't play it at all — busFor's gain floors at 0.05 rather than
+// zero, so distance alone never quite shuts a sound up.
+const NET_EARSHOT = 30;
+function playRemote(x, z, fn) {
+  if (Math.hypot(x - player.pos.x, z - player.pos.z) > NET_EARSHOT) return;
+  play3d(x, z, fn);
+}
 const SFX = {
   shoot(w) {
     if (w.id === 'shotgun') { noiseBurst(0.28, 900, 0.9); tone(90, 0.15, 0.4, 'square', 40); }
@@ -4977,15 +4988,21 @@ function buildChiliStand(rng) {
   }
   const pegTop = ridgeTop + 0.6; // where the sign's underside should land
   const sign = textPlate("RED'S CHILI", 6.8, 1.7, '#421511', '#ffe2b0');
-  sign.position.set(sx, pegTop + 0.85, sz);
+  // Centred ON the pegs, not hung off the back of them. textPlate's box is built with its BACK
+  // face on the origin (geo.translate(0,0,SIGN_D/2)) so a wall-mounted plate protrudes forward
+  // out of its wall — but this one is free-standing on two posts, and that same offset left the
+  // whole board sitting a half-depth behind the posts holding it up. Push it back by half its
+  // depth so the board's own centreline lands on the pegs' centreline (rotation.y = PI, so
+  // local +z runs toward world -z and the offset is +).
+  sign.position.set(sx, pegTop + 0.85, sz + SIGN_D / 2);
   sign.rotation.y = Math.PI; // face the main-street crossing the park sign points from
   townGroup.add(sign);
   // one board now does both reads: it's as deep as the pegs holding it up and lettered on both
-  // broad faces, so the old second plate stacked a hair behind it is no longer needed
-  // the plate itself is solid: a narrow catwalk top to crown, set a hair behind the pegs
-  // (now that pegs sit on the centerline too) so a blob standing on them never gets
-  // shoved off by the plate's box
-  townColliders.push(aabb(sx, sz + 0.3, 3.4, 0.1, 1.7, pegTop));
+  // broad faces, so the old second plate stacked a hair behind it is no longer needed.
+  // The plate itself is solid — a narrow catwalk top to crown for slide-hoppers — so its box
+  // rides exactly where the board now is, instead of the sliver of empty air behind where the
+  // board used to hang.
+  townColliders.push(aabb(sx, sz, 3.4, SIGN_D / 2, 1.7, pegTop));
 }
 
 // ---------- the Blob Lounge ----------
@@ -5456,6 +5473,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') input.reload = true;
   if ((e.code === 'KeyQ' || e.code === 'KeyF') && !e.repeat) cycleWeapon(1);
   if (e.code === 'KeyV' && !e.repeat) toggleFPV();
+  if (e.code === 'Slash' && !e.repeat) { e.preventDefault(); toggleFpsMeter(); }
   if ((e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyC') && !e.repeat) input.slide = true;
   if (e.code === 'Space') { input.jump = true; e.preventDefault(); }
   if (e.code === 'Tab') { e.preventDefault(); if (!e.repeat) ewOpen('kbm'); }
@@ -5742,8 +5760,12 @@ touchLayer.addEventListener('touchcancel', touchEnd);
 addEventListener('gamepadconnected', e => {
   gpIndex = e.gamepad.index;
   const id = e.gamepad.id;
-  // Nintendo's vendor id is 057e (Switch Pro pad + Joy-Cons); fall back to name matches
+  // Nintendo's vendor id is 057e (Switch Pro pad + Joy-Cons); fall back to name matches.
+  // Meta's is 2833 — the Quest browser reports its Touch controllers as gamepads (and WebXR
+  // profiles name them "oculus-touch" / "meta-quest-touch-plus"), so they get their own glyphs
+  // rather than being labelled an Xbox pad by the catch-all below.
   input.gamepadKind =
+    /2833|oculus|meta[- ]?quest|quest[- ]?touch/i.test(id) ? 'quest' :
     /057e|switch|joy-?con|nintendo/i.test(id) ? 'switch' :
     /dual|playstation|054c|ps4|ps5/i.test(id) ? 'ps' : 'xbox';
 });
@@ -5794,6 +5816,15 @@ function pollGamepad(dt) {
   // so you can slide all the way to min/max in one hold instead of tapping repeatedly
   if (pressed(15)) zoomAnalog(-ZOOM_PAD_RATE * dt); // d-pad right: zoom in
   if (pressed(14)) zoomAnalog(ZOOM_PAD_RATE * dt);  // d-pad left: zoom out
+  // Quest Touch has no d-pad at all, so those two are dead buttons on it and the third-person
+  // zoom would simply be unreachable. The grips (4/5) are the natural stand-in — they're the
+  // only pair this pad leaves unused, and squeezing right/left to push/pull the camera reads
+  // the same way the d-pad does. Bumpers are 4/5 on every other pad, which is why this is
+  // gated on the Quest: elsewhere they're free for whatever wants them next.
+  if (input.gamepadKind === 'quest') {
+    if (pressed(5)) zoomAnalog(-ZOOM_PAD_RATE * dt); // right grip: zoom in
+    if (pressed(4)) zoomAnalog(ZOOM_PAD_RATE * dt);  // left grip: zoom out
+  }
   if (justPressed(0)) input.jump = true;
   if (justPressed(1)) input.reload = true;
   if (justPressed(2)) input.interact = true;
@@ -5837,6 +5868,7 @@ const ICON = {
   xbox: p => `icons/xbox/${p}.png`,
   ps: p => `icons/ps/${p}.png`,
   switch: p => `icons/switch/${p}.png`,
+  quest: p => `icons/quest/${p}.png`,
   touch: p => `icons/touch/${p}.png`,
 };
 const CONTROL_SCHEMES = {
@@ -5919,6 +5951,31 @@ const CONTROL_SCHEMES = {
       [['switch', 'switch_stick_side_r'], 'Slide (R3)'],
     ],
     prompt: ['switch', 'switch_button_y'],
+  },
+  quest: {
+    name: 'Meta Quest Touch',
+    // Quest Touch splits the face buttons across two controllers — A/B live under the right
+    // thumb, X/Y under the left — but the standard gamepad mapping the browser hands us is the
+    // same 0..3 every other pad uses, so each action keeps its index and just wears the label
+    // that's physically under the thumb pressing it. The one real difference is the D-PAD: the
+    // Touch controllers haven't got one, so camera zoom moves onto the grips (buttons 4/5),
+    // which nothing else on this pad was using. See pollGamepad's questPad branch.
+    rows: [
+      [['quest', 'quest_stick_l'], 'Move'],
+      [['quest', 'quest_stick_r'], 'Look'],
+      [['quest', 'quest_trigger_right'], 'Shoot'],
+      [['quest', 'quest_trigger_left'], 'Zoom / ADS'],
+      [['quest', 'quest_button_y'], 'Swap weapon'],
+      [['quest', 'quest_button_meta'], 'First / Third view'],
+      [['quest', 'quest_grip_left'], 'Camera Zoom (Third)'],
+      [['quest', 'quest_button_menu'], 'Pause'],
+      [['quest', 'quest_button_x'], 'Interact'],
+      [['quest', 'quest_button_b'], 'Reload'],
+      [['quest', 'quest_button_a'], 'Jump'],
+      [['quest', 'quest_stick_side_l'], 'Sprint (L3)'],
+      [['quest', 'quest_stick_side_r'], 'Slide (R3)'],
+    ],
+    prompt: ['quest', 'quest_button_x'],
   },
   touch: {
     name: 'Touch',
@@ -9971,9 +10028,29 @@ let camDist = 4.9;
 let lensStretched = false, lookFov = 70;
 let nearCrate = null, nearRecruit = null, nearChuteCrate = null;
 
+// "/" FPS readout. Sampled in animate() rather than stepFrame() on purpose: stepFrame is also
+// driven by hand (window.__step, the cutscene director) at a fixed dt, and counting those would
+// report the pump rate instead of the real one. Averaged over a half-second window — a
+// per-frame reciprocal jitters far too hard to read.
+const fpsEl = document.getElementById('fpsmeter');
+const fpsMeter = { on: false, frames: 0, t: 0 };
+function toggleFpsMeter() {
+  fpsMeter.on = !fpsMeter.on;
+  fpsMeter.frames = 0; fpsMeter.t = 0;
+  fpsEl.classList.toggle('show', fpsMeter.on);
+  if (fpsMeter.on) fpsEl.textContent = 'FPS —'; // no reading until the first window closes
+}
 function animate() {
   requestAnimationFrame(animate);
-  stepFrame(Math.min(clock.getDelta(), 0.05));
+  const raw = clock.getDelta();
+  if (fpsMeter.on) {
+    fpsMeter.frames++; fpsMeter.t += raw;
+    if (fpsMeter.t >= 0.5) {
+      fpsEl.textContent = 'FPS ' + Math.round(fpsMeter.frames / fpsMeter.t);
+      fpsMeter.frames = 0; fpsMeter.t = 0;
+    }
+  }
+  stepFrame(Math.min(raw, 0.05));
 }
 // one simulated+rendered frame. Split out of animate so a frozen tab (hidden panes
 // stop rAF dead) can still be driven by hand: window.__step(n) pumps n fixed-dt
@@ -14394,6 +14471,7 @@ function wireHostConn(conn) {
         if (Math.hypot(pc.pos.x - p.pos.x, pc.pos.z - p.pos.z) < 3.4) {
           scene.remove(p.mesh);
           pickups.splice(pi, 1);
+          playRemote(p.pos.x, p.pos.z, () => SFX.pickup()); // heard from where they lifted it, if at all
           try { conn.send({ t: 'pkGive', k: p.kind === 'ammo' ? 0 : p.kind === 'medkit' ? 1 : 2 }); } catch (e) {}
         }
       }
@@ -14402,7 +14480,7 @@ function wireHostConn(conn) {
       if (cr2) {
         cr2.opened = true; cr2.glow.visible = false; cr2.trim.visible = false;
         game.cratesOpened++; hud.crates.textContent = game.cratesOpened;
-        SFX.crate();
+        playRemote(cr2.pos.x, cr2.pos.z, () => SFX.crate()); // their crate, over there — not in our ear
         const loot = rollCrateLoot(Math.random, cr2);
         const code = loot === 'sniperammo' ? 'sa' : loot === 'ammo' ? 'am' : loot === 'medkit' ? 'hp' : loot;
         try { conn.send({ t: 'crateGive', k: code }); } catch(e) {}
@@ -14415,7 +14493,7 @@ function wireHostConn(conn) {
       const pc3 = cousinByConn(conn);
       if (cr3 && pc3 && Math.hypot(pc3.pos.x - cr3.pos.x, pc3.pos.z - cr3.pos.z) < 4) {
         cr3.opened = true; cr3.trim.material.emissiveIntensity = 0;
-        play3d(cr3.pos.x, cr3.pos.z, () => SFX.crate());
+        playRemote(cr3.pos.x, cr3.pos.z, () => SFX.crate());
         spawnParticles(cr3.pos.x, cr3.pos.y + 1.2, cr3.pos.z, 0xffdc78, 18, 4, 0.9);
         try { conn.send({ t: 'chuteGive', w: cr3.weapon }); } catch(e) {}
       }

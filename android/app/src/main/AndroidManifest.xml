@@ -38,4 +38,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Controllers. GAMEPAD is what tells Android (and the Play/Quest store listings) the
+         game is pad-playable; required="false" keeps it installable on a plain touch phone,
+         which is still the main way this gets played. TOUCHSCREEN is likewise not required,
+         because a Quest headset hasn't got one and would otherwise be filtered out. -->
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 </manifest>
