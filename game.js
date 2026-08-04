@@ -10038,7 +10038,7 @@ function toggleFpsMeter() {
   fpsMeter.on = !fpsMeter.on;
   fpsMeter.frames = 0; fpsMeter.t = 0;
   fpsEl.classList.toggle('show', fpsMeter.on);
-  if (fpsMeter.on) fpsEl.textContent = 'FPS —'; // no reading until the first window closes
+  if (fpsMeter.on) fpsEl.textContent = '/FPS —'; // no reading until the first window closes
 }
 function animate() {
   requestAnimationFrame(animate);
@@ -10046,7 +10046,7 @@ function animate() {
   if (fpsMeter.on) {
     fpsMeter.frames++; fpsMeter.t += raw;
     if (fpsMeter.t >= 0.5) {
-      fpsEl.textContent = 'FPS ' + Math.round(fpsMeter.frames / fpsMeter.t);
+      fpsEl.textContent = '/FPS ' + Math.round(fpsMeter.frames / fpsMeter.t);
       fpsMeter.frames = 0; fpsMeter.t = 0;
     }
   }
