@@ -13913,6 +13913,122 @@ function vrHeadYaw() {
   const e = camera.matrixWorld.elements;
   return Math.atan2(e[8], e[10]);
 }
+// ---------- the VR HUD: a panel on the back of your left hand ----------
+// The flat HUD is DOM and there is no DOM in a headset, so health/ammo had nowhere to live.
+// This goes on the LEFT GRIP rather than pinned to the face: a panel welded to the camera is
+// the classic VR mistake — it sits at a fixed focal depth your eyes can't rest on, you can
+// never look away from it, and it fights every head movement. On the wrist you glance down at
+// it like a watch and otherwise forget it's there. If the left hand isn't tracked (hand
+// tracking, sleeping controller) it falls back to floating in the low periphery instead.
+const VRHUD_W = 512, VRHUD_H = 256;
+const vrHud = { mesh: null, tex: null, ctx: null, sig: '', gripIndex: -1, grips: [] };
+function drawVrHud(ctx) {
+  const hpFrac = clamp(player.hp / Math.max(player.maxHp, 1), 0, 1);
+  ctx.clearRect(0, 0, VRHUD_W, VRHUD_H);
+  // slab
+  ctx.fillStyle = 'rgba(8,10,14,0.86)';
+  ctx.strokeStyle = 'rgba(255,140,66,0.55)'; ctx.lineWidth = 5;
+  ctx.beginPath(); ctx.roundRect(6, 6, VRHUD_W - 12, VRHUD_H - 12, 22); ctx.fill(); ctx.stroke();
+  // health: the bar carries the read, the number is the detail
+  ctx.fillStyle = 'rgba(255,255,255,0.16)';
+  ctx.beginPath(); ctx.roundRect(28, 34, VRHUD_W - 56, 34, 17); ctx.fill();
+  const hpCol = hpFrac > 0.5 ? '#5aff6a' : hpFrac > 0.22 ? '#ffd24a' : '#ff4030';
+  const barW = Math.max(34, (VRHUD_W - 56) * hpFrac);
+  ctx.fillStyle = hpCol;
+  ctx.beginPath(); ctx.roundRect(28, 34, barW, 34, 17); ctx.fill();
+  // the label goes INSIDE the fill in dark ink, but only while the fill is long enough to hold
+  // it. On a nearly-empty bar it used to spill off the end and land dark-on-dark — unreadable
+  // at exactly the moment the number matters most — so there it moves outside and goes white.
+  const hpTxt = Math.max(0, Math.round(player.hp)) + ' HP';
+  ctx.font = `bold 22px ${SIGN_FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  const fitsInside = ctx.measureText(hpTxt).width + 28 <= barW;
+  ctx.fillStyle = fitsInside ? '#0a0c10' : '#fff';
+  ctx.fillText(hpTxt, fitsInside ? 42 : 28 + barW + 12, 52);
+  // weapon + ammo
+  const w = player.weapon;
+  const unlim = player.fbiOutfit && (w.id === 'pistol' || w.id === 'smg');
+  const unlimRes = unlim || w.id === 'rpg' || w.id === 'pumpshotgun';
+  const clip = w.consumable ? '1' : w.melee ? '∞' : (unlim ? '∞' : String(player.clip));
+  const res = (w.consumable || w.melee || unlim) ? '' : ' / ' + (unlimRes ? '∞' : (reserves[w.id] | 0));
+  ctx.textAlign = 'left'; ctx.fillStyle = '#ff8c42';
+  // "PUMP SHOTGUN (MOSSBERG)" is long enough to run clean through the kills column, so the
+  // name shrinks to fit the space it actually has rather than overrunning it
+  const nameMax = VRHUD_W - 28 - 120;
+  let namePx = 26;
+  ctx.font = `bold ${namePx}px ${SIGN_FONT}`;
+  while (namePx > 14 && ctx.measureText(w.name.toUpperCase()).width > nameMax) {
+    namePx -= 1; ctx.font = `bold ${namePx}px ${SIGN_FONT}`;
+  }
+  ctx.fillText(w.name.toUpperCase(), 28, 112);
+  ctx.fillStyle = '#fff'; ctx.font = `bold 58px ${SIGN_FONT}`;
+  ctx.fillText(clip, 28, 168);
+  const cw = ctx.measureText(clip).width;
+  ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = `bold 28px ${SIGN_FONT}`;
+  ctx.fillText(res, 28 + cw + 6, 174);
+  // run stats down the right
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#ff8c42'; ctx.font = `bold 34px ${SIGN_FONT}`;
+  ctx.fillText(String(game.kills), VRHUD_W - 28, 116);
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `bold 16px ${SIGN_FONT}`;
+  ctx.fillText('KILLS', VRHUD_W - 28, 142);
+  ctx.fillStyle = '#fff'; ctx.font = `bold 26px ${SIGN_FONT}`;
+  ctx.fillText(fmtTime(game.time), VRHUD_W - 28, 178);
+  // downed is the one state worth shouting about
+  if (player.downed) {
+    ctx.textAlign = 'center'; ctx.fillStyle = '#ff4030'; ctx.font = `bold 30px ${SIGN_FONT}`;
+    ctx.fillText('DOWNED', VRHUD_W / 2, 220);
+  }
+}
+function buildVrHud() {
+  if (vrHud.mesh) return;
+  vrHud.tex = canvasTex(VRHUD_W, VRHUD_H, drawVrHud);
+  vrHud.ctx = vrHud.tex.image.getContext('2d');
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.17, 0.085),
+    new THREE.MeshBasicMaterial({ map: vrHud.tex, transparent: true, depthWrite: false })
+  );
+  m.renderOrder = 30;          // reads over anything it happens to clip into
+  m.frustumCulled = false;     // it lives on your hand; never cull it
+  m.visible = false;
+  vrHud.mesh = m;
+  scene.add(m);
+}
+// which three.js controller slot is the LEFT hand — the index isn't stable across sessions or
+// across a controller being put down and picked back up, so it's re-read whenever the input
+// sources change rather than assumed to be 0.
+function vrPickHudHand() {
+  vrHud.gripIndex = -1;
+  if (!vr.session) return;
+  const list = vr.session.inputSources;
+  for (let i = 0; i < list.length; i++) if (list[i].handedness === 'left') { vrHud.gripIndex = i; return; }
+  for (let i = 0; i < list.length; i++) if (list[i].handedness === 'right') { vrHud.gripIndex = i; return; }
+}
+const _vrHudPos = new THREE.Vector3(), _vrHudQ = new THREE.Quaternion();
+function updateVrHud(dt) {
+  if (!vr.on || !vrHud.mesh) return;
+  // redraw only when something on it actually changed — this is a canvas upload every time
+  const w = player.weapon;
+  const sig = `${Math.round(player.hp)}|${player.clip}|${reserves[w.id] | 0}|${w.id}|${game.kills}|${Math.floor(game.time)}|${player.downed ? 1 : 0}`;
+  if (sig !== vrHud.sig) { vrHud.sig = sig; drawVrHud(vrHud.ctx); vrHud.tex.needsUpdate = true; }
+  const grip = vrHud.gripIndex >= 0 ? vrHud.grips[vrHud.gripIndex] : null;
+  if (grip && grip.visible) {
+    // sit it just above the back of the hand, tipped up toward the face like a watch face
+    grip.updateMatrixWorld();
+    vrHud.mesh.position.setFromMatrixPosition(grip.matrixWorld);
+    vrHud.mesh.quaternion.setFromRotationMatrix(grip.matrixWorld);
+    vrHud.mesh.translateY(0.06); vrHud.mesh.translateZ(0.02);
+    vrHud.mesh.rotateX(-Math.PI * 0.32);
+    vrHud.mesh.visible = true;
+  } else {
+    // no tracked hand: park it low and ahead, and DAMP it so it trails your head instead of
+    // being welded to it — a panel that moves in perfect lockstep with the eyes is nauseating
+    _vrHudPos.set(0, -0.28, -0.62).applyQuaternion(camera.quaternion).add(camera.position);
+    vrHud.mesh.position.lerp(_vrHudPos, 1 - Math.exp(-7 * dt));
+    _vrHudQ.copy(camera.quaternion);
+    vrHud.mesh.quaternion.slerp(_vrHudQ, 1 - Math.exp(-7 * dt));
+    vrHud.mesh.visible = true;
+  }
+}
 async function enterVR() {
   if (!vr.supported || vr.on) return;
   try {
@@ -13926,12 +14042,22 @@ async function enterVR() {
     vr.on = true;
     vr.yaw = player.camYaw;                 // start facing wherever the flat camera was
     document.body.classList.add('invr');    // the DOM HUD can't be seen in a headset
+    // the wrist panel, and the tracked hands to hang it off. Grip objects report in the
+    // reference space, which we re-anchor to world coordinates every frame, so they read out
+    // in world space exactly like the camera does — no rig-local conversion needed.
+    buildVrHud();
+    vrHud.grips = [renderer.xr.getControllerGrip(0), renderer.xr.getControllerGrip(1)];
+    for (const g of vrHud.grips) if (g && !g.parent) scene.add(g);
+    vrPickHudHand();
+    session.addEventListener('inputsourceschange', vrPickHudHand);
     session.addEventListener('end', exitVR, { once: true });
     // WebXR owns the frame clock while presenting — rAF never fires in a session
     renderer.setAnimationLoop(() => stepFrame(Math.min(clock.getDelta(), 0.05)));
   } catch (e) { console.warn('VR session refused:', e); }
 }
 function exitVR() {
+  if (vrHud.mesh) vrHud.mesh.visible = false; // the panel has no business in the flat view
+  vrHud.gripIndex = -1;                       // hands go away with the session
   vr.on = false; vr.session = null; vr.baseRef = null;
   document.body.classList.remove('invr');
   renderer.setAnimationLoop(null);
@@ -13954,6 +14080,7 @@ function updateCamera(dt) {
     player.camYaw = vrHeadYaw();
     player.camPitch = Math.asin(clamp(-camera.matrixWorld.elements[9], -1, 1));
     vrSyncOrigin();
+    updateVrHud(dt); // after the re-anchor: the panel rides world space, same as the hands do
     skyDome.position.copy(camera.position);
     cloudDome.position.copy(camera.position);
     updateCelestial(dt);
@@ -16136,6 +16263,7 @@ window.__dbg = {
   updateGiant, giantStomp, openCrate, allCrates,
   bluga, prestige, spawnBlugaFinal, startCameo, spawnFbi, updateBluga, FOUNTAIN, CAMEO_SPOT,
   vr, enterVR, exitVR, toggleVR, vrHeadYaw, // headset state + session control: unreachable to debug otherwise
+  vrHud, buildVrHud, drawVrHud, updateVrHud, vrPickHudHand, // the wrist panel, so it can be posed and read without a headset
   spawnJellyMarks, grandmaWake, findNearGrandma,
   randomLayout, defaultLayout, applyLayout, rebuildTownWorld, PARK, CHURCHYARD, CHURCH, GRAVEYARD, COUSIN_HOMES, TOWN_RECTS, TOWN_BOUND, LAYOUT, scatterCousins,
   // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad
