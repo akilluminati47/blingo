@@ -6237,7 +6237,13 @@ function updateCousinHUD() {
 
 // ---------- squad + player health bars (bottom-left) ----------
 const squadBarsEl = document.getElementById('squadbars');
-const squadBarEls = []; // {row, bar, c}
+const squadBarEls = []; // {row, bar, name, c, keyShown}
+let _hpTxtShown = '';   // last label key written to the hero's own bar — see updateHUD
+// WHO is behind a bar, not which cousin it is — the colour already says that, and the recruit
+// toast names them when you find them. So a bot is just CPU and a real person is their player
+// number, which keeps these short enough to read at a glance at 10px on a phone. The one time
+// the actual name comes back is when they go down, because then you need to know who to go get.
+function squadTag(c) { return c.netP ? 'P' + c.netP : 'CPU'; }
 function rebuildSquadBars() {
   squadBarsEl.innerHTML = '';
   squadBarEls.length = 0;
@@ -6246,7 +6252,11 @@ function rebuildSquadBars() {
   // Sorting by number (not join order) means a lapsed P2 leaves P3 sitting beside you,
   // and whoever fills the P2 seat later slides in between — the column self-heals into
   // numeric order from your bar upward, on every screen from that screen's own view.
-  const squad = companions.filter(c => c.recruited).sort((a, b) => {
+  // EVERY cousin gets a row, found or not. An unrecruited one shows as a grey empty socket and
+  // fills in when you recruit them, so the column is six rows deep from the first frame and
+  // nothing below it ever moves — the hero's own bar sits directly under this stack, and it
+  // used to get shoved down the screen once per recruit.
+  const squad = companions.slice().sort((a, b) => {
     if (!!a.netP !== !!b.netP) return a.netP ? 1 : -1;
     if (a.netP && b.netP) return b.netP - a.netP;
     return (a.order || 0) - (b.order || 0);
@@ -6255,18 +6265,40 @@ function rebuildSquadBars() {
     const hex = '#' + c.data.color.toString(16).padStart(6, '0');
     const row = document.createElement('div');
     // cousins driven by a real player get a hero-sized bar with their player tag
-    row.className = 'sqrow' + (c.netP ? ' pc' : '');
-    const label = (c.netP ? 'P' + c.netP + ' ' : '') + c.data.name;
+    row.className = 'sqrow' + (c.netP ? ' pc' : '') + (c.recruited ? '' : ' ghost');
     row.innerHTML = `<div class="sqwrap"><div class="sqbar" style="background:${hex}"></div></div>` +
-                    `<span class="sqname" style="color:${hex}">${label}</span>`;
+                    `<span class="sqname" style="color:${hex}"></span>`;
     squadBarsEl.appendChild(row);
-    squadBarEls.push({ row, bar: row.querySelector('.sqbar'), c });
+    squadBarEls.push({ row, bar: row.querySelector('.sqbar'), name: row.querySelector('.sqname'), c, keyShown: '' });
   }
+  updateSquadBars();
 }
 function updateSquadBars() {
   for (const e of squadBarEls) {
-    e.bar.style.width = clamp(e.c.hp / e.c.maxHp, 0, 1) * 100 + '%';
-    e.row.classList.toggle('down', !!e.c.downed);
+    const c = e.c;
+    // ghost is toggled here, not just stamped on at build time. Everything else about a row is
+    // re-evaluated every frame, and leaving one piece of its state to the rebuild meant a row
+    // whose cousin turned up without a rebuild firing stayed greyed out with a live HP figure
+    // sitting inside it.
+    e.row.classList.toggle('ghost', !c.recruited);
+    // an unfound cousin has no health to report — an empty socket holding its slot
+    if (!c.recruited) {
+      if (e.keyShown !== 'ghost') { e.keyShown = 'ghost'; e.name.textContent = '—'; }
+      continue;
+    }
+    e.bar.style.width = clamp(c.hp / c.maxHp, 0, 1) * 100 + '%';
+    e.row.classList.toggle('down', !!c.downed);
+    // Rewritten only when it would actually change — this runs every frame for every row.
+    // Downed drops the HP figure and shows the NAME instead: that's the one moment you need to
+    // know which cousin is on the floor rather than how much health they haven't got.
+    const hp = Math.max(0, Math.ceil(c.hp));
+    const key = c.downed ? 'd' + (c.netP || 0) : hp + '|' + (c.netP || 0);
+    if (key !== e.keyShown) {
+      e.keyShown = key;
+      e.name.textContent = c.downed
+        ? `${c.netP ? 'P' + c.netP + ' ' : ''}${c.data.name.toUpperCase()}`
+        : `${hp} HP | ${squadTag(c)}`;
+    }
   }
 }
 function hurtCompanion(c, dmg) {
@@ -10429,7 +10461,22 @@ function updatePlayer(dt) {
   // player's bar is colour-coded to the cousin we picked; it pulses red when critical
   hud.health.style.background = player.colorHex || '#2ecc71';
   hud.health.classList.toggle('low', hpFrac <= 0.25);
-  hud.healthTxt.innerHTML = Math.ceil(player.hp) + ` HP <span class="pnum">| Player ${net.playerNum || 1}</span>`;
+  // down goes on the WRAP and the label, not the bar itself: the bar's own blink keyframe is
+  // what fights the inline width, and it needs a parent to hang off that the loop isn't
+  // rewriting. Same animation the squad rows use, so being downed looks identical either way.
+  hud.health.parentElement.classList.toggle('down', !!player.downed);
+  hud.healthTxt.classList.toggle('down', !!player.downed);
+  // same shape as every squad row above it — "100 HP | P1 BLINGO" — so the whole bottom-left
+  // column reads as one list instead of the hero's bar being its own format.
+  // Cached because this is an innerHTML parse and it runs every single frame; keyed on the
+  // cousin and player number too, since a skin trade swaps which cousin you ARE mid-run and
+  // caching on the number alone would leave the old name sitting there
+  const hpNow = Math.ceil(player.hp);
+  const hpKey = `${hpNow}|${selectedCousin}|${net.playerNum || 1}`;
+  if (hpKey !== _hpTxtShown) {
+    _hpTxtShown = hpKey;
+    hud.healthTxt.innerHTML = `${hpNow} HP <span class="pnum">| P${net.playerNum || 1} ${myCousinData().name.toUpperCase()}</span>`;
+  }
   updateSquadBars();
   hud.vignette.style.opacity = player.hp < 40 ? (1 - player.hp / 40) * 0.9 :
     (game.time - player.lastHurtT < 0.4 && game.time > player.lastHurtT ? 0.7 : 0);
@@ -13920,7 +13967,10 @@ function vrHeadYaw() {
 // never look away from it, and it fights every head movement. On the wrist you glance down at
 // it like a watch and otherwise forget it's there. If the left hand isn't tracked (hand
 // tracking, sleeping controller) it falls back to floating in the low periphery instead.
-const VRHUD_W = 512, VRHUD_H = 256;
+// 512x300 rather than 512x256: the squad strip along the bottom needs the extra band, and
+// the plane below keeps the same 0.17m width so the panel gets taller, not wider — a wrist
+// panel that grows sideways starts fouling your own forearm.
+const VRHUD_W = 512, VRHUD_H = 300;
 const vrHud = { mesh: null, tex: null, ctx: null, sig: '', gripIndex: -1, grips: [] };
 function drawVrHud(ctx) {
   const hpFrac = clamp(player.hp / Math.max(player.maxHp, 1), 0, 1);
@@ -13979,8 +14029,48 @@ function drawVrHud(ctx) {
   ctx.fillText(fmtTime(game.time), VRHUD_W - 28, 178);
   // downed is the one state worth shouting about
   if (player.downed) {
-    ctx.textAlign = 'center'; ctx.fillStyle = '#ff4030'; ctx.font = `bold 30px ${SIGN_FONT}`;
-    ctx.fillText('DOWNED', VRHUD_W / 2, 220);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#ff4030'; ctx.font = `bold 26px ${SIGN_FONT}`;
+    ctx.fillText('DOWNED', VRHUD_W / 2, 200);
+  }
+  drawVrSquad(ctx);
+}
+// The squad, as a strip of slots along the bottom — the wrist panel's answer to the flat HUD's
+// stacked bars. Same rule as those: EVERY cousin holds a slot whether you've found them or not,
+// greyed until they turn up, so the strip never reflows and a glance always finds the same
+// cousin in the same place. Too small for full names at this size, so each wears the first
+// letters of its own name in its own colour — a player-driven one shows P2 instead, since who
+// is behind it matters more than which cousin it is.
+function drawVrSquad(ctx) {
+  const list = companions;
+  if (!list.length) return;
+  const n = list.length;
+  const pad = 16, gap = 6, top = 232, h = 40;
+  const w = (VRHUD_W - pad * 2 - gap * (n - 1)) / n;
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i < n; i++) {
+    const c = list[i];
+    const x = pad + i * (w + gap);
+    const hex = '#' + c.data.color.toString(16).padStart(6, '0');
+    const found = !!c.recruited;
+    // the socket
+    ctx.fillStyle = found ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.045)';
+    ctx.beginPath(); ctx.roundRect(x, top, w, h, 8); ctx.fill();
+    if (found) {
+      // health fills it from the left in the cousin's own colour; downed drains to a stub
+      const frac = clamp(c.hp / Math.max(c.maxHp, 1), 0, 1);
+      ctx.globalAlpha = c.downed ? 0.3 : 1;
+      ctx.fillStyle = hex;
+      ctx.beginPath(); ctx.roundRect(x, top, Math.max(6, w * frac), h, 8); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // label: P2 for a real person, otherwise the cousin's own short name
+    const label = c.netP ? 'P' + c.netP : c.data.name.slice(0, 4).toUpperCase();
+    ctx.textAlign = 'center';
+    ctx.font = `bold ${c.netP ? 19 : 15}px ${SIGN_FONT}`;
+    ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeStyle = '#000';
+    ctx.strokeText(label, x + w / 2, top + h / 2 + 1);
+    ctx.fillStyle = found ? '#fff' : '#6a6f78';
+    ctx.fillText(label, x + w / 2, top + h / 2 + 1);
   }
 }
 function buildVrHud() {
@@ -13988,7 +14078,7 @@ function buildVrHud() {
   vrHud.tex = canvasTex(VRHUD_W, VRHUD_H, drawVrHud);
   vrHud.ctx = vrHud.tex.image.getContext('2d');
   const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.17, 0.085),
+    new THREE.PlaneGeometry(0.17, 0.17 * VRHUD_H / VRHUD_W), // aspect locked to the canvas
     new THREE.MeshBasicMaterial({ map: vrHud.tex, transparent: true, depthWrite: false })
   );
   m.renderOrder = 30;          // reads over anything it happens to clip into
@@ -14012,7 +14102,10 @@ function updateVrHud(dt) {
   if (!vr.on || !vrHud.mesh) return;
   // redraw only when something on it actually changed — this is a canvas upload every time
   const w = player.weapon;
-  const sig = `${Math.round(player.hp)}|${player.clip}|${reserves[w.id] | 0}|${w.id}|${game.kills}|${Math.floor(game.time)}|${player.downed ? 1 : 0}`;
+  let sig = `${Math.round(player.hp)}|${player.clip}|${reserves[w.id] | 0}|${w.id}|${game.kills}|${Math.floor(game.time)}|${player.downed ? 1 : 0}`;
+  // the squad strip is on this canvas too, so a recruit, a hit or a knockdown has to move the
+  // key or the panel would happily show a stale roster forever
+  for (const c of companions) sig += `|${c.recruited ? 1 : 0}${c.netP || 0}${Math.ceil(c.hp)}${c.downed ? 'd' : ''}`;
   if (sig !== vrHud.sig) { vrHud.sig = sig; drawVrHud(vrHud.ctx); vrHud.tex.needsUpdate = true; }
   const grip = vrHud.gripIndex >= 0 ? vrHud.grips[vrHud.gripIndex] : null;
   if (grip && grip.visible) {
@@ -16022,21 +16115,37 @@ function netRefreshClientBars() {
   const rows = [];
   for (const [key, g] of net.actors) rows.push({ key, g });
   rows.sort((a, b) => (a.g.p || 0) - (b.g.p || 0)); // NPCs on top, then P1 P2 P3...
-  const sig = rows.map(r => r.key + r.g.data.id + (r.g.wp || '')).join('|'); // cousin id too: skin trades relabel the rows
+  // ghost slots for the cousins nobody has found yet — same reason as the host's own bars: a
+  // column that grows shoves the hero's bar down the screen once per recruit. Anyone already
+  // streamed is live; our OWN cousin is skipped, since that's the bar underneath this stack.
+  const live = new Set(rows.map(r => r.g.data.id));
+  const ghosts = COUSINS.filter(cd => !live.has(cd.id) && cd.id !== selectedCousin);
+  const sig = rows.map(r => r.key + r.g.data.id + (r.g.wp || '')).join('|')
+            + '#' + ghosts.map(cd => cd.id).join(','); // cousin id too: skin trades relabel the rows
   if (sig !== net.barSig) {
     net.barSig = sig;
     squadBarsEl.innerHTML = '';
     squadBarEls.length = 0;
+    for (const cd of ghosts) {
+      const hex = '#' + cd.color.toString(16).padStart(6, '0');
+      const row = document.createElement('div');
+      row.className = 'sqrow ghost';
+      row.innerHTML = `<div class="sqwrap"><div class="sqbar" style="background:${hex}"></div></div>` +
+                      `<span class="sqname" style="color:${hex}">—</span>`;
+      squadBarsEl.appendChild(row);
+    }
     for (const { g } of rows) {
       const hex = '#' + g.data.color.toString(16).padStart(6, '0');
       const row = document.createElement('div');
       row.className = 'sqrow' + (g.p ? ' pc' : '');
-      const label = (g.p ? 'P' + g.p + ' ' : '') + g.data.name;
       row.innerHTML = `<div class="sqwrap"><div class="sqbar" style="background:${hex}"></div></div>` +
-                      `<span class="sqname" style="color:${hex}">${label}</span>`;
+                      `<span class="sqname" style="color:${hex}"></span>`;
       squadBarsEl.appendChild(row);
-      squadBarEls.push({ row, bar: row.querySelector('.sqbar'), c: { get hp() { return g.hp || 0; }, maxHp: g.data.id === 'blomba' ? 125 : 100, get downed() { return !!g.dn; } } });
+      squadBarEls.push({ row, bar: row.querySelector('.sqbar'), name: row.querySelector('.sqname'), keyShown: '',
+        c: { recruited: true, data: g.data, netP: g.p, get hp() { return g.hp || 0; },
+             maxHp: g.data.id === 'blomba' ? 125 : 100, get downed() { return !!g.dn; } } });
     }
+    updateSquadBars();
   }
 }
 // on a client, another player's ghost we're close to and facing while BOTH melees are

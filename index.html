@@ -161,9 +161,30 @@
   .sqrow { display:flex; align-items:center; gap:6px; }
   .sqrow .sqwrap { width:150px; height:9px; background:rgba(0,0,0,.5); border:1px solid rgba(255,255,255,.22); border-radius:5px; overflow:hidden; }
   .sqrow .sqbar { height:100%; width:100%; border-radius:4px; transition:width .18s, opacity .2s; }
-  .sqrow.down .sqbar { opacity:.25; }
-  .sqrow .sqname { font-size:10px; letter-spacing:.5px; text-shadow:0 1px 2px #000; min-width:52px; }
-  .sqrow.down .sqname { opacity:.5; text-decoration:line-through; }
+  .sqrow .sqname { font-size:10px; letter-spacing:.5px; text-shadow:0 1px 2px #000; min-width:52px; white-space:nowrap; }
+  /* Downed is a call for help, so this row is the one thing in the corner meant to catch your
+     eye mid-fight. Name and bar blink TOGETHER on the same clock: red name with the bar wiped
+     to nothing, then white name with a sliver of health back. That flicker is the read — not
+     "empty", but fighting to get back up. Hard steps rather than a fade, because a fade reads
+     as decoration and a blink reads as an alarm.
+     The sliver is a percentage so it lands the same on a 150px NPC bar, a 210px player bar and
+     the hero's own. And note the bar is animated rather than set: CSS animations outrank the
+     inline width the update loop writes every frame (but NOT !important, which is why nothing
+     here uses it), so the blink owns the bar while downed and the loop needs to know nothing. */
+  @keyframes sqDownName { 0% { color:#ff4030; } 50% { color:#fff; } }
+  @keyframes sqDownBar  { 0% { width:0; }       50% { width:6%; } }
+  .sqrow.down .sqname { animation:sqDownName .66s steps(1,end) infinite; opacity:1; text-decoration:none; }
+  .sqrow.down .sqbar  { animation:sqDownBar  .66s steps(1,end) infinite; opacity:1; }
+  /* the hero's own bar goes down the same way, so downed looks like downed wherever it happens */
+  #healthwrap.down #healthbar { animation:sqDownBar .66s steps(1,end) infinite; }
+  #healthtxt.down { animation:sqDownName .66s steps(1,end) infinite; }
+  /* Cousins you haven't found yet still hold their slot: an empty socket and a grey name.
+     Without them the column grew from nothing to five rows over a run, and since the hero's
+     own bar sits directly beneath it, every recruit shoved his health bar down the screen. */
+  .sqrow.ghost .sqwrap { background:rgba(0,0,0,.32); border-color:rgba(255,255,255,.1); }
+  .sqrow.ghost .sqbar { width:0 !important; }
+  .sqrow.ghost .sqname { color:#6a6f78 !important; opacity:.72; }
+
 
   /* sniper scope overlay */
   #scope { position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .12s; z-index:11;
@@ -818,6 +839,13 @@
   .pdown-bicon { width:22px; height:22px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
   .pdown-bicon svg { width:18px; height:18px; stroke:#aab4c0; }
   .pdown-btns { display:flex; flex-direction:column; gap:10px; }
+  /* Every row in this stack is the same height. The three platform buttons carry a two-line
+     label (name over extension) and came out at 57.2px; the GitHub and Discord badges are a
+     single line and collapsed onto their 28px icon at 54px, so the last two sat visibly shorter
+     than the three above them. Pinning a shared min-height evens them without touching either
+     one's content — they're all align-items:center, so the shorter labels just centre in the
+     taller box. Border-box, so this is the final on-screen height. */
+  .pdown-btn, .pdown-ghbadge { min-height:58px; }
   .pdown-btn { display:flex; align-items:center; gap:10px; width:100%; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.16); border-radius:12px; padding:12px 16px; text-decoration:none; color:#e8edf2; transition:background .15s,border-color .15s; box-sizing:border-box; }
   .pdown-btn:hover, .pdown-btn.navfocus { background:rgba(111,216,255,.12); border-color:#6fd8ff; }
   .pdown-btnicon { width:28px; height:28px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
