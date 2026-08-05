@@ -13912,9 +13912,10 @@ function vrSyncOrigin() {
 }
 // Touch controllers drive the run. Left stick walks (relative to where you're LOOKING, which is
 // the only heading that doesn't fight your own head), right stick snap-turns.
-//   LEFT   stick move · L3 sprint · trigger aim · grip interact/trade · X reload · Y slide
-//   RIGHT  stick turn · R3 slide  · trigger shoot ·                     A jump   · B swap
-// Slide sits on BOTH Y and R3 so it's under a thumb whichever hand you favour. The left menu
+//   LEFT   stick move · L3 sprint · trigger aim · grip slide · X reload · Y interact/trade
+//   RIGHT  stick turn · R3 slide  · trigger shoot · grip slide · A jump  · B swap
+// Slide sits on BOTH grips (with R3 as a thumb backup) so it fires whichever hand's squeezing.
+// The left menu
 // button isn't in here because it can't be: the platform reserves it (WebXR spec — reserved
 // buttons "MUST NOT be exposed on the Gamepad"), and on Quest it ends the session outright.
 // exitVR pauses the run instead, so that button still lands somewhere sensible.
@@ -13932,11 +13933,14 @@ function vrPollInput(dt) {
     if (src.handedness === 'left') {
       mx = dz(sx); my = dz(sy);
       aim = btn(0);                              // left trigger: aim / ADS
-      input.interactHeldPad = btn(1);            // left grip: interact, and the hold-to-trade
-      if (btn(1)) input.interact = true;
+      if (btn(5)) {                              // Y: interact, and the hold-to-trade
+        input.interact = true;
+        input.interactHeldPad = true;
+      } else input.interactHeldPad = false;
       if (btn(4)) input.reload = true;           // X
-      if (btn(5) && !vr.slideHeldY) input.slide = true;  // Y
-      vr.slideHeldY = btn(5);
+      // left grip: slide (edge-latched so a held squeeze only fires once)
+      if (btn(1) && !vr.slideHeldGripL) input.slide = true;
+      vr.slideHeldGripL = btn(1);
       // L3: sprint is a TOGGLE, so it needs the press edge, not the held state
       if (btn(3) && !vr.sprintHeld) input.sprintGamepad = !input.sprintGamepad;
       vr.sprintHeld = btn(3);
@@ -13947,7 +13951,10 @@ function vrPollInput(dt) {
       vr.jumpHeld = btn(4);
       if (btn(5) && !vr.swapHeld) cycleWeapon(1);        // B
       vr.swapHeld = btn(5);
-      // R3: the other way to slide, so it's on a thumb whichever hand you favour
+      // right grip: slide too, so squeezing either hand hits the deck
+      if (btn(1) && !vr.slideHeldGripR) input.slide = true;
+      vr.slideHeldGripR = btn(1);
+      // R3: the thumb backup for slide
       if (btn(3) && !vr.slideHeldR3) input.slide = true;
       vr.slideHeldR3 = btn(3);
     }
