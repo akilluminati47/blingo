@@ -13936,14 +13936,18 @@ function drawVrHud(ctx) {
   const barW = Math.max(34, (VRHUD_W - 56) * hpFrac);
   ctx.fillStyle = hpCol;
   ctx.beginPath(); ctx.roundRect(28, 34, barW, 34, 17); ctx.fill();
-  // the label goes INSIDE the fill in dark ink, but only while the fill is long enough to hold
-  // it. On a nearly-empty bar it used to spill off the end and land dark-on-dark — unreadable
-  // at exactly the moment the number matters most — so there it moves outside and goes white.
+  // One fixed spot, always white. It sits over the bright fill on a full bar and over the dark
+  // track on an empty one, so a black outline carries it on both — that's what buys it the
+  // right to never move or change colour, which is what you want out of the corner of your eye:
+  // the number reads the same wherever the bar happens to be.
+  // Canvas centres a stroke on the glyph edge, so lineWidth 4 is what shows 2px OUTSIDE it.
   const hpTxt = Math.max(0, Math.round(player.hp)) + ' HP';
   ctx.font = `bold 22px ${SIGN_FONT}`; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-  const fitsInside = ctx.measureText(hpTxt).width + 28 <= barW;
-  ctx.fillStyle = fitsInside ? '#0a0c10' : '#fff';
-  ctx.fillText(hpTxt, fitsInside ? 42 : 28 + barW + 12, 52);
+  ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+  ctx.strokeStyle = '#000';
+  ctx.strokeText(hpTxt, 42, 52);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(hpTxt, 42, 52);
   // weapon + ammo
   const w = player.weapon;
   const unlim = player.fbiOutfit && (w.id === 'pistol' || w.id === 'smg');
