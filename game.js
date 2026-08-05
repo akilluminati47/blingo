@@ -14041,36 +14041,41 @@ function drawVrHud(ctx) {
 // letters of its own name in its own colour — a player-driven one shows P2 instead, since who
 // is behind it matters more than which cousin it is.
 function drawVrSquad(ctx) {
-  const list = companions;
-  if (!list.length) return;
-  const n = list.length;
-  const pad = 16, gap = 6, top = 232, h = 40;
+  // You are the first slot, then the five cousins — the same P1 / CPU / P2..P6 vocabulary the
+  // flat HUD uses, so the two read identically and there's nothing new to learn in a headset.
+  // Your own slot is here even though your health is already the big bar above it: it makes the
+  // strip a whole-lobby roster you can count at a glance rather than "everyone except me".
+  const slots = [{ hp: player.hp, maxHp: player.maxHp, downed: player.downed, recruited: true,
+                   color: myCousinData().color, label: 'P' + (net.playerNum || 1), me: true }];
+  for (const c of companions) {
+    slots.push({ hp: c.hp, maxHp: c.maxHp, downed: c.downed, recruited: !!c.recruited,
+                 color: c.data.color, label: c.netP ? 'P' + c.netP : 'CPU', me: false });
+  }
+  const n = slots.length;
+  const pad = 16, gap = 5, top = 232, h = 40;
   const w = (VRHUD_W - pad * 2 - gap * (n - 1)) / n;
   ctx.textBaseline = 'middle';
+  const blinkOn = (performance.now() % 660) < 330; // matches the flat HUD's .66s downed blink
   for (let i = 0; i < n; i++) {
-    const c = list[i];
+    const s = slots[i];
     const x = pad + i * (w + gap);
-    const hex = '#' + c.data.color.toString(16).padStart(6, '0');
-    const found = !!c.recruited;
-    // the socket
-    ctx.fillStyle = found ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.045)';
+    const hex = '#' + s.color.toString(16).padStart(6, '0');
+    ctx.fillStyle = s.recruited ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.045)';
     ctx.beginPath(); ctx.roundRect(x, top, w, h, 8); ctx.fill();
-    if (found) {
-      // health fills it from the left in the cousin's own colour; downed drains to a stub
-      const frac = clamp(c.hp / Math.max(c.maxHp, 1), 0, 1);
-      ctx.globalAlpha = c.downed ? 0.3 : 1;
-      ctx.fillStyle = hex;
-      ctx.beginPath(); ctx.roundRect(x, top, Math.max(6, w * frac), h, 8); ctx.fill();
-      ctx.globalAlpha = 1;
+    if (s.recruited) {
+      // downed blinks the same way the flat bars do — wiped to nothing, then a sliver back
+      const frac = s.downed ? (blinkOn ? 0 : 0.14) : clamp(s.hp / Math.max(s.maxHp, 1), 0, 1);
+      if (frac > 0) {
+        ctx.fillStyle = hex;
+        ctx.beginPath(); ctx.roundRect(x, top, Math.max(5, w * frac), h, 8); ctx.fill();
+      }
     }
-    // label: P2 for a real person, otherwise the cousin's own short name
-    const label = c.netP ? 'P' + c.netP : c.data.name.slice(0, 4).toUpperCase();
     ctx.textAlign = 'center';
-    ctx.font = `bold ${c.netP ? 19 : 15}px ${SIGN_FONT}`;
+    ctx.font = `bold ${s.me ? 19 : 17}px ${SIGN_FONT}`;
     ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeStyle = '#000';
-    ctx.strokeText(label, x + w / 2, top + h / 2 + 1);
-    ctx.fillStyle = found ? '#fff' : '#6a6f78';
-    ctx.fillText(label, x + w / 2, top + h / 2 + 1);
+    ctx.strokeText(s.label, x + w / 2, top + h / 2 + 1);
+    ctx.fillStyle = !s.recruited ? '#6a6f78' : (s.downed && blinkOn ? '#ff4030' : '#fff');
+    ctx.fillText(s.label, x + w / 2, top + h / 2 + 1);
   }
 }
 function buildVrHud() {
@@ -14106,6 +14111,13 @@ function updateVrHud(dt) {
   // the squad strip is on this canvas too, so a recruit, a hit or a knockdown has to move the
   // key or the panel would happily show a stale roster forever
   for (const c of companions) sig += `|${c.recruited ? 1 : 0}${c.netP || 0}${Math.ceil(c.hp)}${c.downed ? 'd' : ''}`;
+  // ...and while anyone is actually down, the key has to tick on the blink's own clock, or the
+  // "only redraw when something changed" rule would freeze the blink on whichever beat it
+  // happened to be painted on. Only while someone is down — the rest of the time this is stable
+  // and the canvas stays untouched for most frames, which is the whole point of the signature.
+  if (player.downed || companions.some(c => c.recruited && c.downed)) {
+    sig += '|b' + Math.floor(performance.now() / 330);
+  }
   if (sig !== vrHud.sig) { vrHud.sig = sig; drawVrHud(vrHud.ctx); vrHud.tex.needsUpdate = true; }
   const grip = vrHud.gripIndex >= 0 ? vrHud.grips[vrHud.gripIndex] : null;
   if (grip && grip.visible) {
