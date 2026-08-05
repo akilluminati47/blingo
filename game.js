@@ -6608,6 +6608,7 @@ function cycleWeapon(dir = 1) {
 // V / Select flips between the over-the-shoulder third-person rig and first person
 function toggleFPV() {
   if (player.dead) return;
+  if (vr.on) return;   // third person doesn't exist in a headset — see enterVR
   player.fpv = !player.fpv;
   toast(player.fpv ? 'FIRST PERSON' : 'THIRD PERSON');
   initAudio(); SFX.swap({ id: 'view' });
@@ -13909,9 +13910,14 @@ function vrSyncOrigin() {
                            { x: _vrQ.x, y: _vrQ.y, z: _vrQ.z, w: _vrQ.w })));
   } catch (e) {}
 }
-// Touch controllers drive the run: left stick walks (relative to where you're LOOKING, which is
-// the only heading that doesn't fight your own head), right stick snap-turns, triggers shoot and
-// aim, and the face buttons keep the flat game's meanings so muscle memory carries over.
+// Touch controllers drive the run. Left stick walks (relative to where you're LOOKING, which is
+// the only heading that doesn't fight your own head), right stick snap-turns.
+//   LEFT   stick move · L3 sprint · trigger aim · grip interact/trade · X reload · Y slide
+//   RIGHT  stick turn · R3 slide  · trigger shoot ·                     A jump   · B swap
+// Slide sits on BOTH Y and R3 so it's under a thumb whichever hand you favour. The left menu
+// button isn't in here because it can't be: the platform reserves it (WebXR spec — reserved
+// buttons "MUST NOT be exposed on the Gamepad"), and on Quest it ends the session outright.
+// exitVR pauses the run instead, so that button still lands somewhere sensible.
 function vrPollInput(dt) {
   if (!vr.session) return;
   let mx = 0, my = 0, turn = 0, shoot = false, aim = false;
@@ -13925,16 +13931,25 @@ function vrPollInput(dt) {
     const btn = i => gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5);
     if (src.handedness === 'left') {
       mx = dz(sx); my = dz(sy);
-      if (btn(4)) input.jump = true;          // X
-      if (btn(5)) input.interact = true;      // Y
-      input.interactHeldPad = btn(5);
+      aim = btn(0);                              // left trigger: aim / ADS
+      input.interactHeldPad = btn(1);            // left grip: interact, and the hold-to-trade
+      if (btn(1)) input.interact = true;
+      if (btn(4)) input.reload = true;           // X
+      if (btn(5) && !vr.slideHeldY) input.slide = true;  // Y
+      vr.slideHeldY = btn(5);
+      // L3: sprint is a TOGGLE, so it needs the press edge, not the held state
+      if (btn(3) && !vr.sprintHeld) input.sprintGamepad = !input.sprintGamepad;
+      vr.sprintHeld = btn(3);
     } else {
       turn = dz(sx);
-      shoot = btn(0);                          // trigger
-      aim = btn(1);                            // grip
-      if (btn(4)) input.reload = true;        // A
-      if (btn(5) && !vr.swapHeld) cycleWeapon(1); // B
+      shoot = btn(0);                            // right trigger: shoot
+      if (btn(4) && !vr.jumpHeld) input.jump = true;     // A
+      vr.jumpHeld = btn(4);
+      if (btn(5) && !vr.swapHeld) cycleWeapon(1);        // B
       vr.swapHeld = btn(5);
+      // R3: the other way to slide, so it's on a thumb whichever hand you favour
+      if (btn(3) && !vr.slideHeldR3) input.slide = true;
+      vr.slideHeldR3 = btn(3);
     }
   }
   // updatePlayer already walks relative to player.camYaw, and camYaw is pinned to the HEAD's
@@ -14150,6 +14165,11 @@ async function enterVR() {
     vr.baseRef = renderer.xr.getReferenceSpace();
     vr.on = true;
     vr.yaw = player.camYaw;                 // start facing wherever the flat camera was
+    // First person, always. The over-the-shoulder rig has no meaning once the camera IS your
+    // head — you'd be staring at the back of a blob floating in front of your face — so third
+    // person is locked out for the session and handed back exactly as you left it on exit.
+    vr.wasFpv = player.fpv;
+    player.fpv = true; player.fpvT = 1;
     document.body.classList.add('invr');    // the DOM HUD can't be seen in a headset
     // the wrist panel, and the tracked hands to hang it off. Grip objects report in the
     // reference space, which we re-anchor to world coordinates every frame, so they read out
@@ -14167,6 +14187,7 @@ async function enterVR() {
 function exitVR() {
   if (vrHud.mesh) vrHud.mesh.visible = false; // the panel has no business in the flat view
   vrHud.gripIndex = -1;                       // hands go away with the session
+  if (vr.wasFpv !== undefined) { player.fpv = vr.wasFpv; vr.wasFpv = undefined; } // give the view back
   vr.on = false; vr.session = null; vr.baseRef = null;
   document.body.classList.remove('invr');
   renderer.setAnimationLoop(null);
@@ -14174,6 +14195,10 @@ function exitVR() {
   // enterVR would leave two rAF chains racing each other
   if (!flatLoopOn) { flatLoopOn = true; clock.getDelta(); requestAnimationFrame(animate); }
   player.camYaw = vr.yaw;                   // keep the heading you were facing in there
+  // The one button the platform won't let us have is the left menu button — it ends the session
+  // instead. So pressing it lands here, and here is where the run stops: taking the headset off
+  // mid-fight shouldn't leave you being eaten on a screen you aren't looking at.
+  if (game.state === 'playing') pauseGame();
 }
 function toggleVR() { if (vr.on) { try { vr.session.end(); } catch (e) {} } else enterVR(); }
 
@@ -16389,6 +16414,7 @@ window.__dbg = {
   bluga, prestige, spawnBlugaFinal, startCameo, spawnFbi, updateBluga, FOUNTAIN, CAMEO_SPOT,
   vr, enterVR, exitVR, toggleVR, vrHeadYaw, // headset state + session control: unreachable to debug otherwise
   vrHud, buildVrHud, drawVrHud, updateVrHud, vrPickHudHand, // the wrist panel, so it can be posed and read without a headset
+  vrPollInput, // the Touch bindings — callable on its own so they can be probed before updatePlayer eats the one-shot flags
   spawnJellyMarks, grandmaWake, findNearGrandma,
   randomLayout, defaultLayout, applyLayout, rebuildTownWorld, PARK, CHURCHYARD, CHURCH, GRAVEYARD, COUSIN_HOMES, TOWN_RECTS, TOWN_BOUND, LAYOUT, scatterCousins,
   // jump straight to the endgame: mark the first three bosses cleared, kit the player + squad
