@@ -12475,7 +12475,9 @@ function buildFinalStats() {
   // title slot — always takes space, fades in on finale
   const title = document.createElement('div');
   title.className = 'fstitle';
-  title.textContent = 'MISSION COMPLETE .ᐟ';
+  // no ".ᐟ" here: the glyph leans, and at 58px that lean throws the whole line visibly off
+  // centre. The plain words centre cleanly, and it's shorter, which buys the headline room.
+  title.textContent = 'MISSION COMPLETE';
   finalStatsEl.appendChild(title);
   // lore slot
   const lore = document.createElement('div');
