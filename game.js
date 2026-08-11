@@ -7776,9 +7776,12 @@ function finishDeath() {
   document.getElementById('deathstats').innerHTML = chips.map(([ic, val, lab]) =>
     `<div class="dchip">${DEATH_ICONS[ic]}<div class="chipbody"><span>${lab}</span><b>${val}</b></div></div>`).join('');
   document.getElementById('deathtitle').textContent = deathFx.gameOver && net.role ? 'GAME OVER' : 'YOU GOT EATEN';
-  document.getElementById('deathlore').textContent = deathFx.gameOver && net.role
-    ? 'The squad fought to the last, but the block remembers . .'
-    : 'The cousins will avenge you, blob-kind remembers . .';
+  // innerHTML rather than textContent purely to carry the break — the comma is where the line
+  // wants to fold on a narrow screen, and .pbr only exists in portrait, so anything wider still
+  // reads as one sentence. Both strings are literals here; nothing player-supplied goes in.
+  document.getElementById('deathlore').innerHTML = deathFx.gameOver && net.role
+    ? 'The squad fought to the last,<br class="pbr"> but the block remembers . .'
+    : 'The cousins will avenge you,<br class="pbr"> blob-kind remembers . .';
   // one fused pair on every death now, dressed in the fallen hero's colour: solo deaths
   // read RETRY .ᐟ, a lobby game over reads HOST RETRY . . (live for the host, greyed-
   // waiting for a client — the same read as the pause screen's waithost RESUME)

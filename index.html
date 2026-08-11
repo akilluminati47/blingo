@@ -615,6 +615,21 @@
   .dchip .chipbody { display:flex; flex:1; justify-content:space-between; align-items:center; gap:8px; }
   .dchip .chipbody span { font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--hero); font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; }
   .dchip .chipbody b { font-size:20px; color:#fff; line-height:1; font-variant-numeric:tabular-nums; }
+  /* A portrait phone cannot hold two of these side by side. Each chip's min-content is about
+     190px — icon, a letter-spaced caps label and a 20px number — and 1fr is minmax(AUTO,1fr),
+     so the columns refuse to shrink under that and the right-hand pair was running clean off
+     the screen edge with the numbers cut in half. Stack them instead: one column, full width,
+     nothing clipped. Applies to the finale tally too, which is the same grid. */
+  /* the lore's portrait-only fold. Base rule FIRST — same specificity as the one in the media
+     query below, so whichever comes last wins; with this underneath, the break never appeared. */
+  #deathlore .pbr { display:none; }
+  @media (max-width:600px) and (orientation:portrait) {
+    #deathstats, #finalstats .statsgrid {
+      grid-template-columns:1fr; grid-auto-flow:row; grid-template-rows:none; gap:6px;
+    }
+    /* without this the trailing ". ." wraps on its own and sits orphaned under the sentence */
+    #deathlore .pbr { display:inline; }
+  }
   /* fades gently in and out under the respawn button while a client waits on the host */
   #waitmsg { margin-top:10px; font-size:14px; color:var(--hero); animation:waitPulse 1.8s ease-in-out infinite; }
   #waitmsg.hidden { display:none; }
