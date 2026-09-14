@@ -41,10 +41,12 @@
     schedule(TYPE, function() { fill(el, text, fullText, color, i + 1, cb); });
   }
 
-  function wipe(el, text, pos, color, cb) {
+  function wipe(el, text, pos, color, cb, onFirst) {
     if (pos < 0) { el.innerHTML = text.replace(/\n/g, '<br>'); cb(); return; }
     render(el, text, pos, color);
-    schedule(WIPE, function() { wipe(el, text, pos - 1, color, cb); });
+    // pos 0 is the moment the story’s own first letter loses its colour
+    if (pos === 0 && onFirst) onFirst();
+    schedule(WIPE, function() { wipe(el, text, pos - 1, color, cb, onFirst); });
   }
 
   function pause(ms, cb) { schedule(ms, cb); }
@@ -70,6 +72,9 @@
             wipe(wEl, wFull, wFull.length - 1, '#eef1f5', function() {
               wipe(gEl, gText, gText.length - 1, '#ffd9a8', function() {
                 pause(BLANK, cycle);
+              }, function() {
+                // the picker deck slides to the roster on its own once the story is spent
+                if (window._startHandoff) window._startHandoff();
               });
             });
           });
