@@ -580,10 +580,56 @@
   /* town lore, restyled to match the badge/tile language the policies page uses for its
      sections (.pdoc/.ptile: soft translucent fill, hairline border, 16px radius) and widened
      to the same column as .pwrap so it reads as part of one consistent system */
-  #typelore { min-height:5.2em; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive; font-size:16px; line-height:1.7; margin:10px auto 14px; max-width:min(760px,92vw); white-space:pre-line;
-    width:100%; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.13); border-radius:16px; padding:16px 22px; }
+  #typelore { min-height:5.2em; font-family:'OpenDyslexic','Open-Dyslexic','Comic Sans MS','Comic Sans',cursive;
+    font-size:clamp(12px,1.85vh,16px); line-height:1.6; margin:0 auto; white-space:pre-line;
+    /* the column widens with the viewport, which is what keeps the story down to eight lines
+       on a landscape phone instead of the fourteen a 760px cap would force */
+    max-width:min(900px,94vw);
+    width:100%; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.13); border-radius:16px;
+    padding:clamp(12px,1.6vh,16px) clamp(14px,2vw,22px); }
   #typelore .gold { display:block; color:#ffd9a8; font-style:italic; }
   #typelore .white { display:block; color:#eef1f5; font-style:normal; }
+
+  /* ---------- the picker's two-pane deck ---------- */
+  /* The story and the roster stopped fitting one screen together, so they stop sharing one.
+     #startscreen becomes a window onto a track twice its height and the two halves take
+     turns. Transform only, so the shared #policybg video underneath is never disturbed and
+     neither half ever scrolls. */
+  #startscreen { padding:0; overflow:hidden; touch-action:none; display:block; }
+  #startscreen::before { content:none; }
+  #startdeck { position:absolute; inset:0; overflow:hidden; }
+  #starttrack { position:absolute; inset:0; height:200%; transform:translateY(0);
+    transition:transform .52s cubic-bezier(.22,.61,.36,1); will-change:transform; }
+  #startscreen.pane1 #starttrack { transform:translateY(-50%); }
+  /* each pane is exactly one viewport: the spacers top and bottom are what centre the body
+     without stopping the policies chin sitting on the floor of the second one */
+  .spane { height:50%; display:flex; flex-direction:column; align-items:center; justify-content:space-between;
+    text-align:center;
+    padding:calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom)); }
+  .spane > * { flex-shrink:0; }
+  .spanespacer { flex:0 0 auto; }
+  .spanebody { display:flex; flex-direction:column; align-items:center; gap:clamp(10px,1.7vh,16px); width:100%; }
+  #panestory h1 { font-size:min(11vw, clamp(30px,7.2vh,58px)); margin:0; }
+  #prestige { margin:0; }
+  #cousincards { margin:0 auto; }
+  #vrbtn { margin:0 auto; }
+  #policieslink { margin:0; padding-top:12px; }
+  /* the rail: 22px in the picked cousin's colour for the half you're on, 9px for the other.
+     It is the only marker the deck gets — the story hands you over by itself. */
+  #startrail { position:absolute; z-index:2; top:50%; right:calc(10px + env(safe-area-inset-right));
+    transform:translateY(-50%); display:flex; flex-direction:column; gap:9px; }
+  .srdot { width:7px; height:9px; padding:0; border:none; border-radius:4px; cursor:pointer; pointer-events:auto;
+    background:rgba(255,255,255,.22); transition:background .3s, height .3s; }
+  .srdot.on { height:22px; background:var(--hero); }
+  .srdot:hover { background:var(--hero); }
+  /* an even split: the divider lands dead centre whatever the two labels measure */
+  #modepanel { margin-top:0; width:min(430px,92vw); }
+  #modepanel .modebtn { flex:1 1 0; min-width:0; white-space:nowrap; padding:13px 8px; }
+  @media (max-width:600px) {
+    #modepanel { width:min(350px,94vw); }
+    #modepanel .modebtn { font-size:11px; letter-spacing:1px; padding:11px 8px; }
+  }
+  @media (prefers-reduced-motion:reduce) { #starttrack { transition:none; } }
 
   /* ---------- reconnect soft-pause banner (world stays visible behind it) ---------- */
   #reconnecting { position:fixed; inset:0; z-index:34; display:flex; align-items:center; justify-content:center;
@@ -675,8 +721,11 @@
   .card i { display:block; font-size:9px; color:#7bd88f; margin:2px 0 5px; font-style:normal;
     font-family:'Segoe UI',system-ui,sans-serif; letter-spacing:2px; text-transform:uppercase; }
   .card p { font-size:11px; line-height:1.4; opacity:.72; margin:0; }
+  /* The roster now gets ONE viewport rather than its share of a scrolling column, so the
+     blurbs have to fold a long way before they used to — at 700px the policies chin was
+     running clean off the bottom of a 375x812 phone. The column count still steps at 700. */
+  @media (max-height:900px) { .card p { display:none; } }
   @media (max-height:700px) {
-    .card p { display:none; }
     #cousincards { grid-template-columns:repeat(3, minmax(0,140px)); }
   }
 
@@ -783,6 +832,11 @@
   /* short screens (landscape phones): compact type + a tighter touch cluster so the
      tall button stack fits low viewports with padding to spare */
   @media (max-height:430px) {
+    /* a landscape phone is the binding case for the deck: both halves have to clear 390px,
+       so the picker's own padding, buttons and chin all step down a size here */
+    .spane { padding:calc(10px + env(safe-area-inset-top)) 14px calc(10px + env(safe-area-inset-bottom)); }
+    #modepanel .modebtn { font-size:13px; padding:9px 8px; }
+    #policieslink { padding-top:8px; font-size:11px; }
     .screen h1 { font-size:30px; letter-spacing:5px; margin-bottom:2px; }
     #startscreen > p { font-size:13px; }
     .screen p { font-size:11.5px; }
@@ -1025,17 +1079,40 @@
   <div class="tbtn" id="btnEmote">:)</div>
 </div>
 
+<!-- the picker is a two-pane deck: the story gets a whole screen, the roster gets the other,
+     and they take turns instead of sharing one column that no short viewport could hold. -->
 <div class="screen" id="startscreen">
-  <h1>BL<span class="z">I</span>NGO</h1>
-  <div id="typelore" aria-live="polite"><span class="gold"></span><span class="white"></span></div>
-  <div id="prestige"></div>
-  <div id="cousincards"></div>
-  <div id="modepanel">
-    <button class="modebtn" id="playbtn">SINGLE PLAYER</button>
-    <button class="modebtn" id="mpbtn">MULTIPLAYER</button>
+  <div id="startdeck">
+    <div id="starttrack">
+      <section class="spane live" id="panestory" data-pane="0">
+        <div class="spanespacer"></div>
+        <div class="spanebody">
+          <h1>BL<span class="z">I</span>NGO</h1>
+          <div id="typelore" aria-live="polite"><span class="gold"></span><span class="white"></span></div>
+          <div id="prestige"></div>
+        </div>
+        <div class="spanespacer"></div>
+      </section>
+
+      <section class="spane" id="paneblock" data-pane="1">
+        <div class="spanespacer"></div>
+        <div class="spanebody">
+          <div id="cousincards"></div>
+          <div id="modepanel">
+            <button class="modebtn" id="playbtn">SINGLE PLAYER</button>
+            <button class="modebtn" id="mpbtn">MULTIPLAYER</button>
+          </div>
+          <button id="vrbtn">▸ ENTER VR</button>
+        </div>
+        <p id="policieslink"><a href="#policies" id="policiesopen">Cousin Themes ♪ · Terms &amp; Privacy</a></p>
+      </section>
+    </div>
+
+    <div id="startrail" role="group" aria-label="Picker panes">
+      <button class="srdot on" data-pane="0" aria-label="The story"></button>
+      <button class="srdot" data-pane="1" aria-label="The block"></button>
+    </div>
   </div>
-  <button id="vrbtn">▸ ENTER VR</button>
-  <p id="policieslink"><a href="#policies" id="policiesopen">Cousin Themes ♪ · Terms &amp; Privacy</a></p>
 </div>
 
 <!-- the policies overlay: cousin themes player + terms/privacy/ownership, rolled into the

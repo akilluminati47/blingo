@@ -6123,8 +6123,8 @@ function renderPrestige() {
   // entry animation (the .grandma class), then it settles back to white (grandma's spirit)
   if (prestige.bestStreak > 0) mkBadge(`BLOCKS SECURED x${prestige.bestStreak}`, '#ffffff').classList.add('grandma');
   if (prestige.bestTime > 0) {
-    const hero = COUSINS.find(c => c.id === prestige.bestHero);
-    mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#' + (hero ? hero.color : 0xffd24a).toString(16).padStart(6, '0'));
+    // white like BLOCKS SECURED above: the record is the player's, not whichever cousin set it
+    mkBadge(`FASTEST ${fmtTime(prestige.bestTime)}`, '#ffffff');
   }
   if (prestige.fbiOutfit) mkBadge('SHIESTY', '#f2c21a'); // Bluga's outfit, earned once, worn forever
   el.style.display = el.children.length ? 'flex' : 'none';
@@ -7724,11 +7724,13 @@ document.getElementById('lobbybackbtn').addEventListener('click', () => {
   netScanStop();
   document.getElementById('lobbyscreen').classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
+  setStartPane(0, true);   // coming back to the picker always lands on the story
   if (window._resumeTypewriter) window._resumeTypewriter();
 });
 document.getElementById('hcmenu').addEventListener('click', () => {
   document.getElementById('hostclosed').classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
+  setStartPane(0, true);
   renderPrestige();
   if (window._resumeTypewriter) window._resumeTypewriter();
 });
@@ -7861,6 +7863,7 @@ function quitToMenu(keepChain) {
   deathFx.on = false; deathFadeEl.style.opacity = 0; // don't let a quit mid-fade leave the screen black
   pauseScreen.classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
+  setStartPane(0, true);   // coming back to the picker always lands on the story
   if (window._resumeTypewriter) window._resumeTypewriter();
   document.body.classList.remove('playing');
   // the shared cutscene video behind the menus can get suspended/paused by the browser
@@ -8098,7 +8101,10 @@ function currentScreen() {
 function menuFocusables() {
   const s = currentScreen();
   if (!s) return [];
-  return [...s.querySelectorAll('button, .card, #lobbycode, .lobbyrow, .vkkey, #policiesopen')].filter(el => el.offsetParent !== null);
+  // the picker is a two-pane deck and BOTH panes stay in the layout — offsetParent alone
+  // would happily hand back cousin cards that are translated a whole screen out of view
+  const scope = (s.id === 'startscreen' && s.querySelector('.spane.live')) || s;
+  return [...scope.querySelectorAll('button, .card, #lobbycode, .lobbyrow, .vkkey, #policiesopen')].filter(el => el.offsetParent !== null);
 }
 function setMenuFocus(i) {
   const els = menuFocusables();
@@ -8106,7 +8112,8 @@ function setMenuFocus(i) {
   menuFocus = (i + els.length) % els.length;
   els.forEach((el, j) => el.classList.toggle('focus', j === menuFocus));
   const el = els[menuFocus];
-  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  // inside the deck there is nothing to scroll — asking would only shove the track sideways
+  if (el && el.scrollIntoView && !el.closest('#startdeck')) el.scrollIntoView({ block: 'nearest' });
 }
 function menuActivate(el) {
   if (!el) return;
@@ -8143,16 +8150,72 @@ function spatialNext(els, from, dx, dy) {
   });
   return best >= 0 ? best : wrap;
 }
+function spatialHas(els, from, dx, dy) {
+  if (!els[from]) return false;
+  const cen = el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+  const f = cen(els[from]);
+  return els.some((el, i) => {
+    if (i === from) return false;
+    const p = cen(el);
+    return (p.x - f.x) * dx + (p.y - f.y) * dy > 0.5;
+  });
+}
+
+/* ---------- the picker's two-pane deck ---------- *
+ * The story holds nothing focusable, so any direction leaves it; from the roster an
+ * up-press with nothing above the ring goes back. Wheel, swipe and the arrow keys do the
+ * same, and titlecard.js hands over by itself as the story's first letter goes grey. */
+const startScreenEl = document.getElementById('startscreen');
+let startPane = 0, startPaneLock = 0;
+const pickerOpen = () => !startScreenEl.classList.contains('hidden');
+function setStartPane(n, force) {
+  const p = Math.max(0, Math.min(1, n));
+  if (!force) {
+    const now = performance.now();
+    if (now < startPaneLock) return;
+    if (p !== startPane) startPaneLock = now + 560;   // one pane per gesture, matching the slide
+  }
+  startPane = p;
+  startScreenEl.classList.toggle('pane1', p === 1);
+  for (const el of startScreenEl.querySelectorAll('.spane')) el.classList.toggle('live', +el.dataset.pane === p);
+  for (const el of startScreenEl.querySelectorAll('.srdot')) el.classList.toggle('on', +el.dataset.pane === p);
+  // carry the pad's ring across with the pane, but never conjure one that wasn't showing
+  const hadRing = !!startScreenEl.querySelector('.focus');
+  menuFocus = 0;
+  if (hadRing) setMenuFocus(0);
+}
+window._setStartPane = n => setStartPane(n, true);
+// titlecard.js calls this on the last tick of the wipe
+window._startHandoff = () => { if (pickerOpen() && startPane === 0) setStartPane(1, true); };
+
+startScreenEl.addEventListener('wheel', e => {
+  if (!pickerOpen()) return;
+  e.preventDefault();
+  if (Math.abs(e.deltaY) > 8) setStartPane(startPane + (e.deltaY > 0 ? 1 : -1));
+}, { passive: false });
+let startSwipeY = null;
+startScreenEl.addEventListener('pointerdown', e => { startSwipeY = e.clientY; });
+startScreenEl.addEventListener('pointerup', e => {
+  if (startSwipeY === null) return;
+  const dy = e.clientY - startSwipeY;
+  startSwipeY = null;
+  if (Math.abs(dy) > 42) setStartPane(startPane + (dy < 0 ? 1 : -1));
+});
+startScreenEl.addEventListener('pointercancel', () => { startSwipeY = null; });
+for (const el of startScreenEl.querySelectorAll('.srdot'))
+  el.addEventListener('click', () => setStartPane(+el.dataset.pane, true));
+addEventListener('keydown', e => {
+  if (!pickerOpen() || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); setStartPane(startPane + 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); setStartPane(startPane - 1); }
+});
+
 function padMenuScreen(gp, dt, justPressed, ax, ay) {
   menuNavT -= dt;
   const sx = Math.abs(ax) > 0.5 ? Math.sign(ax) : 0;
   const sy = Math.abs(ay) > 0.5 ? Math.sign(ay) : 0;
   const ready = menuNavT <= 0 && (sx || sy);
-  const els = menuFocusables();
-  if (!els.length) return;
-  if (menuFocus >= els.length) menuFocus = 0;
-  if (!els[menuFocus] || !els[menuFocus].classList.contains('focus')) setMenuFocus(menuFocus);
-  const vk = !document.getElementById('vkeyboard').classList.contains('hidden');
   let dx = 0, dy = 0;
   // LB/RB drive the horizontal step too, so the bumpers jump between cousin columns and
   // between Single/Multiplayer just as the d-pad does — spatialNext already wraps at the ends.
@@ -8160,6 +8223,23 @@ function padMenuScreen(gp, dt, justPressed, ax, ay) {
   else if (justPressed(15) || justPressed(5) || (ready && sx > 0)) dx = 1;
   else if (justPressed(12) || (ready && sy < 0)) dy = -1;
   else if (justPressed(13) || (ready && sy > 0)) dy = 1;
+  const els = menuFocusables();
+  // the deck gets first refusal on a direction, before the grid sees it
+  if (currentScreen() === startScreenEl) {
+    if (startPane === 0) {
+      if (dx || dy) { setStartPane(1); menuNavT = 0.22; }
+      else if (justPressed(0)) setStartPane(1, true);
+      return;                                   // nothing on the story pane to focus
+    }
+    if (dy < 0 && els.length && !spatialHas(els, Math.min(menuFocus, els.length - 1), 0, -1)) {
+      setStartPane(0); menuNavT = 0.22; return; // nothing above the ring: back to the story
+    }
+    if (justPressed(1)) { setStartPane(0, true); return; }
+  }
+  if (!els.length) return;
+  if (menuFocus >= els.length) menuFocus = 0;
+  if (!els[menuFocus] || !els[menuFocus].classList.contains('focus')) setMenuFocus(menuFocus);
+  const vk = !document.getElementById('vkeyboard').classList.contains('hidden');
   if (dx || dy) {
     const to = spatialNext(els, menuFocus, dx, dy);
     if (to >= 0) setMenuFocus(to);
