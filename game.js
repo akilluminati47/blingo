@@ -7724,13 +7724,13 @@ document.getElementById('lobbybackbtn').addEventListener('click', () => {
   netScanStop();
   document.getElementById('lobbyscreen').classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
-  setStartPane(0, true);   // coming back to the picker always lands on the story
+  enterPicker();   // coming back to the picker always lands on the story, hand-off re-armed
   if (window._resumeTypewriter) window._resumeTypewriter();
 });
 document.getElementById('hcmenu').addEventListener('click', () => {
   document.getElementById('hostclosed').classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
-  setStartPane(0, true);
+  enterPicker();
   renderPrestige();
   if (window._resumeTypewriter) window._resumeTypewriter();
 });
@@ -7863,7 +7863,7 @@ function quitToMenu(keepChain) {
   deathFx.on = false; deathFadeEl.style.opacity = 0; // don't let a quit mid-fade leave the screen black
   pauseScreen.classList.add('hidden');
   document.getElementById('startscreen').classList.remove('hidden');
-  setStartPane(0, true);   // coming back to the picker always lands on the story
+  enterPicker();   // coming back to the picker always lands on the story, hand-off re-armed
   if (window._resumeTypewriter) window._resumeTypewriter();
   document.body.classList.remove('playing');
   // the shared cutscene video behind the menus can get suspended/paused by the browser
@@ -8166,7 +8166,7 @@ function spatialHas(els, from, dx, dy) {
  * up-press with nothing above the ring goes back. Wheel, swipe and the arrow keys do the
  * same, and titlecard.js hands over by itself as the story's first letter goes grey. */
 const startScreenEl = document.getElementById('startscreen');
-let startPane = 0, startPaneLock = 0;
+let startPane = 0, startPaneLock = 0, handoffArmed = true;
 const pickerOpen = () => !startScreenEl.classList.contains('hidden');
 function setStartPane(n, force) {
   const p = Math.max(0, Math.min(1, n));
@@ -8184,9 +8184,17 @@ function setStartPane(n, force) {
   menuFocus = 0;
   if (hadRing) setMenuFocus(0);
 }
-window._setStartPane = n => setStartPane(n, true);
-// titlecard.js calls this on the last tick of the wipe
-window._startHandoff = () => { if (pickerOpen() && startPane === 0) setStartPane(1, true); };
+// arriving at the picker is a fresh visit, and the story gets to hand over once in it
+function enterPicker() { handoffArmed = true; setStartPane(0, true); }
+window._enterPicker = enterPicker;
+window._setStartPane = n => setStartPane(n, true);   // pane only, no re-arm (debug//direct)
+// titlecard.js calls this on the last tick of the wipe. Once per visit: someone who swipes
+// back up to re-read the story is reading it on purpose and should be left there.
+window._startHandoff = () => {
+  if (!handoffArmed || !pickerOpen() || startPane !== 0) return;
+  handoffArmed = false;
+  setStartPane(1, true);
+};
 
 startScreenEl.addEventListener('wheel', e => {
   if (!pickerOpen()) return;

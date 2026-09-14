@@ -373,7 +373,7 @@ function closePolicies(){
   navRow = -1; navCol = 0; applyNav();
   if(location.hash === '#policies') history.replaceState(null, '', location.pathname + location.search);
   document.getElementById('policiesopen').blur();
-  if (window._setStartPane) window._setStartPane(0);
+  if (window._enterPicker) window._enterPicker();
   if (window._resetTypewriter) window._resetTypewriter();
   // no more pausing #policybg here — it's the same shared video that plays behind the
   // picker too, so closing policies should just let it keep running uninterrupted
